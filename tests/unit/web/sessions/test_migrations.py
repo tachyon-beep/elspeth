@@ -1915,3 +1915,194 @@ class TestMigration008BlobReadyHashInvariant:
         with engine.connect() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         assert rev == "007"
+
+
+# ---------------------------------------------------------------------------
+# Migration 008: batch-rebuild preserves every pre-008 shape element
+# ---------------------------------------------------------------------------
+
+
+class TestMigration008PreservesBlobsShape:
+    """008's batch_alter_table(copy_from=_current_blobs_shape()) must carry every
+    index and CHECK from the post-007 blobs shape through the SQLite rebuild.
+
+    Parallel of ``TestMigration007PreservesIndexes`` for migration 007: any
+    shape element NOT listed in the copy_from snapshot silently vanishes
+    during SQLite's table-copy rebuild.  Today the pre-008 blobs table has
+    no partial indexes, so a pure-reflection rebuild would also work — but
+    without the snapshot a future migration that adds a partial index
+    (e.g. ``WHERE status='ready'`` over ``session_id``) would be lost on any
+    downgrade-then-reupgrade round trip that replays 008.  These tests pin
+    the snapshot against the live pre-008 shape so any drift surfaces
+    immediately.
+    """
+
+    def _sqlite_master_indexes(self, engine: Engine, table: str) -> dict[str, str | None]:
+        """Return {index_name: sql} from sqlite_master.
+
+        Duplicated from ``TestMigration007PreservesIndexes`` intentionally:
+        sharing the helper via inheritance would couple two otherwise-
+        independent test classes, and SQLAlchemy's ``inspect().get_indexes``
+        does not reliably surface partial-unique WHERE clauses, so hitting
+        sqlite_master directly is the only way to verify shape faithfully.
+        """
+        with engine.connect() as conn:
+            rows = conn.execute(
+                text("SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = :t"),
+                {"t": table},
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
+
+    def _blobs_create_table_sql(self, engine: Engine) -> str:
+        """Return the full ``CREATE TABLE blobs ...`` statement.
+
+        CHECK constraints and column definitions are embedded in the
+        CREATE TABLE SQL on SQLite — they do not surface through
+        ``inspect().get_check_constraints()`` reliably — so we query
+        sqlite_master directly and grep the statement text.
+        """
+        with engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'blobs'"),
+            ).fetchone()
+        assert row is not None, "blobs table missing from sqlite_master after migrations"
+        create_sql = row[0]
+        assert isinstance(create_sql, str), f"sqlite_master returned non-string SQL: {create_sql!r}"
+        return create_sql
+
+    def test_blobs_session_id_index_survives(self) -> None:
+        """``ix_blobs_session_id`` must remain after 008 applies.
+
+        The session_id index is load-bearing for every blob-list query
+        scoped by session (``BlobServiceImpl.list_blobs``, quota checks,
+        active-run guards).  Losing it during 008's rebuild would not
+        break correctness but would turn every per-session blob query
+        into a table scan — the sort of latent regression a pure-
+        reflection rebuild could introduce without any test failure.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)
+        indexes = self._sqlite_master_indexes(engine, "blobs")
+        assert "ix_blobs_session_id" in indexes, (
+            f"ix_blobs_session_id was dropped by 008's batch rebuild. Surviving indexes on blobs: {sorted(indexes)}"
+        )
+
+    def test_blobs_status_check_constraint_survives(self) -> None:
+        """``ck_blobs_status`` must remain after 008 applies.
+
+        The status-enum CHECK is the database-layer mirror of
+        ``BLOB_STATUSES`` (see ``web/blobs/protocol.py``).  Silently
+        dropping it would turn ``status`` from an enforced enum into a
+        free string column, and the Tier 1 read guard in
+        ``BlobServiceImpl._row_to_record`` would be the only remaining
+        line of defence against a direct-SQL write with a bogus status.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)
+        create_sql = self._blobs_create_table_sql(engine)
+        assert "ck_blobs_status" in create_sql, (
+            f"ck_blobs_status CHECK constraint was dropped by 008's batch rebuild. CREATE TABLE SQL: {create_sql!r}"
+        )
+
+    def test_blobs_created_by_check_constraint_survives(self) -> None:
+        """``ck_blobs_created_by`` must remain after 008 applies.
+
+        Mirror of the ``created_by`` enum defined in
+        ``BLOB_CREATORS``.  The same logic as ``ck_blobs_status`` above
+        applies — dropping this at the DB layer leaves the column
+        enforceable only through the application read guard.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)
+        create_sql = self._blobs_create_table_sql(engine)
+        assert "ck_blobs_created_by" in create_sql, (
+            f"ck_blobs_created_by CHECK constraint was dropped by 008's batch rebuild. CREATE TABLE SQL: {create_sql!r}"
+        )
+
+    def test_blobs_status_check_rejects_invalid_values_end_to_end(self) -> None:
+        """Behavioural proof: the status CHECK still fires after 008.
+
+        Shape-level tests above would pass against a CHECK that had
+        been silently renamed or whose expression had drifted to
+        something permissive.  This test writes an invalid status
+        through raw SQL and asserts the DB rejects it — the invariant
+        the constraint exists to enforce must hold end-to-end.
+        """
+        engine = _fresh_engine()
+        run_migrations(engine)
+
+        session_id = str(uuid.uuid4())
+        now_iso = datetime.now(UTC).isoformat()
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO sessions "
+                    "(id, user_id, auth_provider_type, title, created_at, updated_at) "
+                    "VALUES (:id, :uid, :apt, :title, :ca, :ua)"
+                ),
+                {
+                    "id": session_id,
+                    "uid": "u-shape",
+                    "apt": "local",
+                    "title": "t",
+                    "ca": now_iso,
+                    "ua": now_iso,
+                },
+            )
+
+        # 'deleted' is not a member of BLOB_STATUSES; the CHECK must reject it.
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO blobs "
+                    "(id, session_id, filename, mime_type, size_bytes, content_hash, "
+                    " storage_path, created_at, created_by, status) "
+                    "VALUES (:id, :sid, :fn, :mt, :sz, :ch, :sp, :ca, :cb, :st)"
+                ),
+                {
+                    "id": str(uuid.uuid4()),
+                    "sid": session_id,
+                    "fn": "shape.csv",
+                    "mt": "text/csv",
+                    "sz": 1,
+                    "ch": "a" * 64,
+                    "sp": "/tmp/shape",
+                    "ca": now_iso,
+                    "cb": "user",
+                    "st": "deleted",
+                },
+            )
+
+    def test_008_round_trip_preserves_shape_elements(self) -> None:
+        """008 → 007 → 008 must leave ix_blobs_session_id and CHECKs intact.
+
+        The round trip exercises both upgrade and downgrade through the
+        copy_from snapshot.  A drift between the snapshot and the live
+        shape would surface here as a missing index or CHECK after the
+        second upgrade — the exact failure mode a future partial-index
+        addition would produce if this snapshot were not kept in sync
+        with the (frozen) post-007 shape.
+        """
+        from alembic import command
+
+        engine = _fresh_engine()
+        run_migrations(engine)  # to head (008)
+
+        cfg = _alembic_config_for(engine)
+        with engine.connect() as connection:
+            cfg.attributes["connection"] = connection
+            command.downgrade(cfg, "007")
+            command.upgrade(cfg, "008")
+
+        indexes = self._sqlite_master_indexes(engine, "blobs")
+        assert "ix_blobs_session_id" in indexes, (
+            f"ix_blobs_session_id lost during 008 → 007 → 008 round trip. Surviving indexes: {sorted(indexes)}"
+        )
+        create_sql = self._blobs_create_table_sql(engine)
+        assert "ck_blobs_status" in create_sql, f"ck_blobs_status lost during 008 → 007 → 008 round trip. CREATE TABLE SQL: {create_sql!r}"
+        assert "ck_blobs_created_by" in create_sql, (
+            f"ck_blobs_created_by lost during 008 → 007 → 008 round trip. CREATE TABLE SQL: {create_sql!r}"
+        )
+        assert "ck_blobs_ready_hash" in create_sql, (
+            f"ck_blobs_ready_hash (the invariant 008 adds) did not survive the re-upgrade. CREATE TABLE SQL: {create_sql!r}"
+        )

@@ -53,12 +53,76 @@ rule.
 
 from collections.abc import Sequence
 
+import sqlalchemy as sa
 from alembic import op
 
 revision: str = "008"
 down_revision: str | Sequence[str] | None = "007"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+
+def _current_blobs_shape() -> sa.Table:
+    """Shape of ``blobs`` BEFORE this migration, with every index/CHECK.
+
+    IMMUTABLE SNAPSHOT — post-007, pre-008.  Do NOT update this when
+    later migrations change the ``blobs`` table.  See migration 007's
+    ``_current_runs_shape`` docstring for the full rationale: any
+    index, CHECK, or FK NOT listed here is silently dropped during
+    SQLite's table-copy rebuild, reopening whatever invariant the
+    omitted constraint was enforcing.
+
+    The non-obvious failure mode this snapshot closes is forward drift:
+    a future migration that adds, say, a partial index
+    ``WHERE status='ready'`` on ``blobs`` is safe under a pure-reflection
+    rebuild (Alembic re-reads the live shape), but unsafe if 008's
+    ``batch_alter_table`` is ever exercised again against a database
+    carrying that later index.  Freezing the shape at the revision
+    boundary makes the rebuild deterministic regardless of what has
+    been applied since, and the matching drift-guard tests in
+    ``TestMigration008PreservesBlobsShape`` catch any omission here
+    before it reaches a production run.
+
+    The ``downgrade()`` path deliberately does NOT reuse this snapshot:
+    by the time 008 is being downgraded, the live ``blobs`` table
+    already carries ``ck_blobs_ready_hash`` and passing a pre-008
+    shape to ``copy_from`` would make Alembic's batch rebuild unable
+    to locate the constraint to drop.  Matching migration 007's
+    downgrade precedent, the downgrade uses reflection — correct
+    because reflection reads the live post-008 shape at the moment
+    the downgrade runs.
+    """
+    md = sa.MetaData()
+    return sa.Table(
+        "blobs",
+        md,
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("session_id", sa.String(), nullable=False),
+        sa.Column("filename", sa.String(), nullable=False),
+        sa.Column("mime_type", sa.String(), nullable=False),
+        sa.Column("size_bytes", sa.Integer(), nullable=False),
+        sa.Column("content_hash", sa.String(), nullable=True),
+        sa.Column("storage_path", sa.String(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("created_by", sa.String(), nullable=False),
+        sa.Column("source_description", sa.String(), nullable=True),
+        sa.Column("status", sa.String(), nullable=False, server_default="ready"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["session_id"],
+            ["sessions.id"],
+            ondelete="CASCADE",
+        ),
+        sa.CheckConstraint(
+            "created_by IN ('user', 'assistant', 'pipeline')",
+            name="ck_blobs_created_by",
+        ),
+        sa.CheckConstraint(
+            "status IN ('ready', 'pending', 'error')",
+            name="ck_blobs_status",
+        ),
+        sa.Index("ix_blobs_session_id", "session_id"),
+    )
 
 
 def _ready_hash_check_clause(dialect_name: str) -> str:
@@ -106,7 +170,7 @@ def upgrade() -> None:
     """Add CHECK ensuring status='ready' implies a SHA-256 hex content_hash."""
     bind = op.get_bind()
     clause = _ready_hash_check_clause(bind.dialect.name)
-    with op.batch_alter_table("blobs") as batch_op:
+    with op.batch_alter_table("blobs", copy_from=_current_blobs_shape()) as batch_op:
         batch_op.create_check_constraint(
             "ck_blobs_ready_hash",
             clause,
@@ -114,6 +178,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop the ready⇒valid-hash invariant."""
+    """Drop the ready⇒valid-hash invariant.
+
+    No ``copy_from`` here: Alembic reflects the live post-008 shape
+    (including ``ck_blobs_ready_hash``) and the rebuild drops the
+    constraint.  See ``_current_blobs_shape`` docstring for the full
+    rationale — passing a pre-008 shape would leave Alembic unable to
+    locate the constraint we are trying to drop.
+    """
     with op.batch_alter_table("blobs") as batch_op:
         batch_op.drop_constraint("ck_blobs_ready_hash", type_="check")

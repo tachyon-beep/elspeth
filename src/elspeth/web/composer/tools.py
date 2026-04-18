@@ -10,6 +10,7 @@ L3 (web/composer/state, web/catalog/protocol).
 from __future__ import annotations
 
 import re
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -1837,6 +1838,97 @@ def _execute_create_blob(
     )
 
 
+# Per-session mutex guarding blob-file/DB consistency.
+#
+# ``_execute_update_blob`` reads the prior file content, writes new
+# content, then opens a DB transaction that updates the size/hash
+# metadata.  Two concurrent callers on the same session+blob can
+# otherwise interleave these steps so that:
+#
+#   1. Thread A reads ``old_A`` from storage_path.
+#   2. Thread A writes ``new_A``.
+#   3. Thread B reads ``new_A`` (believing it to be ``old_B``).
+#   4. Thread B writes ``new_B`` and commits the DB row with ``new_B``'s
+#      size/hash.
+#   5. Thread A's DB transaction fails.
+#   6. Thread A's rollback writes ``old_A`` back to storage_path —
+#      clobbering B's committed content.  File = ``old_A``, DB row =
+#      ``new_B`` metadata: silent file/DB divergence with no signal.
+#
+# The composer tool layer is the only writer with this
+# read→write→commit shape.  ``BlobServiceImpl.create_blob`` allocates a
+# unique storage_path per blob, so it cannot hit this race; only the
+# update path shares a storage_path between sequential writers.
+#
+# Serialising per-session (rather than per-blob) is deliberate: composer
+# blob operations are low-frequency and a human typically interacts with
+# one session at a time, so contention is benign.  Per-blob locking
+# would require bookkeeping (reference counting, stale-lock GC) without
+# a meaningful throughput win.
+#
+# The registry is a plain dict protected by a registry mutex.  A
+# ``WeakValueDictionary`` cannot hold ``threading.Lock`` because the
+# lock primitive does not support weak references.  Stale entries
+# accumulate at roughly one entry per unique session_id observed during
+# process lifetime (~150 bytes each) — negligible for the expected
+# deployment (hundreds of sessions per server process).  If this ever
+# becomes a concern, ``clear_session_blob_lock(session_id)`` below is
+# the single-site cleanup hook; today there is no caller because
+# session teardown is not yet observable from this module.
+_SESSION_BLOB_LOCKS: dict[str, threading.Lock] = {}
+_SESSION_BLOB_LOCKS_REGISTRY_MUTEX = threading.Lock()
+
+
+def _session_blob_lock(session_id: str) -> threading.Lock:
+    """Return the per-session mutex guarding blob-file/DB consistency.
+
+    Double-checked locking: the fast path skips the registry mutex when
+    the lock already exists; the registry mutex serialises the
+    get-or-create race on first access so two concurrent callers on the
+    same session_id cannot each install a different lock instance.
+    """
+    lock = _SESSION_BLOB_LOCKS.get(session_id)
+    if lock is not None:
+        return lock
+    with _SESSION_BLOB_LOCKS_REGISTRY_MUTEX:
+        lock = _SESSION_BLOB_LOCKS.get(session_id)
+        if lock is None:
+            lock = threading.Lock()
+            _SESSION_BLOB_LOCKS[session_id] = lock
+        return lock
+
+
+class _BlobQuotaExceededInTxn(Exception):
+    """Internal sentinel raised inside the blob-update DB transaction.
+
+    The quota check in ``_execute_update_blob`` must fire AFTER the file
+    has been overwritten (so the size delta reflects the newly-written
+    bytes) and INSIDE the DB transaction (so the delta uses the current
+    row's size_bytes rather than a stale pre-transaction snapshot).
+    When the quota is exceeded, the transaction must roll back AND the
+    file must be restored from the ``old_content`` snapshot — the same
+    rollback-write-with-add_note discipline the DB-failure path applies.
+
+    Raising a distinct sentinel lets the outer ``except`` clauses model
+    this cleanly:
+
+    * ``except _BlobQuotaExceededInTxn`` handles the quota-exceeded
+      flow: attempt the rollback write, attach add_note on rollback
+      failure, then (if rollback succeeded) return the failure result.
+    * ``except Exception as primary_exc`` handles DB-layer failures
+      identically but re-raises ``primary_exc`` rather than returning a
+      ToolResult.
+
+    The two clauses share the rollback-with-add_note structure so the
+    divergence-on-rollback-failure diagnostic is produced identically
+    for both paths.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.user_message = message
+
+
 def _execute_update_blob(
     arguments: dict[str, Any],
     state: CompositionState,
@@ -1878,86 +1970,138 @@ def _execute_update_blob(
             actual_type=type(content).__name__,
         )
 
-    blob = _sync_get_blob(session_engine, blob_id, session_id)
-    if blob is None:
-        return _failure_result(state, f"Blob '{blob_id}' not found.")
+    # Serialise the read→write→commit critical section across concurrent
+    # composer-tool callers on this session.  See ``_session_blob_lock``'s
+    # module-level docstring for the rollback-clobber race this closes
+    # (I4).  The lock MUST be acquired BEFORE ``_sync_get_blob`` — a lock
+    # scoped any tighter (e.g. only around the file write) would still
+    # permit the interleave described in that docstring.
+    with _session_blob_lock(session_id):
+        blob = _sync_get_blob(session_engine, blob_id, session_id)
+        if blob is None:
+            return _failure_result(state, f"Blob '{blob_id}' not found.")
 
-    content_bytes = content.encode("utf-8")
-    file_hash = content_hash(content_bytes)
+        content_bytes = content.encode("utf-8")
+        file_hash = content_hash(content_bytes)
 
-    # Overwrite storage file — snapshot old content for rollback on DB failure
-    storage_path = Path(blob["storage_path"])
-    old_content = storage_path.read_bytes()
-    storage_path.write_bytes(content_bytes)
+        # Overwrite storage file — snapshot old content for rollback on DB failure
+        storage_path = Path(blob["storage_path"])
+        old_content = storage_path.read_bytes()
+        storage_path.write_bytes(content_bytes)
 
-    new_size = len(content_bytes)
+        new_size = len(content_bytes)
 
-    # Atomic quota check + update.  size_bytes is re-read inside the
-    # transaction so the delta reflects the current DB row, not the
-    # pre-transaction snapshot (which may be stale under concurrent writes).
-    try:
-        with session_engine.begin() as conn:
-            current_size: int = conn.execute(
-                select(blobs_table.c.size_bytes).where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
-            ).scalar_one()
-            size_delta = new_size - current_size
-
-            if size_delta > 0:
-                quota_error = _check_blob_quota(conn, session_id, size_delta)
-                if quota_error is not None:
-                    storage_path.write_bytes(old_content)
-                    return _failure_result(state, quota_error)
-            conn.execute(
-                update(blobs_table)
-                .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
-                .values(
-                    size_bytes=new_size,
-                    content_hash=file_hash,
-                )
-            )
-    except Exception as primary_exc:
-        # Restore old content so file matches DB metadata.  Exception
-        # (not BaseException) because write_bytes() is not atomic — under
-        # KeyboardInterrupt the rollback write could truncate the file,
-        # leaving it inconsistent with both old and new DB state.
-        #
-        # Wrap the rollback write so a secondary OSError (ENOSPC, EIO, EACCES,
-        # parent-dir vanished mid-flight) cannot mask primary_exc.  Without
-        # this wrapper the new OSError would propagate as the headline and
-        # operators triaging the incident would investigate the disk fault
-        # instead of the actual root cause (the failed DB transaction).
-        # Narrow to OSError per offensive-programming policy: programmer bugs
-        # (TypeError, AttributeError, AssertionError) must propagate so a
-        # broken rollback isn't silently downgraded to a note.  add_note()
-        # attaches the rollback diagnostic to primary_exc without changing
-        # its type — upstream `except <PrimaryType>:` clauses still match,
-        # but operators see both causes in the traceback.  The bare `raise`
-        # below re-raises primary_exc (sys.exc_info() reverts to the outer
-        # frame after the nested except completes), so primary_exc remains
-        # the headline.
+        # Atomic quota check + update.  size_bytes is re-read inside the
+        # transaction so the delta reflects the current DB row, not the
+        # pre-transaction snapshot (which may be stale under writers that
+        # bypass the composer session lock — e.g. ``BlobServiceImpl``
+        # paths that share the same session_engine).
         try:
-            storage_path.write_bytes(old_content)
-        except OSError as rollback_exc:
-            primary_exc.add_note(
-                f"Rollback failed: could not restore prior content of {storage_path} "
-                f"({type(rollback_exc).__name__}: {rollback_exc}). "
-                f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
-                f"inconsistent — the file may contain the new (uncommitted) bytes "
-                f"while the DB row retains the prior size_bytes/content_hash. "
-                f"Manual reconciliation required."
-            )
-        raise
+            with session_engine.begin() as conn:
+                current_size: int = conn.execute(
+                    select(blobs_table.c.size_bytes).where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
+                ).scalar_one()
+                size_delta = new_size - current_size
 
-    return _discovery_result(
-        state,
-        {
-            "blob_id": blob_id,
-            "filename": blob["filename"],
-            "mime_type": blob["mime_type"],
-            "size_bytes": len(content_bytes),
-            "content_hash": file_hash,
-        },
-    )
+                if size_delta > 0:
+                    quota_error = _check_blob_quota(conn, session_id, size_delta)
+                    if quota_error is not None:
+                        # Signal the quota breach to the outer handler so
+                        # the file-rollback and add_note discipline is
+                        # identical to the DB-failure path (I5).  Raising
+                        # inside ``session_engine.begin()`` also rolls the
+                        # DB transaction back before the outer handler
+                        # runs, which is what we want: the caller sees
+                        # no DB change.
+                        raise _BlobQuotaExceededInTxn(quota_error)
+                conn.execute(
+                    update(blobs_table)
+                    .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
+                    .values(
+                        size_bytes=new_size,
+                        content_hash=file_hash,
+                    )
+                )
+        except _BlobQuotaExceededInTxn as quota_exc:
+            # Mirror of the DB-failure handler below: attempt the file
+            # rollback, attach add_note on rollback OSError, and surface
+            # the divergence rather than silently returning a failure
+            # result.  ``except _BlobQuotaExceededInTxn`` appears BEFORE
+            # ``except Exception`` so the sentinel is handled here and
+            # never reaches the DB-failure clause (which would perform
+            # a redundant second rollback write).
+            try:
+                storage_path.write_bytes(old_content)
+            except OSError as rollback_exc:
+                quota_exc.add_note(
+                    f"Rollback failed: could not restore prior content of {storage_path} "
+                    f"({type(rollback_exc).__name__}: {rollback_exc}). "
+                    f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
+                    f"inconsistent — the file may contain the new (uncommitted) bytes "
+                    f"while the DB row retains the prior size_bytes/content_hash. "
+                    f"Manual reconciliation required."
+                )
+                # Rollback failed: surface the divergence as a
+                # RuntimeError rather than returning a _failure_result.
+                # A silent failure-result here would tell the LLM
+                # "quota exceeded, try again" while the file and DB
+                # disagree about this blob's content — the worst
+                # possible outcome for audit integrity.  ``from
+                # rollback_exc`` preserves the OSError cause chain and
+                # ``quota_exc`` carries the add_note diagnostic so both
+                # root causes appear in the traceback.
+                raise RuntimeError(
+                    f"Blob quota rollback diverged for {blob_id!r}: "
+                    f"{quota_exc.user_message}  Rollback write_bytes raised "
+                    f"{type(rollback_exc).__name__}: {rollback_exc}. "
+                    f"storage_path {storage_path!s} contains the uncommitted "
+                    f"new content while the DB row retains the prior "
+                    f"size_bytes/content_hash.  Manual reconciliation required."
+                ) from rollback_exc
+            return _failure_result(state, quota_exc.user_message)
+        except Exception as primary_exc:
+            # Restore old content so file matches DB metadata.  Exception
+            # (not BaseException) because write_bytes() is not atomic — under
+            # KeyboardInterrupt the rollback write could truncate the file,
+            # leaving it inconsistent with both old and new DB state.
+            #
+            # Wrap the rollback write so a secondary OSError (ENOSPC, EIO, EACCES,
+            # parent-dir vanished mid-flight) cannot mask primary_exc.  Without
+            # this wrapper the new OSError would propagate as the headline and
+            # operators triaging the incident would investigate the disk fault
+            # instead of the actual root cause (the failed DB transaction).
+            # Narrow to OSError per offensive-programming policy: programmer bugs
+            # (TypeError, AttributeError, AssertionError) must propagate so a
+            # broken rollback isn't silently downgraded to a note.  add_note()
+            # attaches the rollback diagnostic to primary_exc without changing
+            # its type — upstream `except <PrimaryType>:` clauses still match,
+            # but operators see both causes in the traceback.  The bare `raise`
+            # below re-raises primary_exc (sys.exc_info() reverts to the outer
+            # frame after the nested except completes), so primary_exc remains
+            # the headline.
+            try:
+                storage_path.write_bytes(old_content)
+            except OSError as rollback_exc:
+                primary_exc.add_note(
+                    f"Rollback failed: could not restore prior content of {storage_path} "
+                    f"({type(rollback_exc).__name__}: {rollback_exc}). "
+                    f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
+                    f"inconsistent — the file may contain the new (uncommitted) bytes "
+                    f"while the DB row retains the prior size_bytes/content_hash. "
+                    f"Manual reconciliation required."
+                )
+            raise
+
+        return _discovery_result(
+            state,
+            {
+                "blob_id": blob_id,
+                "filename": blob["filename"],
+                "mime_type": blob["mime_type"],
+                "size_bytes": len(content_bytes),
+                "content_hash": file_hash,
+            },
+        )
 
 
 def _execute_delete_blob(

@@ -3218,6 +3218,400 @@ class TestUpdateBlobRollbackPreservesPrimaryException:
         assert not any("Rollback failed" in n for n in notes), f"Spurious rollback note attached on successful rollback: {notes!r}"
 
 
+class TestSessionBlobLockRegistry:
+    """``_session_blob_lock`` must return a stable lock per session_id.
+
+    The lock identity is the contract the ``_execute_update_blob``
+    critical section depends on: two threads asking for the same
+    session_id's lock must receive the SAME ``threading.Lock`` instance
+    so acquiring it in one thread blocks the other.  A broken registry
+    that returned fresh locks on every call would offer no
+    serialisation at all — correctness would silently regress to the
+    pre-I4 race.
+    """
+
+    def test_same_session_returns_identical_lock(self) -> None:
+        """Two lookups for the same session_id must return the same lock."""
+        from elspeth.web.composer.tools import _session_blob_lock
+
+        session_id = "test-session-identity"
+        first = _session_blob_lock(session_id)
+        second = _session_blob_lock(session_id)
+        assert first is second, (
+            "Session lock registry returned a DIFFERENT lock for the same session_id; two concurrent updaters would not serialise."
+        )
+
+    def test_different_sessions_return_distinct_locks(self) -> None:
+        """Different session_ids must map to different locks (no global bottleneck)."""
+        from elspeth.web.composer.tools import _session_blob_lock
+
+        lock_a = _session_blob_lock("session-A")
+        lock_b = _session_blob_lock("session-B")
+        assert lock_a is not lock_b, (
+            "Session lock registry returned the SAME lock for different session_ids; unrelated sessions would contend."
+        )
+
+    def test_concurrent_lookups_converge_on_single_lock(self) -> None:
+        """Under concurrent first-access, all threads must receive the same lock.
+
+        Regression guard for the double-checked-locking implementation
+        in ``_session_blob_lock``.  Without the registry mutex, two
+        threads asking for a not-yet-present session_id at the same
+        time could each install a different lock and half the callers
+        would serialise against one instance while the other half
+        serialise against the other — the race the I4 fix closes would
+        persist across threads partitioned by lock identity.
+        """
+        import threading as stdlib_threading
+        from uuid import uuid4
+
+        from elspeth.web.composer.tools import _session_blob_lock
+
+        session_id = f"concurrent-{uuid4()}"
+        start = stdlib_threading.Event()
+        locks: list[Any] = []
+        lock_guard = stdlib_threading.Lock()
+
+        def worker() -> None:
+            start.wait()
+            lock = _session_blob_lock(session_id)
+            with lock_guard:
+                locks.append(lock)
+
+        threads = [stdlib_threading.Thread(target=worker) for _ in range(16)]
+        for t in threads:
+            t.start()
+        start.set()
+        for t in threads:
+            t.join()
+
+        assert len(locks) == 16
+        assert all(lock is locks[0] for lock in locks), (
+            "Concurrent _session_blob_lock callers received distinct lock instances; "
+            "the registry mutex is missing or double-checked locking is broken."
+        )
+
+
+class TestUpdateBlobSessionLockSerialisation:
+    """_execute_update_blob must acquire the session lock BEFORE _sync_get_blob.
+
+    This is the I4 fix: the read→write→commit critical section must be
+    atomic across concurrent composer-tool callers on the same session.
+    Holding the session lock externally from the test must block the
+    tool call entirely — if the tool bypasses the lock, the worker
+    thread completes while the main thread still holds the mutex,
+    revealing the race.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import blobs_table, sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = f"lock-serialise-{uuid4()}"
+        self.blob_id = str(uuid4())
+        self.data_dir = str(tmp_path)
+        now = datetime.now(UTC)
+
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.original_content = b"orig"
+        self.storage_path.write_bytes(self.original_content)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.original_content),
+                    content_hash=_STUB_SHA256,
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def test_update_blob_blocks_when_session_lock_is_held(self) -> None:
+        """Worker must NOT complete while the main thread holds the lock.
+
+        Strategy: acquire the session lock externally, spawn a worker
+        that calls update_blob, assert the worker is still alive after
+        a short wait.  Releasing the lock unblocks the worker, which
+        must then complete and produce a successful update.  A regression
+        that skipped the lock would make the worker complete before the
+        lock is released — the short-wait assertion catches that.
+        """
+        import threading as stdlib_threading
+
+        from elspeth.web.composer.tools import _session_blob_lock
+
+        lock = _session_blob_lock(self.session_id)
+        completed = stdlib_threading.Event()
+        result_holder: list[Any] = []
+
+        def worker() -> None:
+            try:
+                result = execute_tool(
+                    "update_blob",
+                    {"blob_id": self.blob_id, "content": "new-content-from-worker"},
+                    _empty_state(),
+                    _mock_catalog(),
+                    session_engine=self.engine,
+                    session_id=self.session_id,
+                )
+                result_holder.append(result)
+            finally:
+                completed.set()
+
+        lock.acquire()
+        try:
+            t = stdlib_threading.Thread(target=worker, daemon=True)
+            t.start()
+            # While we hold the lock, the worker MUST NOT complete — if
+            # it does, the tool bypassed the session lock.  0.3s is an
+            # ample margin for a sub-millisecond in-memory SQLite
+            # transaction; fail fast if the tool is not lock-respecting.
+            blocked = not completed.wait(timeout=0.3)
+            assert blocked, (
+                "update_blob completed while the session lock was held externally; "
+                "the tool did not acquire _session_blob_lock before _sync_get_blob, "
+                "reopening the I4 file/DB rollback race."
+            )
+        finally:
+            lock.release()
+
+        assert completed.wait(timeout=2.0), "update_blob did not complete within 2s after session lock was released"
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "worker thread failed to exit after update completed"
+        assert result_holder, "worker did not produce a result"
+        assert result_holder[0].success is True, f"Update failed after lock release: {result_holder[0].data}"
+        assert self.storage_path.read_bytes() == b"new-content-from-worker"
+
+
+class TestUpdateBlobQuotaRollbackDivergence:
+    """Quota-rollback path must use the same add_note discipline as DB failure.
+
+    Pre-I5, the quota-exceeded path did an unprotected
+    ``storage_path.write_bytes(old_content)`` — if that write itself
+    raised (ENOSPC mid-quota-rollback on a quota-tracked filesystem is
+    the realistic scenario), the file contained the uncommitted new
+    content while the DB row retained the prior metadata, and the
+    user saw an OSError "disk fault" instead of "quota exhausted".
+    Silent divergence, wrong triage signal.
+
+    The fix mirrors the outer DB-failure handler: wrap the rollback
+    write, attach add_note on OSError, and surface the divergence as a
+    RuntimeError (not a silent _failure_result) so the operator is
+    informed that the file and DB disagree.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import blobs_table, sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.data_dir = str(tmp_path)
+        now = datetime.now(UTC)
+
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.original_content = b"pre-quota-bytes"
+        self.storage_path.write_bytes(self.original_content)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.original_content),
+                    content_hash=_STUB_SHA256,
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def test_quota_rollback_oserror_surfaces_divergence_runtime_error(self) -> None:
+        """Rollback OSError on quota path raises RuntimeError, not silent failure.
+
+        Patches ``Path.write_bytes`` so the FIRST call (overwriting
+        storage_path with the new oversized content) succeeds, and the
+        SECOND call (the in-quota-handler rollback) raises OSError.
+        Asserts:
+
+        * A RuntimeError propagates (NOT a ToolResult).  A silent
+          _failure_result here would hide the file/DB divergence
+          behind a "quota exceeded, try smaller" message the LLM would
+          act on without knowing the audit trail is broken.
+        * The RuntimeError message carries the word "Manual
+          reconciliation" so operators investigating the traceback see
+          the repair signal.
+        * ``__notes__`` contains the rollback-failure note so the
+          divergence diagnostic is visible in the traceback alongside
+          the headline.
+        * The OSError is preserved as ``__cause__`` for forensic
+          chaining.
+        """
+        from unittest.mock import patch
+
+        from elspeth.web.composer.tools import _execute_update_blob
+
+        real_write_bytes = Path.write_bytes
+        target_path_str = str(self.storage_path)
+        rollback_oserror = OSError(28, "No space left on device")
+        call_log: list[str] = []
+
+        def _fake_write_bytes(path_self: Path, data: bytes) -> int:
+            call_log.append(str(path_self))
+            if str(path_self) == target_path_str and call_log.count(target_path_str) >= 2:
+                raise rollback_oserror
+            return real_write_bytes(path_self, data)
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # Quota 10 bytes; new content 100 bytes; delta 85 bytes exceeds quota.
+        # First write_bytes (overwrite) succeeds; second (rollback) raises.
+        with (
+            patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 10),
+            patch.object(Path, "write_bytes", _fake_write_bytes),
+            pytest.raises(RuntimeError) as exc_info,
+        ):
+            _execute_update_blob(
+                {"blob_id": self.blob_id, "content": "x" * 100},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        # Headline must document the divergence, not the raw OSError.
+        assert "Manual reconciliation required" in str(exc_info.value), (
+            f"RuntimeError headline is missing the divergence signal: {exc_info.value!r}"
+        )
+        assert self.blob_id in str(exc_info.value), (
+            f"RuntimeError headline must identify blob_id {self.blob_id!r} for triage: {exc_info.value!r}"
+        )
+        # Cause chain preserves the OSError for forensic analysis.
+        assert isinstance(exc_info.value.__cause__, OSError), (
+            f"Expected __cause__ to be the rollback OSError; got {type(exc_info.value.__cause__).__name__}"
+        )
+        assert exc_info.value.__cause__ is rollback_oserror
+        # Exception chain structure:
+        #   RuntimeError (headline)
+        #     .__cause__    = rollback_exc (OSError) — explicit via ``from``
+        #     .__context__  = rollback_exc — auto-set since we raise inside
+        #                     ``except OSError as rollback_exc``
+        #   rollback_exc (OSError)
+        #     .__context__  = quota_exc — auto-set since OSError was raised
+        #                     inside ``except _BlobQuotaExceededInTxn``
+        # So the quota sentinel (carrying add_note) is at depth-2 through
+        # __context__.  Traversing explicitly asserts the full chain survives
+        # the outer ``raise ... from rollback_exc``.
+        rollback_context = exc_info.value.__context__
+        assert isinstance(rollback_context, OSError), f"__context__ should be the rollback OSError; got {type(rollback_context).__name__}"
+        sentinel = rollback_context.__context__
+        assert sentinel is not None, "Expected quota sentinel at __context__.__context__"
+        sentinel_notes = getattr(sentinel, "__notes__", [])
+        assert any("Rollback failed" in n for n in sentinel_notes), (
+            f"Expected add_note rollback diagnostic on the quota sentinel; notes={sentinel_notes!r}"
+        )
+        # The note must carry the same divergence vocabulary the DB-failure
+        # handler emits so operators grepping logs find both incident types.
+        combined = " ".join(sentinel_notes)
+        assert "Manual reconciliation required" in combined, f"Sentinel note must flag manual reconciliation: {sentinel_notes!r}"
+        assert self.blob_id in combined, f"Sentinel note must identify blob_id {self.blob_id!r}: {sentinel_notes!r}"
+
+    def test_quota_rollback_success_returns_failure_result_not_exception(self) -> None:
+        """When rollback succeeds on quota path, callers still get a ToolResult.
+
+        Regression guard: the quota-exceeded contract is that callers
+        receive a ``ToolResult(success=False, ...)`` — NOT a raised
+        exception — when the quota is breached AND the rollback
+        succeeds.  The I5 fix adds the divergence-on-rollback-failure
+        path without changing the happy-path shape.
+        """
+        from unittest.mock import patch
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        with patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 10):
+            result = execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "x" * 100},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        assert result.success is False, "Quota-exceeded must return failure, not success"
+        assert "quota" in result.data["error"].lower()
+        # File must be restored to original content.
+        assert self.storage_path.read_bytes() == self.original_content, (
+            "File was not rolled back after quota-exceeded with successful rollback"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Secret tool tests — composer-level secret reference wiring
 # ---------------------------------------------------------------------------

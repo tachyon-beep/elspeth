@@ -25,9 +25,14 @@ from elspeth.contracts.freeze import freeze_fields
 #
 # The Literal aliases are authoritative — their matching runtime
 # frozensets are *derived* via typing.get_args() so adding a member is
-# a single-site edit.  The static assert below anchors the derivation
-# (a frozenset literal that drifted from the Literal would now be an
-# immediate import-time crash rather than a silent Tier 1 gap).
+# a single-site edit.  The derivation IS the anti-drift mechanism:
+# because the frozensets below are built from ``get_args(Literal[...])``
+# rather than declared as independent literals, there is no second
+# definition that could fall out of sync.  Any edit to a Literal alias
+# changes the frozenset produced here in lockstep, so the Tier 1 read
+# guards in ``BlobServiceImpl._row_to_record`` and the boundary
+# assertions at write sites cannot silently disagree with the static
+# type.
 BlobStatus = Literal["ready", "pending", "error"]
 FinalizeBlobStatus = Literal["ready", "error"]
 BlobCreator = Literal["user", "assistant", "pipeline"]
