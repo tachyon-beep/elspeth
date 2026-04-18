@@ -644,8 +644,9 @@ class ComposerServiceImpl:
         NOTE: The sessions-table schema does not yet have a dedicated crash
         marker column. Bumping updated_at is the minimum viable breadcrumb
         until a migration adds (e.g.) a ``status`` or ``crashed_at`` column.
-        A follow-up issue tracks the schema addition; do NOT introduce the
-        migration as part of this PR (scope creep).
+        The schema addition is tracked separately as elspeth-23b0987938;
+        when that lands, this method expands to populate the new columns
+        and its signature gains ``exc_class``.
 
         The crash's exc_class is NOT written to the session row — no column
         exists to hold it. The operator correlates the updated_at bump with

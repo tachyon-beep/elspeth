@@ -555,10 +555,10 @@ allow_hits:
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=9598a33f16b02d6f
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=7f793a5fc8be7a01
   owner: web-execution
   reason: Progress broadcasting via call_soon_threadsafe raises RuntimeError when event loop is closed during shutdown
-  safety: Only RuntimeError caught (narrowed from bare Exception); logged; pipeline continues
+  safety: Only RuntimeError caught (narrowed from bare Exception); logged with canonical exc_class; pipeline continues
   expires: null
 - key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=8aae581a3a04bfbd
   owner: web-execution

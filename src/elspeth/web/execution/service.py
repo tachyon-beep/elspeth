@@ -732,10 +732,15 @@ class ExecutionServiceImpl:
                 except RuntimeError as broadcast_err:
                     # call_soon_threadsafe raises RuntimeError when the
                     # event loop is closed — expected during shutdown.
+                    # Log the class name, not the message: the canonical
+                    # CPython wording ("Event loop is closed") is not a
+                    # stable contract and future interpreter versions may
+                    # reword it.  ``exc_class`` is the diagnostic token
+                    # every other site in this module uses.
                     slog.error(
                         "progress_broadcast_failed",
                         run_id=run_id,
-                        error=str(broadcast_err),
+                        exc_class=type(broadcast_err).__name__,
                     )
 
             event_bus = EventBus()

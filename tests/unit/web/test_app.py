@@ -238,7 +238,17 @@ class TestSessionWiring:
 
 
 class TestMultiWorkerEnforcement:
-    """W10 -> R6: Hard-enforce single worker for WebSocket support."""
+    """W10 -> R6: Hard-enforce single worker for WebSocket support.
+
+    The ``_SESSION_BLOB_LOCKS`` registry in composer/tools.py is a
+    process-local mutex map whose correctness depends on this guard
+    rejecting every multi-worker signal (see composer/tools.py's
+    PROCESS-LOCAL CORRECTNESS PRECONDITION block).  If the guard is
+    relaxed on any code path without also replacing the lock registry
+    with a cross-process primitive, two workers can interleave
+    blob-file writes and DB rollbacks against the same session.  These
+    tests regression-protect each detection code path the comment names.
+    """
 
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "4"})
     def test_raises_on_multi_worker(self, tmp_path) -> None:
@@ -249,6 +259,34 @@ class TestMultiWorkerEnforcement:
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
     def test_single_worker_accepted(self, tmp_path) -> None:
         """No error when running with a single worker."""
+        app = create_app(_settings(tmp_path))
+        assert app is not None
+
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
+    def test_raises_on_uvicorn_workers_space_form(self, tmp_path, monkeypatch) -> None:
+        """Reject ``uvicorn --workers 2`` (space-separated argv form)."""
+        monkeypatch.setattr("sys.argv", ["uvicorn", "elspeth.web.app:create_app", "--workers", "2"])
+        with pytest.raises(RuntimeError, match=r"--workers 2\) but is not supported"):
+            create_app(_settings(tmp_path))
+
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
+    def test_raises_on_workers_equals_form(self, tmp_path, monkeypatch) -> None:
+        """Reject ``--workers=2`` (equals form used by some launchers)."""
+        monkeypatch.setattr("sys.argv", ["uvicorn", "elspeth.web.app:create_app", "--workers=2"])
+        with pytest.raises(RuntimeError, match=r"--workers=2\) but is not supported"):
+            create_app(_settings(tmp_path))
+
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
+    def test_raises_on_gunicorn_short_flag(self, tmp_path, monkeypatch) -> None:
+        """Reject ``gunicorn -w 2`` (gunicorn's short form)."""
+        monkeypatch.setattr("sys.argv", ["gunicorn", "elspeth.web.app:create_app", "-w", "2"])
+        with pytest.raises(RuntimeError, match=r"-w 2\) but is not supported"):
+            create_app(_settings(tmp_path))
+
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
+    def test_workers_one_space_form_accepted(self, tmp_path, monkeypatch) -> None:
+        """``--workers 1`` is permitted — the guard only fires at > 1."""
+        monkeypatch.setattr("sys.argv", ["uvicorn", "elspeth.web.app:create_app", "--workers", "1"])
         app = create_app(_settings(tmp_path))
         assert app is not None
 

@@ -574,3 +574,52 @@ class TestFieldValidatorCoverage:
         """Every str | None field must reject empty strings at config time."""
         with pytest.raises(ValidationError):
             WebSettings(**{field_name: "", **self._COMPOSER_DEFAULTS})
+
+
+class TestJWKSFailureRetryFloor:
+    """Regression guard for the cold-start DoS shield (elspeth-32982f17cf).
+
+    ``jwks_failure_retry_seconds`` has a schema floor of ``ge=10``, not
+    ``ge=1``.  The floor is load-bearing: during an IdP outage the FIRST
+    caller pays the httpx timeout (~15s worst case) while subsequent
+    callers short-circuit on the cached negative result.  A configured
+    1-second retry collapses that shield — concurrent auth requests
+    re-hit the dead IdP almost immediately, reinstating a partial DoS.
+    Ten seconds is tight enough for fixtures to advance the window
+    deliberately and loose enough that operators cannot configure the
+    throttle away.  These tests fail loudly if the floor is silently
+    relaxed to ``ge=1`` again.
+    """
+
+    _COMPOSER_DEFAULTS: typing.ClassVar[dict[str, object]] = {
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 85.0,
+        "composer_rate_limit_per_minute": 10,
+    }
+
+    @pytest.mark.parametrize("below_floor", [1, 2, 5, 9])
+    def test_below_floor_rejected(self, below_floor: int) -> None:
+        """Any value below 10 must raise ValidationError at schema time."""
+        with pytest.raises(ValidationError):
+            WebSettings(jwks_failure_retry_seconds=below_floor, **self._COMPOSER_DEFAULTS)
+
+    def test_floor_value_accepted(self) -> None:
+        """The boundary value ``10`` is the minimum legal configuration."""
+        settings = WebSettings(jwks_failure_retry_seconds=10, **self._COMPOSER_DEFAULTS)
+        assert settings.jwks_failure_retry_seconds == 10
+
+    def test_above_floor_accepted(self) -> None:
+        """Operators may raise the retry window (trading stale-serve risk for safety)."""
+        settings = WebSettings(jwks_failure_retry_seconds=600, **self._COMPOSER_DEFAULTS)
+        assert settings.jwks_failure_retry_seconds == 600
+
+    def test_zero_rejected(self) -> None:
+        """Zero would disable the throttle entirely — must be rejected."""
+        with pytest.raises(ValidationError):
+            WebSettings(jwks_failure_retry_seconds=0, **self._COMPOSER_DEFAULTS)
+
+    def test_negative_rejected(self) -> None:
+        """Negative values are schema-illegal."""
+        with pytest.raises(ValidationError):
+            WebSettings(jwks_failure_retry_seconds=-1, **self._COMPOSER_DEFAULTS)
