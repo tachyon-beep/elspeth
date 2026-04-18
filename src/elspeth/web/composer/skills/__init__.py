@@ -67,15 +67,19 @@ def load_deployment_skill(name: str, data_dir: str | Path | None = None) -> str:
     if data_dir is None:
         return ""
     path = Path(data_dir) / "skills" / f"{name}.md"
+    # Bounded read: cap at MAX+1 bytes so oversized files never materialize
+    # fully in memory. Decoding only happens after the size check passes,
+    # and the raw bytes are reused for the final decode so we never encode
+    # the content a second time.
     try:
-        content = path.read_text(encoding="utf-8")
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_DEPLOYMENT_SKILL_BYTES + 1)
     except FileNotFoundError:
         # File does not exist — no deployment skill configured.
         return ""
-    if len(content.encode("utf-8")) > MAX_DEPLOYMENT_SKILL_BYTES:
+    if len(raw) > MAX_DEPLOYMENT_SKILL_BYTES:
         raise ValueError(
-            f"Deployment skill at {path} is {len(content.encode('utf-8'))} bytes, "
-            f"exceeding the {MAX_DEPLOYMENT_SKILL_BYTES} byte limit. "
+            f"Deployment skill at {path} exceeds the {MAX_DEPLOYMENT_SKILL_BYTES} byte limit. "
             f"Reduce the file size or increase MAX_DEPLOYMENT_SKILL_BYTES."
         )
-    return content
+    return raw.decode("utf-8")

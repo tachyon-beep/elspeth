@@ -100,16 +100,31 @@ class TestProgressBroadcasterThreadSafety:
     """Verify B1 fix: broadcast() uses loop.call_soon_threadsafe()."""
 
     def test_broadcast_uses_call_soon_threadsafe(self) -> None:
-        """broadcast() MUST use loop.call_soon_threadsafe, not direct put_nowait."""
+        """broadcast() MUST use loop.call_soon_threadsafe, not direct put_nowait.
+
+        After the coalesced-drain fix, the scheduled callable is
+        ``_drain_pending(run_id, state)`` rather than
+        ``_safe_put(queue, event, run_id)``. The thread-safety contract
+        (no direct put_nowait from producer thread) is preserved —
+        _drain_pending runs on the loop thread and is responsible for
+        invoking _safe_put.
+        """
         mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
         broadcaster = ProgressBroadcaster(mock_loop)
-        queue = broadcaster.subscribe("run-1")
+        broadcaster.subscribe("run-1")
         event = _make_event()
 
         broadcaster.broadcast("run-1", event)
 
-        # Verify call_soon_threadsafe was called with _safe_put wrapper
-        mock_loop.call_soon_threadsafe.assert_called_once_with(ProgressBroadcaster._safe_put, queue, event, "run-1")
+        assert mock_loop.call_soon_threadsafe.call_count == 1
+        call_args = mock_loop.call_soon_threadsafe.call_args
+        # The scheduled callable must be _drain_pending bound to this
+        # broadcaster instance — anything else would either bypass the
+        # coalescing bound (direct _safe_put) or corrupt loop internals.
+        assert call_args.args[0] == broadcaster._drain_pending
+        # Args carry the run_id and the subscriber state, not the event
+        # itself — the event lives in state.pending.
+        assert call_args.args[1] == "run-1"
 
     def test_broadcast_to_multiple_subscribers(self) -> None:
         """Each subscriber queue gets its own call_soon_threadsafe call."""
@@ -285,6 +300,164 @@ class TestProgressBroadcasterBackpressure:
         assert queue.get_nowait() is failed
 
 
+class TestProgressBroadcasterCallbackBacklogBound:
+    """Regression: coalesced cross-thread scheduling.
+
+    The advertised OOM guard (``_SUBSCRIBER_QUEUE_MAXSIZE``) bounds the
+    async queue, but without coalescing, each ``broadcast()`` would enqueue
+    a fresh ``call_soon_threadsafe()`` callback into the event loop's
+    internal ``_ready`` deque — one per event per subscriber. A slow or
+    stalled loop turns that deque into an unbounded buffer, pinning every
+    ``RunEvent`` in memory long before the "bounded" queue drops anything.
+
+    Fix contract: broadcast() must cap scheduled callbacks at one per
+    subscriber at any moment. The per-subscriber pending buffer carries the
+    backlog and applies the drop-head policy at broadcast time, not after
+    the cross-thread handoff.
+    """
+
+    def test_callback_backlog_is_bounded_when_loop_is_stalled(self) -> None:
+        """10k broadcasts with a stalled loop schedule at most one drain per subscriber.
+
+        This is the core regression guard for the ticket. Against the old
+        implementation, ``call_soon_threadsafe`` was invoked once per event
+        (10000 times); the fix coalesces to one scheduled drain per
+        subscriber until that drain actually runs on the loop thread.
+        """
+        mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(mock_loop)
+        broadcaster.subscribe("run-1")
+
+        event_count = 10_000
+        for i in range(event_count):
+            broadcaster.broadcast(
+                "run-1",
+                RunEvent(
+                    run_id="run-1",
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="progress",
+                    data=ProgressData(rows_processed=i, rows_failed=0),
+                ),
+            )
+
+        # One subscriber → at most one scheduled drain callback pending.
+        assert mock_loop.call_soon_threadsafe.call_count == 1, (
+            f"Expected 1 scheduled drain callback for the stalled loop; got "
+            f"{mock_loop.call_soon_threadsafe.call_count}. The loop's _ready "
+            f"deque is not bounded by _SUBSCRIBER_QUEUE_MAXSIZE, so one "
+            f"scheduled callback per event defeats the OOM guard."
+        )
+
+    def test_pending_buffer_is_bounded_at_subscriber_maxsize(self) -> None:
+        """The pending pre-loop buffer must obey _SUBSCRIBER_QUEUE_MAXSIZE.
+
+        If pending grew without bound, the fix would merely shift the
+        unbounded-buffer problem from the loop's _ready deque into our own
+        bookkeeping. Drop-head policy must apply at broadcast time.
+        """
+        from elspeth.web.execution.progress import _SUBSCRIBER_QUEUE_MAXSIZE
+
+        mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(mock_loop)
+        broadcaster.subscribe("run-1")
+
+        # Emit 3x the cap; pending must never exceed the cap.
+        for i in range(_SUBSCRIBER_QUEUE_MAXSIZE * 3):
+            broadcaster.broadcast(
+                "run-1",
+                RunEvent(
+                    run_id="run-1",
+                    timestamp=datetime.now(tz=UTC),
+                    event_type="progress",
+                    data=ProgressData(rows_processed=i, rows_failed=0),
+                ),
+            )
+
+        # Look up the one subscriber state. Whitebox read justified: the
+        # invariant ("pending stays bounded") is the exact thing being tested.
+        sub_map = broadcaster._subscribers["run-1"]
+        state = next(iter(sub_map.values()))
+        assert len(state.pending) <= _SUBSCRIBER_QUEUE_MAXSIZE, (
+            f"Pending pre-loop buffer grew to {len(state.pending)} — "
+            f"exceeds _SUBSCRIBER_QUEUE_MAXSIZE={_SUBSCRIBER_QUEUE_MAXSIZE}. "
+            f"Drop-head policy must run at broadcast time."
+        )
+
+    def test_coalesced_drain_delivers_all_buffered_events_in_order(self) -> None:
+        """Running the scheduled drain callback must deliver the full pending batch.
+
+        Coalescing scheduled callbacks is only safe if the single drain
+        callback consumes the entire pending buffer. This test runs the
+        scheduled drain and verifies all (unthrottled, post-drop-head)
+        events reach the subscriber queue in FIFO order.
+        """
+        mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(mock_loop)
+        queue = broadcaster.subscribe("run-1")
+
+        events = [
+            RunEvent(
+                run_id="run-1",
+                timestamp=datetime.now(tz=UTC),
+                event_type="progress",
+                data=ProgressData(rows_processed=i, rows_failed=0),
+            )
+            for i in range(5)
+        ]
+        for event in events:
+            broadcaster.broadcast("run-1", event)
+
+        # The first and only call should schedule _drain_pending with
+        # (run_id, state) arguments. Invoke it synchronously to simulate
+        # the loop servicing the callback.
+        assert mock_loop.call_soon_threadsafe.call_count == 1
+        call_args = mock_loop.call_soon_threadsafe.call_args
+        drain_fn = call_args.args[0]
+        drain_args = call_args.args[1:]
+        drain_fn(*drain_args)
+
+        # All 5 events delivered in order via _safe_put → asyncio.Queue.
+        received = [queue.get_nowait() for _ in range(5)]
+        assert [r.data.rows_processed for r in received if isinstance(r.data, ProgressData)] == [0, 1, 2, 3, 4]
+
+    def test_drain_clears_schedule_flag_so_next_broadcast_reschedules(self) -> None:
+        """After the drain callback runs, the next broadcast must schedule again.
+
+        The coalescing flag must flip back to False once pending is drained;
+        otherwise a second burst of events would sit in pending with no
+        drain ever scheduled — silent loss under any real load pattern.
+        """
+        mock_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+        broadcaster = ProgressBroadcaster(mock_loop)
+        broadcaster.subscribe("run-1")
+        event = _make_event()
+
+        broadcaster.broadcast("run-1", event)
+        assert mock_loop.call_soon_threadsafe.call_count == 1
+
+        # Drive the scheduled drain to completion. The drain may re-schedule
+        # itself via loop.call_soon; we drive that too, since in real
+        # operation the loop would keep servicing until pending is empty.
+        while mock_loop.call_soon_threadsafe.called or mock_loop.call_soon.called:
+            pending_calls = []
+            if mock_loop.call_soon_threadsafe.called:
+                pending_calls.extend(list(mock_loop.call_soon_threadsafe.call_args_list))
+                mock_loop.call_soon_threadsafe.reset_mock()
+            if mock_loop.call_soon.called:
+                pending_calls.extend(list(mock_loop.call_soon.call_args_list))
+                mock_loop.call_soon.reset_mock()
+            for call in pending_calls:
+                call.args[0](*call.args[1:])
+
+        # Second broadcast after the drain has fully drained must schedule.
+        broadcaster.broadcast("run-1", event)
+        assert mock_loop.call_soon_threadsafe.call_count == 1, (
+            "After drain fully drained pending, the next broadcast must "
+            "schedule a new drain — otherwise future events would never reach "
+            "the async queue."
+        )
+
+
 class TestProgressBroadcasterCleanup:
     def test_cleanup_run_removes_all_subscribers(self) -> None:
         loop = asyncio.new_event_loop()
@@ -333,20 +506,55 @@ class TestBroadcasterSingleTerminalGuard:
         )
 
     def test_non_terminal_after_terminal_still_delivered(self) -> None:
-        """Progress events should not be suppressed by the terminal guard."""
+        """Progress events should not be suppressed by the terminal guard.
+
+        Under the coalesced-drain design, the second broadcast does not
+        schedule a second ``call_soon_threadsafe`` — it appends to the
+        already-scheduled subscriber's pending deque. The correct test is
+        therefore end-to-end: after both broadcasts, the scheduled drain
+        must deliver the non-terminal event to the subscriber queue. The
+        pre-fix test asserted on ``call_count`` as a proxy and would miss
+        a silent loss of the non-terminal event in the pending deque.
+        """
         loop = MagicMock(spec=asyncio.AbstractEventLoop)
         broadcaster = ProgressBroadcaster(loop)
-        broadcaster.subscribe("run-1")
+        queue = broadcaster.subscribe("run-1")
 
+        # Terminal first — this is the unusual (buggy-producer) case the
+        # broadcaster must still defend against.  In a well-behaved run
+        # producers emit non-terminals before the terminal, but the
+        # broadcaster's guarantees cannot depend on producer ordering.
         completed = _make_event(run_id="run-1", event_type="completed")
         progress = _make_event(run_id="run-1", event_type="progress")
 
         broadcaster.broadcast("run-1", completed)
-        calls_after_terminal = loop.call_soon_threadsafe.call_count
-
         broadcaster.broadcast("run-1", progress)
-        assert loop.call_soon_threadsafe.call_count == calls_after_terminal + 1, (
-            "Non-terminal events must not be blocked by the terminal guard."
+
+        # Drive any scheduled drain callbacks manually (MagicMock loop
+        # does not service them). Run until no further callbacks pend.
+        def _drive(mock_loop: MagicMock) -> int:
+            pending_calls = []
+            if mock_loop.call_soon_threadsafe.called:
+                pending_calls.extend(list(mock_loop.call_soon_threadsafe.call_args_list))
+                mock_loop.call_soon_threadsafe.reset_mock()
+            if mock_loop.call_soon.called:
+                pending_calls.extend(list(mock_loop.call_soon.call_args_list))
+                mock_loop.call_soon.reset_mock()
+            for call in pending_calls:
+                call.args[0](*call.args[1:])
+            return len(pending_calls)
+
+        while _drive(loop) > 0:
+            pass
+
+        # Both events delivered — terminal first, then the progress that
+        # was accepted because the terminal guard only suppresses
+        # subsequent *terminals*, not post-terminal progress.
+        delivered = []
+        while not queue.empty():
+            delivered.append(queue.get_nowait())
+        assert [e.event_type for e in delivered] == ["completed", "progress"], (
+            "Non-terminal events after a terminal must reach the subscriber queue; the terminal guard only blocks duplicate terminals."
         )
 
     def test_cleanup_run_clears_terminal_tracking(self) -> None:

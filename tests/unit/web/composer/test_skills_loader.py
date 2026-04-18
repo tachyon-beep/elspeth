@@ -104,7 +104,34 @@ class TestLoadDeploymentSkill:
         oversized = "x" * (MAX_DEPLOYMENT_SKILL_BYTES + 1)
         (skills_dir / "pipeline_composer.md").write_text(oversized)
 
-        with pytest.raises(ValueError, match="exceeding the"):
+        with pytest.raises(ValueError, match="exceeds the"):
+            load_deployment_skill("pipeline_composer", tmp_path)
+
+    def test_oversized_file_is_rejected_without_full_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Oversized files must be bounded-read — never materialized in full.
+
+        The loader must cap the read at MAX + 1 bytes. If it fell back to the
+        old unbounded path.read_text(), a hostile deployment skill could
+        exhaust process memory before the size guard ever fires. This test
+        proves the read is bounded by forbidding read_text() and writing a
+        file an order of magnitude larger than the limit.
+        """
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        skill_file = skills_dir / "pipeline_composer.md"
+        # Ten times over the limit — no real skill would ever be this big.
+        skill_file.write_bytes(b"x" * (MAX_DEPLOYMENT_SKILL_BYTES * 10))
+
+        # Sentinel: if the fix regresses back to read_text(), this fires
+        # before the ValueError and the test fails with a clear message.
+        def _forbidden(*_args: object, **_kwargs: object) -> str:
+            raise AssertionError(
+                "load_deployment_skill must not call Path.read_text() — oversized files must be rejected by a bounded binary read."
+            )
+
+        monkeypatch.setattr(Path, "read_text", _forbidden)
+
+        with pytest.raises(ValueError, match="exceeds the"):
             load_deployment_skill("pipeline_composer", tmp_path)
 
     def test_accepts_file_at_size_limit(self, tmp_path: Path) -> None:

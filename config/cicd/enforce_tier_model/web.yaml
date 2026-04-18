@@ -234,37 +234,42 @@ allow_hits:
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
   expires: null
-- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=eee81154a0e859d0
+- key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=80dd3c1d05f93c94
   owner: web-execution
-  reason: Subscriber map creates the per-run queue set lazily on first subscription
+  reason: Subscriber map creates the per-run queue→state mapping lazily on first subscription
   safety: Mutation is guarded by the broadcaster lock and only initializes empty internal state
   expires: null
-- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=6e11678254f558d4
+- key: web/execution/progress.py:R9:ProgressBroadcaster:unsubscribe:fp=d21d1c5a7f779ec1
+  owner: web-execution
+  reason: Unsubscribe is idempotent — a queue may be absent because the WS handler already removed it or cleanup_run raced ahead
+  safety: Missing entry simply means no state to remove; lock-protected no-op
+  expires: null
+- key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=06ba034f5edd8ae9
   owner: web-execution
   reason: Broadcast treats an absent run entry as 'no subscribers' for that run
-  safety: A missing subscriber set results in a no-op broadcast, which is the correct behavior
+  safety: A missing subscriber map results in a no-op broadcast, which is the correct behavior
   expires: null
-- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=bb8b519dfa2f28f2
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=18e58b3e32b2e5fe
   owner: web-execution
   reason: QueueFull for terminal events — drains queue and retries (terminal events must never be dropped)
   safety: Terminal events guaranteed delivered; progress events use drop-oldest backpressure
   expires: null
-- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=17b62f55090a5b22
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=4148cfe963eb1f65
   owner: web-execution
   reason: QueueEmpty suppressed during terminal event drain — queue may have been consumed concurrently
   safety: Race-safe no-op; no data loss
   expires: null
-- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=60537202986af777
+- key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=4082e42d8f7ef55f
   owner: web-execution
   reason: QueueEmpty suppressed during progress event drop-oldest — queue may have been consumed between full check and drain
   safety: Race-safe no-op; no data loss
   expires: null
-- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=f6f40e5a148cdd41
+- key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=b0813b2652b434b9
   owner: web-execution
   reason: QueueFull after drop-oldest retry for non-terminal events — event dropped rather than blocking pipeline thread
   safety: Best-effort delivery for progress events; terminal events use separate drain path
   expires: null
-- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=df372b3a50327d9d
+- key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=bcf3a714f3cd29f0
   owner: web-execution
   reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry
   safety: Missing key simply means there are no remaining subscribers to clean up

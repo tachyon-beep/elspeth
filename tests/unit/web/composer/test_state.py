@@ -1561,6 +1561,51 @@ class TestStage1Validation:
         result = state.validate()
         assert any("no explicit schema" in s.message for s in result.suggestions)
 
+    def test_validate_schema_alias_suppresses_suggestion(self) -> None:
+        """S3: Source with composer-facing ``schema`` alias must not trigger the suggestion.
+
+        The composer/runtime boundary uses ``schema`` (user-facing) while
+        plugin config parsing normalizes to ``schema_config``. The detection
+        helper must accept either alias so correctly configured sources do
+        not draw a false advisory through the LLM prompt.
+        """
+        source = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"schema": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        )
+        state = self._empty_state()
+        state = state.with_source(source)
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert not any("no explicit schema" in s.message for s in result.suggestions)
+
+    def test_validate_schema_config_alias_suppresses_suggestion(self) -> None:
+        """S3: Source with internal ``schema_config`` alias also suppresses the suggestion.
+
+        Plugin config parsing may land internal shapes in composer state
+        (e.g. after serialization round-trips). Both alias names must be
+        recognized so internal and external shapes agree.
+        """
+        source = SourceSpec(
+            plugin="csv",
+            on_success="t1",
+            options={"schema_config": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        )
+        state = self._empty_state()
+        state = state.with_source(source)
+        state = state.with_node(self._make_transform("t1", "t1", "main"))
+        state = state.with_output(self._make_output("main"))
+        state = state.with_edge(self._make_edge("e1", "source", "t1"))
+        state = state.with_edge(self._make_edge("e2", "t1", "main"))
+        result = state.validate()
+        assert not any("no explicit schema" in s.message for s in result.suggestions)
+
     # --- Interaction tests ---
 
     def test_validate_warnings_dont_block(self) -> None:
