@@ -2317,6 +2317,146 @@ class TestComposePluginCrashResponse:
         crash_events = [e for e in cap_logs if e.get("event") == "compose_plugin_crash"]
         assert len(crash_events) == 1, cap_logs
 
+    def test_compose_plugin_crash_save_failure_sets_partial_state_save_failed_flag(self, tmp_path) -> None:
+        """Regression (P2d): when partial-state persistence fails during a
+        plugin crash, the 500 response body MUST include
+        ``partial_state_save_failed=True`` and ``partial_state_save_error``
+        symmetric with the 422 convergence-error response. The frontend
+        recovery UX branches on this flag to distinguish "state is
+        captured, safe to retry later" from "state is lost, start over."
+        Without the flag, the two plugin-crash outcomes (save success
+        vs save failure) are indistinguishable to the client.
+        """
+        from sqlalchemy.exc import OperationalError
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="mid-crash-mutation"),
+            version=3,
+        )
+        original = ValueError("plugin bug")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=partial),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+
+        async def _raise_operational(*_args, **_kwargs):
+            raise OperationalError(
+                "UPDATE composition_states ...",
+                {},
+                Exception("lock wait timeout exceeded"),
+            )
+
+        service.save_composition_state = _raise_operational  # type: ignore[method-assign]
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+        assert response.status_code == 500
+        detail = response.json()["detail"]
+        assert detail["error_type"] == "composer_plugin_error"
+        # The two symmetry fields introduced to match _handle_convergence_error.
+        assert detail.get("partial_state_save_failed") is True
+        assert detail.get("partial_state_save_error") == "OperationalError"
+
+    def test_compose_plugin_crash_save_successful_omits_partial_state_save_failed_flag(self, tmp_path) -> None:
+        """Regression (P2d, negative): when partial-state persistence
+        SUCCEEDS, the 500 response body MUST NOT carry a false
+        ``partial_state_save_failed`` flag. The flag is a signal of
+        recovery failure, not a constant field."""
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="mid-crash-mutation"),
+            version=3,
+        )
+        original = ValueError("plugin bug")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=partial),
+        )
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+        assert response.status_code == 500
+        detail = response.json()["detail"]
+        assert detail["error_type"] == "composer_plugin_error"
+        # Both keys absent on the success path — no false signal.
+        assert "partial_state_save_failed" not in detail
+        assert "partial_state_save_error" not in detail
+
+    def test_compose_plugin_crash_save_typeerror_propagates_tier1_crash(self, tmp_path) -> None:
+        """Regression (P2b): when ``save_composition_state`` raises a
+        ``TypeError`` (our own code, Tier 1), the handler MUST let it
+        propagate as an unstructured 500 rather than laundering it into
+        ``partial_state_save_failed=True``. Pre-fix behaviour caught
+        (ValueError, TypeError, KeyError, SQLAlchemyError) and produced
+        a soft 500 with the flag set — which is exactly the silent-
+        wrong-result pattern CLAUDE.md forbids for our own data.
+        """
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="mid-crash-mutation"),
+            version=3,
+        )
+        original = ValueError("plugin bug")
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerPluginCrashError(original, partial_state=partial),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+
+        # TypeError from our own dataclass path — a Tier 1 bug that must propagate.
+        async def _raise_type_error(*_args, **_kwargs):
+            raise TypeError("dataclass field contract violated")
+
+        service.save_composition_state = _raise_type_error  # type: ignore[method-assign]
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+        # 500 from FastAPI's default handler — NOT the composer_plugin_error
+        # structured body. The crashed request is the correct outcome; a
+        # soft partial_state_save_failed=True would hide the Tier 1 bug.
+        assert response.status_code == 500
+        assert "composer_plugin_error" not in response.text
+        assert "partial_state_save_failed" not in response.text
+
     def test_compose_unknown_exception_class_is_not_absorbed(self, tmp_path) -> None:
         """Deliberately narrow typed catch: RuntimeError (not in the handler's
         catch list) must propagate past the composer_plugin_error handler.

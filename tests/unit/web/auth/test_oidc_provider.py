@@ -1208,6 +1208,164 @@ class TestOIDCStaleCacheDoesNotLaunderProgrammerBugs:
             assert identity.user_id == "user-123"
 
 
+class TestOIDCColdStartBackoff:
+    """Cold-start IdP outage must not serialize every request on the
+    refresh lock.
+
+    Symmetric with ``TestOIDCStaleCacheBackoff``, but for the *empty
+    cache* case: neither the top-of-function short-circuit nor the
+    lock-locked short-circuit fires on cold start (both gate on
+    ``self._jwks is not None``), so pre-fix every request hit the
+    refresh lock and paid a full httpx timeout when the IdP was down.
+    The fix advances ``_next_refresh_at`` unconditionally on fetch
+    failure and adds a cold-start fail-fast that raises
+    ``AuthenticationError`` while the retry window is open without
+    touching the network.
+    """
+
+    @pytest.mark.asyncio
+    async def test_cold_start_fetch_failure_throttles_subsequent_calls(
+        self,
+        rsa_keypair,
+    ) -> None:
+        """Cold start + IdP outage: first request fetches (and fails),
+        subsequent requests within the retry window fail fast without
+        re-hitting the IdP."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=3600,
+            jwks_failure_retry_seconds=60,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # Cache is empty (no seed fetch). Simulate IdP outage for every call.
+        attempt_count = 0
+
+        async def failing_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            raise httpx.ConnectError("IdP is down")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=failing_client):
+            # First call: attempts fetch, has no stale cache, raises AuthenticationError.
+            with pytest.raises(AuthenticationError):
+                await provider.authenticate(token)
+            # Second and third calls within the 60s backoff window:
+            # MUST fail fast WITHOUT re-entering the httpx client.
+            with pytest.raises(AuthenticationError):
+                await provider.authenticate(token)
+            with pytest.raises(AuthenticationError):
+                await provider.authenticate(token)
+
+        # The fix: only one network attempt during the backoff window.
+        # Pre-fix behaviour: 3 attempts (one per authenticate call).
+        assert attempt_count == 1, (
+            f"Expected 1 IdP fetch during cold-start backoff window, got "
+            f"{attempt_count}. Cold-start throttle is not advancing "
+            f"_next_refresh_at when stale_jwks is None."
+        )
+
+    @pytest.mark.asyncio
+    async def test_cold_start_retry_window_elapses_allows_new_fetch(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """After the cold-start retry window elapses, a fresh fetch is
+        attempted and — with a healthy IdP — succeeds."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=3600,
+            jwks_failure_retry_seconds=60,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        attempt_count = 0
+
+        async def failing_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            raise httpx.ConnectError("IdP is down")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=failing_client),
+            pytest.raises(AuthenticationError),
+        ):
+            await provider.authenticate(token)
+
+        # Simulate time passing past the retry window.
+        provider._validator._next_refresh_at = time.time() - 1
+
+        # Now the IdP is healthy again.
+        with mock_httpx_discovery:
+            identity = await provider.authenticate(token)
+
+        assert identity.user_id == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_cold_start_concurrent_requests_share_single_fetch(
+        self,
+        rsa_keypair,
+    ) -> None:
+        """Concurrent cold-start requests during an IdP outage: exactly
+        one fetch attempt; all requests raise AuthenticationError; none
+        block on the httpx timeout in sequence."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=3600,
+            jwks_failure_retry_seconds=60,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        attempt_count = 0
+
+        async def failing_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            # Tiny sleep so queued coroutines have a chance to pile up on
+            # the lock before this first attempt completes.
+            await asyncio.sleep(0.01)
+            raise httpx.ConnectError("IdP is down")
+
+        failing_client = AsyncMock()
+        failing_client.get = failing_get
+        failing_client.__aenter__ = AsyncMock(return_value=failing_client)
+        failing_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=failing_client):
+            results = await asyncio.gather(
+                *(provider.authenticate(token) for _ in range(5)),
+                return_exceptions=True,
+            )
+
+        # All five requests failed.
+        assert all(isinstance(r, AuthenticationError) for r in results), results
+        # Exactly one attempt — the first acquired the lock and ran, the
+        # other four hit the cold-start throttle fast-path and never
+        # touched the network.
+        assert attempt_count == 1, (
+            f"Expected 1 IdP fetch for 5 concurrent cold-start requests, "
+            f"got {attempt_count}. Cold-start throttle is not firing "
+            f"inside the lock re-check."
+        )
+
+
 class TestOIDCProtocolConformance:
     """Verify OIDCAuthProvider satisfies the AuthProvider protocol."""
 

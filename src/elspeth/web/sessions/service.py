@@ -19,6 +19,7 @@ from uuid import UUID
 from sqlalchemy import ColumnElement, Connection, Engine, delete, desc, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.sessions.models import (
     chat_messages_table,
@@ -674,6 +675,37 @@ class SessionServiceImpl:
             raise ValueError(f"State not found: {state_id}")
 
         return self._row_to_state_record(row)
+
+    async def get_state_in_session(
+        self,
+        state_id: UUID,
+        session_id: UUID,
+    ) -> CompositionStateRecord:
+        """Scoped read: fetch state and verify it belongs to ``session_id``.
+
+        Runtime defence-in-depth complementing the migration-007 composite
+        foreign key: post-007 data cannot create cross-session state
+        references at the schema layer, but pre-007 data repaired with
+        Variant-A (delete orphans) has no DB-enforced invariant. This
+        method raises ``AuditIntegrityError`` on any mismatch it
+        encounters. The exception class is chosen deliberately to match
+        the cross-session blob-ref rejection at
+        ``sessions/routes.py`` (see commit c86f935d / b8ba2214): a Tier 1
+        anomaly in our own data must surface as corruption, not as a
+        soft 404. ``ValueError`` on "state does not exist at all" is
+        preserved from ``get_state`` for callers that still need to
+        distinguish absence from mismatch.
+        """
+        record = await self.get_state(state_id)
+        if record.session_id != session_id:
+            raise AuditIntegrityError(
+                f"Tier 1 audit anomaly: composition_state {state_id} "
+                f"belongs to session {record.session_id}, not {session_id}. "
+                f"Migration 007 composite FK prevents this for post-007 "
+                f"data; pre-007 orphans should have been deleted by "
+                f"Variant-A repair. Cross-session state reference rejected."
+            )
+        return record
 
     async def set_active_state(
         self,

@@ -189,6 +189,18 @@ async def _handle_convergence_error(
 
         # Persistence guard: DB write failure should not upgrade the
         # response from 422 (convergence error) to 500 (internal).
+        #
+        # SQLAlchemyError ONLY — narrowed per CLAUDE.md Tier 1 semantics.
+        # ``state_d = exc.partial_state.to_dict()`` and the subsequent
+        # ``CompositionStateData(...)`` construction are OUR code operating
+        # on OUR dataclass (``CompositionState``). A ``TypeError`` /
+        # ``KeyError`` raised here is a broken invariant between our
+        # dataclass and our DTO — a Tier 1 bug — and MUST propagate and
+        # crash the request rather than being laundered into a soft
+        # ``partial_state_save_failed=True``. The earlier ``validate()``
+        # guard is the only place those classes are acceptable: ``validate``
+        # is defined to tolerate structurally damaged partial state, which
+        # is exactly the state we arrive here with.
         try:
             state_d = exc.partial_state.to_dict()
             state_data = CompositionStateData(
@@ -202,16 +214,15 @@ async def _handle_convergence_error(
             )
             await service.save_composition_state(session_id, state_data)
             response_body["partial_state"] = redact_source_storage_path(state_d)
-        except (ValueError, TypeError, KeyError, SQLAlchemyError) as save_err:
-            # Catch the full SQLAlchemyError family — ``IntegrityError`` alone
-            # would let ``OperationalError`` (lock timeout / pool disconnect /
-            # deadlock), ``ProgrammingError`` (schema drift), and other
-            # siblings escape, upgrading the 422 convergence response to an
-            # unstructured 500.
-            # exc_info deliberately omitted: SQLAlchemyError
-            # __cause__ chains can carry DB connection strings, schema
-            # introspection detail, or other operational secrets that
-            # structured server logs must not retain.
+        except SQLAlchemyError as save_err:
+            # Full SQLAlchemyError family — ``IntegrityError`` alone would
+            # let ``OperationalError`` (lock timeout / pool disconnect /
+            # deadlock), ``ProgrammingError`` (schema drift), and siblings
+            # escape, upgrading 422 → unstructured 500.
+            # exc_info deliberately omitted: SQLAlchemyError __cause__
+            # chains can carry DB connection strings, schema introspection
+            # detail, or operational secrets that structured server logs
+            # must not retain.
             slog.error(
                 f"{log_prefix}_partial_state_save_failed",
                 session_id=str(session_id),
@@ -255,6 +266,11 @@ async def _handle_plugin_crash(
     Returns:
         Response body dict for ``HTTPException(status_code=500, ...)``.
     """
+    response_body: dict[str, object] = {
+        "error_type": "composer_plugin_error",
+        "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
+    }
+
     if exc.partial_state is not None:
         # Validate guard: partial_state was captured mid-compose — it may
         # be structurally damaged. Catch data-shape errors so we still
@@ -278,6 +294,13 @@ async def _handle_plugin_crash(
         # Persistence guard: DB write failure MUST NOT mask the original
         # plugin crash (response stays as the 500 below, the save failure
         # is recorded as a separate audit-system-failure slog event).
+        #
+        # SQLAlchemyError ONLY — narrowed per CLAUDE.md Tier 1 semantics.
+        # ``to_dict()`` / ``CompositionStateData(...)`` are OUR code on OUR
+        # dataclass; ``TypeError`` / ``KeyError`` from this block is a
+        # broken invariant (Tier 1 bug) and must propagate. Symmetric with
+        # ``_handle_convergence_error``; see the comment there for the full
+        # rationale.
         try:
             state_d = exc.partial_state.to_dict()
             state_data = CompositionStateData(
@@ -290,16 +313,30 @@ async def _handle_plugin_crash(
                 validation_errors=[e.message for e in validation.errors] if validation.errors else None,
             )
             await service.save_composition_state(session_id, state_data)
-        except (ValueError, TypeError, KeyError, SQLAlchemyError) as save_err:
-            # Catch the full SQLAlchemyError family — a narrow
-            # ``IntegrityError`` catch would let ``OperationalError``,
-            # ``ProgrammingError``, and other siblings escape and mask the
-            # primary plugin-crash response / slog path.
+        except SQLAlchemyError as save_err:
+            # Full SQLAlchemyError family — a narrow ``IntegrityError``
+            # catch would let ``OperationalError`` / ``ProgrammingError`` /
+            # siblings escape and mask the primary plugin-crash response.
+            # exc_info deliberately omitted: ``str(save_err)`` and
+            # ``__cause__`` text can carry SQL + bound parameters (the
+            # composition-state payload, which may reference secrets) and
+            # DB connection strings on ``OperationalError``.
             slog.error(
                 f"{log_prefix}_plugin_crash_partial_state_save_failed",
                 session_id=str(session_id),
                 exc_class=type(save_err).__name__,
             )
+            # Symmetry with _handle_convergence_error: frontend recovery UX
+            # needs the same ``partial_state_save_failed`` signal on the
+            # 500 path it already branches on for the 422 path. Without
+            # this, a plugin crash whose partial-state persist also failed
+            # looks identical to a plugin crash that succeeded in
+            # persisting — the UI can't distinguish "state is captured,
+            # safe to retry later" from "state is lost, start over."
+            # Class name only; see the save_error comment in
+            # _handle_convergence_error for the leak rationale.
+            response_body["partial_state_save_failed"] = True
+            response_body["partial_state_save_error"] = type(save_err).__name__
 
     # exc_info deliberately omitted: exc.original_exc / its __cause__ chain
     # may carry DB URLs, filesystem paths, or secret fragments. The
@@ -313,10 +350,7 @@ async def _handle_plugin_crash(
         exc_class=exc.exc_class,
     )
 
-    return {
-        "error_type": "composer_plugin_error",
-        "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
-    }
+    return response_body
 
 
 def create_session_router() -> APIRouter:
@@ -785,9 +819,16 @@ def create_session_router() -> APIRouter:
 
         # Resolve composition_version from each run's state_id.
         # A missing state is Tier 1 data corruption — crash, don't hide.
+        # Scope the read to the current session: migration 007's composite
+        # FK prevents future cross-session state refs at the schema layer,
+        # but pre-007 rows repaired with Variant-A (delete orphans) have
+        # no runtime guard. ``get_state_in_session`` raises
+        # ``AuditIntegrityError`` on session mismatch, surfacing Tier 1
+        # corruption rather than silently returning the wrong state's
+        # version number in another session's listing.
         responses: list[RunResponse] = []
         for run in runs:
-            state = await service.get_state(run.state_id)
+            state = await service.get_state_in_session(run.state_id, session.id)
             version = state.version
             responses.append(
                 RunResponse(

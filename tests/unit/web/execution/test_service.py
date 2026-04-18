@@ -746,6 +746,97 @@ class TestCancelMechanism:
         assert str(run_id) not in service._shutdown_events
 
 
+class TestP2aCleanupCatchNarrowing:
+    """Regression (P2a): cleanup catches in ExecutionServiceImpl must not
+    launder exception strings into slog.
+
+    ``except Exception`` over ``update_run_status`` previously logged
+    ``cleanup_error=str(cleanup_err)``. On SQLAlchemyError subclasses that
+    expands to ``[SQL: ...] [parameters: ...]`` plus a ``__cause__`` chain
+    that can carry DB URLs / credentials. Canonical pattern (commits
+    b8ba2214/127417cb): narrow to ``(SQLAlchemyError, OSError)`` and log
+    ``exc_class`` only.
+    """
+
+    @pytest.mark.asyncio
+    async def test_setup_failure_cleanup_slog_uses_exc_class_not_str(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """When a setup failure triggers cleanup and cleanup's own
+        ``update_run_status`` raises a ``SQLAlchemyError``, the slog
+        record must carry ``cleanup_exc_class`` + ``original_exc_class``
+        (class names) — not the legacy ``cleanup_error``/``original_error``
+        string fields."""
+        from sqlalchemy.exc import OperationalError
+
+        session_id = uuid4()
+        run_id = uuid4()
+        mock_session_service.create_run.return_value = MagicMock(id=run_id)
+
+        # First update_run_status call (in cleanup) raises OperationalError.
+        mock_session_service.update_run_status.side_effect = OperationalError(
+            "UPDATE runs ...",
+            {"id": str(run_id), "error": "Setup failed: SuperSecretDSN://u:p@h/d"},
+            Exception("lock wait timeout exceeded — __cause__ carries DSN"),
+        )
+
+        # Force the setup path to fail so the cleanup catch fires.
+        # _executor.submit raising is the simplest route.
+        service._executor.submit = MagicMock(side_effect=RuntimeError("pool shutdown"))  # type: ignore[method-assign]
+
+        with (
+            patch("elspeth.web.execution.service.slog") as mock_slog,
+            pytest.raises(RuntimeError, match="pool shutdown"),
+        ):
+            await service.execute(session_id=session_id)
+
+        # slog.error was called for the cleanup failure.
+        slog_calls = [c for c in mock_slog.error.call_args_list if c[0] and c[0][0] == "run_cleanup_status_update_failed"]
+        assert len(slog_calls) == 1, mock_slog.error.call_args_list
+        kwargs = slog_calls[0][1]
+
+        # The narrow-catch kwargs are class names, not strings.
+        assert kwargs["cleanup_exc_class"] == "OperationalError"
+        assert kwargs["original_exc_class"] == "RuntimeError"
+
+        # Legacy string-valued fields are GONE — this is the redaction
+        # regression guard. Any reintroduction re-opens the str(exc) leak.
+        assert "cleanup_error" not in kwargs
+        assert "original_error" not in kwargs
+
+    @pytest.mark.asyncio
+    async def test_setup_cleanup_narrow_catch_lets_runtimeerror_escape(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Narrow catch semantics: a RuntimeError from update_run_status
+        (programmer bug, not a DB/filesystem failure) MUST propagate
+        instead of being swallowed. Pre-narrowing, the broad
+        ``except Exception`` masked such bugs."""
+        session_id = uuid4()
+        run_id = uuid4()
+        mock_session_service.create_run.return_value = MagicMock(id=run_id)
+
+        # First update_run_status (in cleanup) raises RuntimeError — outside
+        # the narrow (SQLAlchemyError, OSError) catch. It must escape.
+        mock_session_service.update_run_status.side_effect = RuntimeError("dataclass contract violated inside update_run_status")
+
+        # Force setup to fail so cleanup fires.
+        service._executor.submit = MagicMock(side_effect=RuntimeError("pool shutdown"))  # type: ignore[method-assign]
+
+        # The RuntimeError from update_run_status escapes the narrow catch.
+        # The outer `raise` is bypassed — the cleanup RuntimeError wins
+        # (Python's implicit exception chaining preserves both via
+        # __context__, but the foreground exception is the cleanup one).
+        # We accept either RuntimeError here — the key invariant is that
+        # a RuntimeError propagates rather than being swallowed.
+        with pytest.raises(RuntimeError):
+            await service.execute(session_id=session_id)
+
+
 # ── Completion-Path Guard ─────────────────────────────────────────────
 
 

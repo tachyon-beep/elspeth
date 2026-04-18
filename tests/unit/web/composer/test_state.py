@@ -2207,6 +2207,83 @@ class TestSchemaContractValidation:
         assert sink_contract.consumer_requires == ("body",)
         assert sink_contract.satisfied is False
 
+    def test_contract_probe_redacts_exception_detail_from_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Regression (P2c): the constructor-time exception message is the
+        plugin author's free-form text (plugin options, DSN fragments,
+        filesystem paths, occasionally a mis-typed secret) and MUST NOT
+        be surfaced to the preview response. The warning surfaced to the
+        composer UI carries only ``type(exc).__name__`` — the class name
+        is enough triage signal ("something about this plugin's config
+        is wrong") without leaking the option values through a Stage 1
+        preview endpoint.
+        """
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="mapper_in",
+                plugin="text",
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "map_body",
+                "mapper_in",
+                "main",
+                plugin="field_mapper",
+                options={
+                    "schema": {"mode": "observed"},
+                    "mapping": {"text": "body"},
+                },
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "map_body"))
+        state = state.with_edge(self._make_edge("e2", "map_body", "main"))
+
+        # A representative secret-bearing exception message: an API URL
+        # with a bearer token fragment, a DSN, and a filesystem path.
+        # Production constructors have raised all three shapes.
+        leaked_substrings = (
+            "Authorization: Bearer sk-SUPER-SECRET-TOKEN-123",
+            "postgres://admin:hunter2@db.internal:5432/prod",
+            "/home/appuser/.ssh/id_rsa",
+        )
+
+        class _LeakyManager:
+            def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
+                raise RuntimeError(f"plugin '{plugin_name}' failed to initialize: " + " | ".join(leaked_substrings))
+
+        monkeypatch.setattr(
+            "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
+            lambda: _LeakyManager(),
+        )
+
+        result = state.validate()
+
+        # The warning still fires (triage signal preserved).
+        probe_warnings = [w for w in result.warnings if "computed contract probe" in w.message.lower()]
+        assert probe_warnings, "Probe-failure warning must still be emitted"
+        # But none of the exception detail leaks into the message.
+        for warning in probe_warnings:
+            for leak in leaked_substrings:
+                assert leak not in warning.message, (
+                    f"Contract warning leaked plugin-option detail: {warning.message!r} "
+                    f"contained {leak!r}. str(exc) must be replaced with type(exc).__name__."
+                )
+            # And the class name IS present (triage surface intact).
+            assert "RuntimeError" in warning.message
+
     def test_text_heuristic_rescues_original_bug_scenario(self) -> None:
         """Reported text-source scenario passes via the shared observed-text rule."""
         state = self._empty_state()

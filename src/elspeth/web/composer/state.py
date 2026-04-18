@@ -648,15 +648,26 @@ def _check_schema_contracts(
             # Keep Stage 1 tolerant of partially configured draft nodes.
             # Constructor-time errors must not crash preview/export endpoints.
             # Fall back to the raw contract and surface one warning per node.
+            #
+            # REDACTED: ``str(exc)`` from plugin constructors can carry
+            # plugin option values (API URLs, file paths, DSN fragments,
+            # occasionally secrets if an option is mis-typed into a connection
+            # string), file system paths from credential-file readers, and
+            # arbitrary library text routed from third-party validators. The
+            # preview response surfaces these warnings directly to the
+            # composer UI, where they render into an unauthenticated-
+            # reachable error payload (preview is open to any logged-in
+            # session owner, not just operators with secret-read grants).
+            # Class name only — the triage signal ("something about this
+            # plugin's config is wrong") is preserved; detailed diagnosis
+            # belongs in server logs, not the UI warning list.
             if producer.producer_id not in contract_probe_failed_producers:
                 contract_probe_failed_producers.add(producer.producer_id)
-                detail = str(exc).strip()
-                suffix = f": {detail}" if detail else ""
                 contract_warnings.append(
                     _warn(
                         f"node:{producer.producer_id}",
                         f"Computed contract probe for node '{producer.producer_id}' failed during preview "
-                        f"({type(exc).__name__}{suffix}); falling back to raw schema declarations.",
+                        f"({type(exc).__name__}); falling back to raw schema declarations.",
                         "medium",
                     )
                 )

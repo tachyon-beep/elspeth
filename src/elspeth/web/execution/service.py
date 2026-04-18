@@ -418,16 +418,38 @@ class ExecutionServiceImpl:
                 self._shutdown_events.pop(str(run_id), None)
             # Transition run out of pending so the one-active-run constraint
             # doesn't permanently block this session.
+            #
+            # Narrow catch (canonical pattern, commits b8ba2214/127417cb):
+            # ``SQLAlchemyError`` covers every DB-layer failure mode
+            # (lock timeout, pool disconnect, deadlock, IntegrityError,
+            # OperationalError, ProgrammingError); ``OSError`` covers
+            # filesystem-adjacent failures routed through SQLAlchemy on
+            # SQLite (``database is locked`` is an OperationalError subclass
+            # of SQLAlchemyError, but a disk-full midway through a commit
+            # can surface as OSError before SQLAlchemy wraps it). Programmer
+            # bugs (AttributeError, TypeError, KeyError) from our own
+            # service code must propagate — a cleanup path masking a
+            # programmer bug is exactly the silent-wrong-result pattern
+            # CLAUDE.md forbids.
+            #
+            # ``exc_class`` only: ``str(cleanup_err)`` on SQLAlchemyError
+            # subclasses expands to ``[SQL: ...] [parameters: ...]`` and
+            # appends ``__cause__`` text that can carry DB URLs /
+            # credentials. ``str(exc)`` (the original) is similarly unsafe
+            # because the outer ``BaseException`` catch sweeps up anything
+            # including sanitizer bugs.  The client-facing message is
+            # already routed through ``_sanitize_error_for_client`` above;
+            # the slog must not re-expose the raw form.
             try:
                 await self._session_service.update_run_status(
                     run_id, status="failed", error=f"Setup failed: {_sanitize_error_for_client(exc)}"
                 )
-            except Exception as cleanup_err:
+            except (SQLAlchemyError, OSError) as cleanup_err:
                 slog.error(
                     "run_cleanup_status_update_failed",
                     run_id=str(run_id),
-                    original_error=str(exc),
-                    cleanup_error=str(cleanup_err),
+                    original_exc_class=type(exc).__name__,
+                    cleanup_exc_class=type(cleanup_err).__name__,
                 )
             raise
         # B7 Layer 2: safety net callback
@@ -846,12 +868,21 @@ class ExecutionServiceImpl:
             if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
                 try:
                     self._call_async(self._session_service.update_run_status(run_uuid, status="failed", error=client_msg))
-                except Exception as status_err:
+                except (SQLAlchemyError, OSError) as status_err:
+                    # Narrow catch (canonical pattern, commits b8ba2214/127417cb):
+                    # SQLAlchemyError family + OSError only. Programmer bugs in
+                    # update_run_status must propagate so they don't masquerade
+                    # as a transient status-update failure.  exc_class only —
+                    # ``str(status_err)`` can surface SQL + bound parameters +
+                    # ``__cause__`` credentials, and ``client_msg`` is already
+                    # the sanitized form of ``exc`` (see _sanitize_error_for_client
+                    # above), so re-logging it as ``original_error`` gives no
+                    # extra triage surface beyond the class name.
                     slog.error(
                         "run_status_update_failed_in_except",
                         run_id=run_id,
-                        original_error=client_msg,
-                        status_update_error=str(status_err),
+                        original_exc_class=type(exc).__name__,
+                        status_update_exc_class=type(status_err).__name__,
                     )
             else:
                 slog.warning(

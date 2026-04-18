@@ -391,6 +391,54 @@ class TestGetState:
             await service.get_state(uuid.uuid4())
 
 
+class TestGetStateInSession:
+    """Tests for get_state_in_session -- scoped read with Tier 1 invariant check.
+
+    Regression guard (P2f): list_session_runs resolves each run's
+    state_id without a session-scope check. Migration 007's composite FK
+    prevents future cross-session state refs at the schema layer, but
+    pre-007 orphans repaired with Variant-A (delete orphans) have no
+    runtime defense-in-depth. ``get_state_in_session`` is that
+    defense-in-depth.
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_record_when_session_matches(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        saved = await service.save_composition_state(
+            session.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
+        )
+        fetched = await service.get_state_in_session(saved.id, session.id)
+        assert fetched.id == saved.id
+        assert fetched.session_id == session.id
+
+    @pytest.mark.asyncio
+    async def test_raises_audit_integrity_error_on_session_mismatch(self, service) -> None:
+        """State belongs to session A, caller says it's in session B — Tier 1."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        session_a = await service.create_session("alice", "Pipeline A", "local")
+        session_b = await service.create_session("alice", "Pipeline B", "local")
+        state_in_a = await service.save_composition_state(
+            session_a.id,
+            CompositionStateData(source={"type": "csv"}, is_valid=True),
+        )
+        with pytest.raises(AuditIntegrityError, match="Tier 1 audit anomaly"):
+            await service.get_state_in_session(state_in_a.id, session_b.id)
+
+    @pytest.mark.asyncio
+    async def test_raises_value_error_when_state_missing(self, service) -> None:
+        """Nonexistent state_id must still raise ValueError, not AuditIntegrityError.
+
+        Absence is distinguishable from corruption — callers that map to
+        404 rely on the exception class to know which is which.
+        """
+        session = await service.create_session("alice", "Pipeline", "local")
+        with pytest.raises(ValueError, match="not found"):
+            await service.get_state_in_session(uuid.uuid4(), session.id)
+
+
 class TestSetActiveState:
     """Tests for set_active_state -- revert by copying a prior version."""
 

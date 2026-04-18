@@ -73,12 +73,12 @@ allow_hits:
   reason: Tier 3 boundary — JSON schema field 'default' is optional
   safety: Returns None; ConfigFieldSummary.default accepts None
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=8620d7134f519ede
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=bb52dabba9866ec6
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=9523314a8f3464b7
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=7889a4ddc822160d
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
@@ -289,9 +289,9 @@ allow_hits:
   reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
   safety: Missing iat returns None; no fabrication
   expires: null
-- key: web/composer/state.py:R4:_check_schema_contracts:_effective_producer_guarantees:fp=e56a7250850bfe5c
+- key: web/composer/state.py:R4:_check_schema_contracts:_effective_producer_guarantees:fp=94843730d080c42f
   owner: web-composer
-  reason: Composer preview probes plugin-computed output contracts for shape-changing transforms, but draft configs can fail during constructor setup for reasons outside schema parsing
+  reason: Composer preview probes plugin-computed output contracts for shape-changing transforms, but draft configs can fail during constructor setup for reasons outside schema parsing. The caught exception message is NOT surfaced to the UI — only type(exc).__name__ is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials, filesystem paths) via the preview response.
   safety: The exception is converted into a medium-severity warning and preview falls back to raw declared schema guarantees instead of crashing or fabricating a stronger contract
   expires: null
 - key: web/composer/state.py:R6:_check_schema_contracts:fp=8a79d1466f003a74
@@ -476,17 +476,17 @@ allow_hits:
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan blob_id and target session_id; storage file unlinked best-effort; primary copy exception remains the headline
   expires: null
-- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=2efca5290efd65c5
+- key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=2695aa4a742eae91
   owner: web-sessions
   reason: Type check for envelope format in composition state deserialization
   safety: Handles both raw and enveloped formats
   expires: null
-- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=342afe8184fa65d1
+- key: web/sessions/service.py:R6:SessionServiceImpl:save_composition_state:_sync:fp=698026777ed0a04c
   owner: web-sessions
   reason: IntegrityError on duplicate version is expected race condition
   safety: Upsert-or-skip
   expires: null
-- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=8b091d4f935591f4
+- key: web/sessions/service.py:R6:SessionServiceImpl:set_active_state:_sync:fp=e7ac75dd5f140dcc
   owner: web-sessions
   reason: IntegrityError on duplicate active state is expected race condition
   safety: Upsert-or-skip
@@ -516,9 +516,9 @@ allow_hits:
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_execute_locked:fp=d4715bcc0c537468
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_execute_locked:fp=908a39b3e67de538
   owner: web-execution
-  reason: Best-effort run status cleanup on setup failure — must not mask original exception
+  reason: Best-effort run status cleanup on setup failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb so programmer bugs in update_run_status propagate. Logs exc_class only (no str(exc)) to avoid SQLAlchemy `__cause__` chains exposing DB URLs/credentials.
   safety: Logged with slog.error; original exception always re-raised
   expires: null
 - key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=3cf81cd510666514
@@ -551,9 +551,9 @@ allow_hits:
   reason: Error classification — SecretResolutionError triggers safe message
   safety: Secret names not leaked to client
   expires: null
-- key: web/execution/service.py:R4:ExecutionServiceImpl:_run_pipeline:fp=58f0f602612b4b6f
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=441f1ebb41c04d86
   owner: web-execution
-  reason: Status update after pipeline failure — must not mask original exception
+  reason: Status update after pipeline failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb. Logs exc_class only (no str(status_err)) to avoid leaking SQL + bound parameters or `__cause__` text with DB credentials. The sanitized client_msg already reached the DB update call above, so the slog's exc_class is the complete triage surface.
   safety: Logged; original exception re-raised
   expires: null
 - key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=0ead0f9d12aab1d8
@@ -666,9 +666,21 @@ allow_hits:
   reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
   safety: Returns 422 with structured error, does not swallow
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=65f35ff21a6061fe
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=3d86a6af9a39356d
   owner: web-sessions
-  reason: Convergence partial-state save may fail — catch covers data-shape errors and the full SQLAlchemyError family (IntegrityError, OperationalError for lock timeout / pool disconnect, ProgrammingError for schema drift, and siblings). A narrow IntegrityError catch would let siblings escape and upgrade the structured 422 into an unstructured 500. exc_info stays omitted so SQLAlchemy __cause__ chains do not leak connection strings into structured server logs.
+  reason: >-
+    Convergence partial-state save may fail — catch covers the full
+    SQLAlchemyError family (IntegrityError, OperationalError for lock timeout
+    or pool disconnect, ProgrammingError for schema drift, and siblings). A
+    narrow IntegrityError catch would let siblings escape and upgrade the
+    structured 422 into an unstructured 500. Narrowed from the earlier
+    (ValueError, TypeError, KeyError, SQLAlchemyError) tuple per CLAUDE.md
+    Tier-1 semantics — to_dict() and CompositionStateData() run on our own
+    dataclass, so TypeError/KeyError from that block is a broken internal
+    invariant and must propagate as a 500 with traceback rather than be
+    laundered into partial_state_save_failed=True. exc_info stays omitted so
+    SQLAlchemy __cause__ chains do not leak connection strings into
+    structured server logs.
   safety: >-
     Returns 422 with structured error, sets partial_state_save_failed=True;
     does not swallow. Both the slog (exc_class=...) and the HTTP response
@@ -680,14 +692,26 @@ allow_hits:
     composition-state fields can surface source options / metadata
     (potential secret refs). Redaction is uniform across both channels.
   expires: null
-- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=42bcecb3459a48a4
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=16456c3839079643
   owner: web-sessions
   reason: Plugin-crash partial-state validation may fail on damaged LLM output — narrowed to data-shape errors (ValueError, TypeError, KeyError). Mirrors the convergence-error validate-guard; required because partial_state is captured mid-mutation and may be structurally inconsistent.
   safety: Returns 500 with structured error; logs exc_class and falls back to ValidationSummary(is_valid=False). Original plugin crash still propagates — validation-guard failure never masks the primary bug.
   expires: null
-- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=41e9e538629d759f
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=64d0417c14970b33
   owner: web-sessions
-  reason: Plugin-crash partial-state save may fail — catch covers data-shape errors and the full SQLAlchemyError family. A narrow IntegrityError catch would let OperationalError, ProgrammingError, and siblings escape and mask the redacted 500 plugin-crash response. Mirrors the convergence-error persist-guard.
+  reason: >-
+    Plugin-crash partial-state save may fail — catch covers the full
+    SQLAlchemyError family. A narrow IntegrityError catch would let
+    OperationalError, ProgrammingError, and siblings escape and mask the
+    redacted 500 plugin-crash response. Narrowed from the earlier
+    (ValueError, TypeError, KeyError, SQLAlchemyError) tuple per CLAUDE.md
+    Tier-1 semantics — to_dict() and CompositionStateData() operate on our
+    own dataclass, so TypeError/KeyError from that block is a broken
+    internal invariant and must propagate rather than be laundered into
+    partial_state_save_failed=True. Mirrors the convergence-error
+    persist-guard. On save failure, sets partial_state_save_failed=True on
+    the 500 response body for frontend recovery UX symmetry with
+    _handle_convergence_error.
   safety: Returns 500 with structured error; logs exc_class (no traceback, same redaction policy as the convergence path). Original plugin crash still propagates via the outer `raise HTTPException(...) from crash.original_exc`.
   expires: null
 - key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=36241754de850478
@@ -727,12 +751,12 @@ allow_hits:
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the generic except Exception path — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan sessions.id; bare `raise` preserves primary_exc and its original traceback as the headline (regression-tested by test_fork_cleanup_failure_preserves_primary_exception_with_note)
   expires: null
-- key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=09c474ed2cd0dc17
+- key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=17378531bc04d849
   owner: web-sessions
   reason: derived_from_map.get() on seed_id — seed may not exist in derived_from_map (states without derived_from parents)
   safety: Returns None, while-loop terminates naturally
   expires: null
-- key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=58437ca62984def1
+- key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=7414fdec789846ef
   owner: web-sessions
   reason: derived_from_map.get() traversing parent chain — parent may reference state outside session or not in map
   safety: Returns None, terminates transitive closure walk

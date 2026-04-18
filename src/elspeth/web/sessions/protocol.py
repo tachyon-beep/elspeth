@@ -239,6 +239,33 @@ class SessionServiceProtocol(Protocol):
 
     async def get_state(self, state_id: UUID) -> CompositionStateRecord: ...
 
+    async def get_state_in_session(
+        self,
+        state_id: UUID,
+        session_id: UUID,
+    ) -> CompositionStateRecord:
+        """Fetch a composition state with a session-scope invariant check.
+
+        Migration 007 added a composite FK ``(state_id, session_id)`` on
+        tables that reference ``composition_states``, which prevents
+        *future* cross-session state references at the schema layer. This
+        method is the runtime defence-in-depth for pre-007 rows repaired
+        with Variant-A (delete orphans) — and for any future code path
+        that acquires a ``state_id`` indirectly (e.g. via a
+        ``RunRecord.state_id`` carried through the fork lineage) and then
+        resolves it inside a session-scoped handler.
+
+        Implementations MUST raise ``AuditIntegrityError`` when the
+        resolved state's ``session_id`` does not match the caller-supplied
+        ``session_id``. That is a Tier 1 audit anomaly: the state was
+        reachable from a run but does not belong to the session hosting
+        the run. Silent coercion or a soft 404 would produce a confident
+        wrong answer — exactly the pattern CLAUDE.md forbids for our own
+        data. Raises ``ValueError`` when the state does not exist at all,
+        consistent with ``get_state``.
+        """
+        ...
+
     async def get_state_versions(
         self,
         session_id: UUID,

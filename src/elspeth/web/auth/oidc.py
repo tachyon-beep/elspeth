@@ -97,10 +97,30 @@ class JWKSTokenValidator:
         Only the single lock-holder pays the network cost per retry
         window — see elspeth-32982f17cf for the partial-DoS this
         prevents.
+
+        **Cold-start throttle:** with no cache, the stale-serve bypasses
+        cannot fire (they all gate on ``self._jwks is not None``). If the
+        IdP is down at cold start, every concurrent auth request would
+        otherwise serialize on the refresh lock and hit the httpx timeout
+        in turn. The cold-start throttle — advancing ``_next_refresh_at``
+        unconditionally on fetch failure and short-circuiting requests
+        while ``self._jwks is None and now < self._next_refresh_at`` —
+        means only the first request per retry window pays the network
+        cost, and the rest fail fast with 401 until the horizon passes.
         """
         now = time.time()
         if self._jwks is not None and now < self._next_refresh_at:
             return self._jwks
+
+        # Cold-start throttle fast-path: a prior fetch failed within the
+        # current retry window AND we have no cache to serve. Fail fast
+        # BEFORE touching the lock so cold-start traffic during an IdP
+        # outage is shed without queueing. The ``_next_refresh_at``
+        # timestamp is the single source of truth for "are we in a
+        # throttle window" — see the failure branches below for where
+        # it is advanced on both network and shape failures.
+        if self._jwks is None and now < self._next_refresh_at:
+            raise AuthenticationError("JWKS unavailable (cold-start fetch failed, retry throttled)")
 
         # Lock-decoupled stale-serve: if another coroutine is already
         # attempting a refresh and we have a cached (possibly stale) JWKS,
@@ -118,6 +138,14 @@ class JWKSTokenValidator:
             now = time.time()
             if self._jwks is not None and now < self._next_refresh_at:
                 return self._jwks
+
+            # Cold-start throttle inside lock: another coroutine's fetch
+            # may have failed while we were queued on the lock. Repeat
+            # the fail-fast check here so lock-queued cold-start requests
+            # don't re-hit the dead IdP when the first coroutine releases
+            # the lock after raising.
+            if self._jwks is None and now < self._next_refresh_at:
+                raise AuthenticationError("JWKS unavailable (cold-start fetch failed, retry throttled)")
 
             stale_jwks = self._jwks
             try:
@@ -163,13 +191,21 @@ class JWKSTokenValidator:
                 # gate does not trigger and the window only throttles the
                 # single-caller path; every caller still gets 401 until
                 # the IdP returns valid JSON.
-                if stale_jwks is not None:
-                    self._next_refresh_at = now + self._jwks_failure_retry_seconds
-                    slog.debug(
-                        "JWKS shape validation failed; throttling refresh",
-                        issuer=self._issuer,
-                        next_refresh_in_seconds=self._jwks_failure_retry_seconds,
-                    )
+                # Advance the horizon UNCONDITIONALLY (both warm and
+                # cold-start paths). Without this, a cold-start shape
+                # failure leaves ``_next_refresh_at`` at 0 and every
+                # queued coroutine re-hits the malformed IdP in
+                # succession. With the cold-start throttle fast-paths
+                # above, setting the horizon here lets all subsequent
+                # callers in the retry window fail fast at the top of
+                # ``ensure_jwks`` with a clean 401.
+                self._next_refresh_at = now + self._jwks_failure_retry_seconds
+                slog.debug(
+                    "JWKS shape validation failed; throttling refresh",
+                    issuer=self._issuer,
+                    has_stale_cache=stale_jwks is not None,
+                    next_refresh_in_seconds=self._jwks_failure_retry_seconds,
+                )
                 raise
             except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
                 # Narrowed from the historical (HTTPError, KeyError, ValueError,
@@ -203,9 +239,19 @@ class JWKSTokenValidator:
                 #   - ValueError: covers json.JSONDecodeError and
                 #     UnicodeDecodeError from response.json() when the
                 #     IdP returns non-JSON or mis-encoded bytes.
+                # Advance the horizon UNCONDITIONALLY (both stale-serve
+                # and cold-start paths). The original code only advanced
+                # when ``stale_jwks is not None`` — cold-start outages
+                # therefore left ``_next_refresh_at`` at 0 and every
+                # concurrent auth request serialized on ``self._jwks_lock``
+                # through a full httpx timeout apiece, which is the
+                # documented-but-live DoS vector the cold-start throttle
+                # (above) was added to close. Writing the horizon here is
+                # the same source-of-truth update that makes the
+                # fast-paths at the top of ``ensure_jwks`` fire.
+                self._next_refresh_at = now + self._jwks_failure_retry_seconds
                 if stale_jwks is not None:
                     # Serve stale cache -- JWKS keys are long-lived
-                    self._next_refresh_at = now + self._jwks_failure_retry_seconds
                     slog.debug(
                         "JWKS fetch failed, serving stale cache",
                         issuer=self._issuer,
@@ -213,6 +259,12 @@ class JWKSTokenValidator:
                         next_refresh_in_seconds=self._jwks_failure_retry_seconds,
                     )
                     return stale_jwks
+                slog.debug(
+                    "JWKS cold-start fetch failed; throttling retry",
+                    issuer=self._issuer,
+                    error=str(exc),
+                    next_refresh_in_seconds=self._jwks_failure_retry_seconds,
+                )
                 raise AuthenticationError(f"Failed to fetch JWKS: {exc}") from exc
 
         return self._jwks
