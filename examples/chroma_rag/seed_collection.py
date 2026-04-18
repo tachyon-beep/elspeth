@@ -135,7 +135,7 @@ def main() -> None:
     client = chromadb.PersistentClient(path=PERSIST_DIR)
 
     # Delete collection if it exists (clean seed)
-    with contextlib.suppress(ValueError):
+    with contextlib.suppress(ValueError, chromadb.errors.NotFoundError):
         client.delete_collection(COLLECTION_NAME)
 
     collection = client.get_or_create_collection(
