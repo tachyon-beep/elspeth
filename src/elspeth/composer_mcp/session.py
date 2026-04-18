@@ -10,11 +10,53 @@ Layer: L3 (application). Imports from L3 (web.composer.state).
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
 
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
+
+# Tier-3 boundary: session_id arrives as an LLM-controlled MCP argument.
+# The valid shape is the output of ``new_session`` — ``uuid.uuid4().hex[:12]``
+# — a 12-character lowercase hex string. Anything else is either a client
+# bug or a path-traversal attempt; either way, reject at the boundary
+# rather than coerce (silent coercion would re-point the agent's intended
+# session to a different file, a meaning-changing operation).
+_SESSION_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+
+
+class InvalidSessionIdError(ValueError):
+    """Raised when a session_id does not match the allowed shape.
+
+    Subclasses ``ValueError`` so the MCP server's existing ``except
+    (ValueError, KeyError, TypeError)`` handler at ``server.py`` surfaces
+    it as a clean ``isError=True`` tool response without a stack trace.
+    """
+
+    def __init__(self, session_id: str) -> None:
+        # The message echoes only the caller-supplied value — never a
+        # server-side filesystem path — so no information is leaked back
+        # to the LLM that it didn't already provide.
+        super().__init__(f"Invalid session_id: {session_id!r}")
+        self.session_id = session_id
+
+
+def _validate_session_id(session_id: str) -> None:
+    """Enforce the session_id shape at the filesystem boundary.
+
+    Called from ``_session_path`` so every read/write/delete path inherits
+    the guard automatically — a future method that calls ``_session_path``
+    cannot accidentally bypass validation.
+
+    The MCP tool schema declares ``session_id`` as ``"type": "string"``,
+    so non-str inputs are a contract violation, not an attack. If one
+    slips through, ``re.Pattern.fullmatch`` raises ``TypeError`` which
+    the server's top-level handler converts to a clean tool error —
+    equivalent security outcome, one fewer defensive branch.
+    """
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        raise InvalidSessionIdError(session_id)
 
 
 class SessionNotFoundError(Exception):
@@ -88,4 +130,7 @@ class SessionManager:
         return sessions
 
     def _session_path(self, session_id: str) -> Path:
+        # Chokepoint guard — every filesystem-touching method (save, load,
+        # delete) routes here, so validating once covers all three.
+        _validate_session_id(session_id)
         return self._dir / f"{session_id}.json"
