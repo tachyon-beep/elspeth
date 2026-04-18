@@ -231,7 +231,18 @@ class ComposerServiceImpl:
             # migration: elspeth-23b0987938).
             if self._session_engine is not None and session_id is not None:
                 try:
-                    self._persist_crashed_session(session_id)
+                    # Offload to the thread pool — _persist_crashed_session
+                    # executes a synchronous SQLAlchemy ``Engine.begin()``
+                    # + UPDATE, which would otherwise block the event
+                    # loop for the duration of the DB round-trip,
+                    # stalling websocket heartbeats, rate-limit checks,
+                    # and concurrent progress broadcasts. Symmetric with
+                    # the execute_tool offload at the top of
+                    # _compose_loop: every other sync DB path in this
+                    # file runs through asyncio.to_thread, and this
+                    # crash-path call was missed when it was hoisted
+                    # out of the main loop.
+                    await asyncio.to_thread(self._persist_crashed_session, session_id)
                 except (SQLAlchemyError, OSError) as audit_failure:
                     # Audit-persistence is best-effort on the crash path —
                     # failure to persist MUST NOT mask the original plugin

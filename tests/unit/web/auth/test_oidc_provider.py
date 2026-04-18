@@ -860,6 +860,252 @@ class TestOIDCConcurrentStaleDuringOutage:
             )
 
 
+class TestOIDCStaleCacheDoesNotLaunderProgrammerBugs:
+    """Bugs in the JWKS fetch block must NOT be absorbed by the stale-cache
+    fallback.
+
+    After the shape validators (_validate_discovery_document,
+    _validate_jwks_document) were added, the discovery/JWKS happy path
+    cannot produce TypeError/AttributeError/KeyError from the response
+    payloads — those shapes are enforced at the Tier 3 boundary as
+    AuthenticationError. Any TypeError/AttributeError/KeyError that
+    escapes the happy path is therefore a programmer bug in code we
+    control, and must surface (per CLAUDE.md's offensive-programming
+    doctrine) rather than silently produce a confident-but-wrong auth
+    decision against stale keys.
+    """
+
+    @pytest.mark.asyncio
+    async def test_attribute_error_propagates_does_not_serve_stale(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """An AttributeError raised inside the fetch block must propagate,
+        NOT be laundered into a stale-cache fallback.
+
+        This pins the narrowed catch in JWKSTokenValidator.ensure_jwks:
+        a future regression that re-widens the catch (e.g., "catch
+        everything so auth never breaks") would serve stale keys while
+        masking the underlying programmer bug.
+        """
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # Seed the cache with a successful fetch so there IS a stale
+        # payload available — the test proves the fallback is not taken.
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        async def buggy_get(url, **kwargs):
+            raise AttributeError("'NoneType' object has no attribute 'json'")
+
+        buggy_client = AsyncMock()
+        buggy_client.get = buggy_get
+        buggy_client.__aenter__ = AsyncMock(return_value=buggy_client)
+        buggy_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=buggy_client,
+            ),
+            pytest.raises(AttributeError, match="NoneType"),
+        ):
+            await provider.authenticate(token)
+
+    @pytest.mark.asyncio
+    async def test_type_error_propagates_does_not_serve_stale(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """A TypeError raised inside the fetch block must propagate."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        async def buggy_get(url, **kwargs):
+            raise TypeError("unsupported operand type(s) for +: 'NoneType' and 'float'")
+
+        buggy_client = AsyncMock()
+        buggy_client.get = buggy_get
+        buggy_client.__aenter__ = AsyncMock(return_value=buggy_client)
+        buggy_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=buggy_client,
+            ),
+            pytest.raises(TypeError, match="unsupported operand"),
+        ):
+            await provider.authenticate(token)
+
+    @pytest.mark.asyncio
+    async def test_key_error_propagates_does_not_serve_stale(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """A KeyError raised inside the fetch block must propagate.
+
+        Post-shape-validation, no KeyError can arise from IdP payload
+        access (the validators use .get() and isinstance() only). Any
+        KeyError is a bug in code we control.
+        """
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        async def buggy_get(url, **kwargs):
+            raise KeyError("internal_dict_lookup_bug")
+
+        buggy_client = AsyncMock()
+        buggy_client.get = buggy_get
+        buggy_client.__aenter__ = AsyncMock(return_value=buggy_client)
+        buggy_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "elspeth.web.auth.oidc.httpx.AsyncClient",
+                return_value=buggy_client,
+            ),
+            pytest.raises(KeyError, match="internal_dict_lookup_bug"),
+        ):
+            await provider.authenticate(token)
+
+    @pytest.mark.asyncio
+    async def test_httpx_error_still_serves_stale(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """Post-narrowing, IdP outage (httpx.HTTPError) still falls back
+        to stale cache. Pins that the narrowing did not accidentally
+        remove the legitimate Tier 3 handling."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        async def outage_get(url, **kwargs):
+            raise httpx.ConnectError("IdP is down")
+
+        outage_client = AsyncMock()
+        outage_client.get = outage_get
+        outage_client.__aenter__ = AsyncMock(return_value=outage_client)
+        outage_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "elspeth.web.auth.oidc.httpx.AsyncClient",
+            return_value=outage_client,
+        ):
+            identity = await provider.authenticate(token)
+            assert identity.user_id == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_malformed_json_still_serves_stale(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """json.JSONDecodeError (a ValueError subclass) from response.json()
+        is a Tier 3 boundary failure — IdP returned non-JSON bytes — and
+        must still fall through to stale cache, not crash."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        async def malformed_get(url, **kwargs):
+            response = MagicMock()
+            response.raise_for_status = lambda: None
+            response.json.side_effect = ValueError("No JSON object could be decoded")
+            return response
+
+        malformed_client = AsyncMock()
+        malformed_client.get = malformed_get
+        malformed_client.__aenter__ = AsyncMock(return_value=malformed_client)
+        malformed_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "elspeth.web.auth.oidc.httpx.AsyncClient",
+            return_value=malformed_client,
+        ):
+            identity = await provider.authenticate(token)
+            assert identity.user_id == "user-123"
+
+    @pytest.mark.asyncio
+    async def test_invalid_url_from_idp_still_serves_stale(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """httpx.InvalidURL (NOT a subclass of httpx.HTTPError) is a
+        Tier 3 boundary failure — the IdP returned a structurally-valid
+        string for jwks_uri that cannot be parsed as a URL. Stale cache
+        must still be served; the narrowed catch must explicitly name
+        InvalidURL because it sits outside the HTTPError hierarchy.
+        """
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        async def invalid_url_get(url, **kwargs):
+            raise httpx.InvalidURL("not a valid URL")
+
+        invalid_url_client = AsyncMock()
+        invalid_url_client.get = invalid_url_get
+        invalid_url_client.__aenter__ = AsyncMock(return_value=invalid_url_client)
+        invalid_url_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch(
+            "elspeth.web.auth.oidc.httpx.AsyncClient",
+            return_value=invalid_url_client,
+        ):
+            identity = await provider.authenticate(token)
+            assert identity.user_id == "user-123"
+
+
 class TestOIDCProtocolConformance:
     """Verify OIDCAuthProvider satisfies the AuthProvider protocol."""
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from elspeth.contracts.secrets import ResolvedSecret, SecretInventoryItem
+from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.user_store import UserSecretStore
 
@@ -49,18 +50,31 @@ class WebSecretService:
 
         Returns None for missing secrets — callers (resolve_secret_refs in
         core/secrets.py) batch all missing refs and raise SecretResolutionError.
+
+        TOCTOU note: the has_*/get_* sequence below opens several independent
+        database reads (and independent env-var reads on the server path).
+        A concurrent ``DELETE /api/secrets/{name}`` or env-var clear landing
+        between the has-check and the get-call can make get_secret raise
+        ``SecretNotFoundError`` even though the has-check saw the row/value.
+        The outer catch translates that race into ``None`` so the ``Returns
+        None for missing`` contract holds — otherwise the error propagates
+        to resolve_secret_refs as an HTTP 500 instead of being aggregated
+        as a missing ref.
         """
-        # User scope first
-        if self._user_store.has_secret_record(name, user_id=user_id, auth_provider_type=auth_provider_type):
-            if not self._user_store.has_secret(name, user_id=user_id, auth_provider_type=auth_provider_type):
+        try:
+            # User scope first
+            if self._user_store.has_secret_record(name, user_id=user_id, auth_provider_type=auth_provider_type):
+                if not self._user_store.has_secret(name, user_id=user_id, auth_provider_type=auth_provider_type):
+                    return None
+                value, ref = self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
+                return ResolvedSecret(name=name, value=value, scope="user", fingerprint=ref.fingerprint)
+            # Server fallback
+            if not self._server_store.has_secret(name):
                 return None
-            value, ref = self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
-            return ResolvedSecret(name=name, value=value, scope="user", fingerprint=ref.fingerprint)
-        # Server fallback
-        if not self._server_store.has_secret(name):
+            value, ref = self._server_store.get_secret(name)
+            return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
+        except SecretNotFoundError:
             return None
-        value, ref = self._server_store.get_secret(name)
-        return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
 
     # -- REST API helpers (not part of WebSecretResolver) --------------------
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import sqlalchemy as sa
 
@@ -426,6 +428,72 @@ class TestHasRefResolveInvariant:
 
         assert service.has_ref("u1", "ELSPETH_FOO", auth_provider_type="local") is False
         assert service.resolve("u1", "ELSPETH_FOO", auth_provider_type="local") is None
+
+    def test_resolve_returns_none_when_user_secret_deleted_between_has_and_get(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """Regression for the TOCTOU race in WebSecretService.resolve.
+
+        The LBYL pattern opens three separate DB connections
+        (has_secret_record → has_secret → get_secret). A concurrent
+        DELETE /api/secrets/{name} landing between has_secret and
+        get_secret causes get_secret to raise SecretNotFoundError,
+        which the old resolve() did not catch — so it propagated out
+        to resolve_secret_refs and became an HTTP 500 instead of being
+        aggregated as a missing ref.
+
+        The docstring contract ``Returns None for missing secrets`` is
+        load-bearing for the pipeline-validation missing_refs walk; this
+        test pins that the race window no longer violates that contract.
+        """
+        user_store.set_secret("RACE", value="v", user_id="u1", auth_provider_type="local")
+
+        original_has_secret = user_store.has_secret
+
+        def has_secret_then_delete(*args: object, **kwargs: object) -> bool:
+            result = original_has_secret(*args, **kwargs)  # type: ignore[arg-type]
+            # Simulate a concurrent DELETE landing in the TOCTOU window:
+            # the row still existed when has_secret ran, but vanishes
+            # before get_secret runs.
+            user_store.delete_secret("RACE", user_id="u1", auth_provider_type="local")
+            return result
+
+        with patch.object(user_store, "has_secret", side_effect=has_secret_then_delete):
+            result = service.resolve("u1", "RACE", auth_provider_type="local")
+
+        assert result is None
+
+    def test_resolve_returns_none_when_server_env_cleared_between_has_and_get(
+        self,
+        service: WebSecretService,
+        server_store: ServerSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Server-scope symmetric TOCTOU race: env var cleared between
+        has_secret and get_secret.
+
+        The server store path in resolve() has the same LBYL shape as
+        the user path — has_secret then get_secret, each reading the
+        env vars independently. An operator un-setting the env var
+        between the two reads (or a concurrent monkeypatch in a parallel
+        test) turns what should be ``None`` into a SecretNotFoundError
+        escape. The resolve() contract must hold on this path too.
+        """
+        monkeypatch.setenv("TEST_KEY", "server-val")
+
+        original_has_secret = server_store.has_secret
+
+        def has_secret_then_clear(name: str) -> bool:
+            result = original_has_secret(name)
+            monkeypatch.delenv("TEST_KEY", raising=False)
+            return result
+
+        with patch.object(server_store, "has_secret", side_effect=has_secret_then_clear):
+            result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
+
+        assert result is None
 
     def test_unresolvable_user_secret_shadows_server_secret_of_same_name(
         self,

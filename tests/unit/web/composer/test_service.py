@@ -1845,6 +1845,79 @@ class TestPluginCrashSessionPersistence:
         persistence_failure_events = [entry for entry in cap_logs if entry.get("event") == "composer_crash_persistence_failed"]
         assert persistence_failure_events == [], cap_logs
 
+    @pytest.mark.asyncio
+    async def test_persist_crashed_session_runs_off_event_loop(self) -> None:
+        """_persist_crashed_session must execute in a worker thread, not
+        on the event loop thread.
+
+        The method performs a synchronous ``Engine.begin()`` + UPDATE,
+        which holds the GIL and (more importantly) blocks the asyncio
+        event loop for the duration of the DB round-trip. Every other
+        sync DB path in the compose flow is already wrapped in
+        ``asyncio.to_thread(...)``; the crash-path persistence was
+        hoisted out of the main loop but not wrapped.
+
+        Blast radius: a stalled persist blocks websocket heartbeats,
+        rate-limit checks, and the per-session progress broadcasts for
+        every concurrent request. Cold path, but the partial DoS
+        matches the same class of regression that the tool-execution
+        offloading test already guards against.
+        """
+        import threading
+
+        catalog = _mock_catalog()
+        settings = _make_settings(data_dir=self.data_dir)
+        service = ComposerServiceImpl(
+            catalog=catalog,
+            settings=settings,
+            session_engine=self.engine,
+        )
+        state = _empty_state()
+
+        event_loop_thread = threading.current_thread()
+        persist_thread: threading.Thread | None = None
+
+        original_persist = service._persist_crashed_session
+
+        def capture_thread(session_id: str) -> None:
+            nonlocal persist_thread
+            persist_thread = threading.current_thread()
+            original_persist(session_id)
+
+        valid_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                side_effect=ValueError("plugin bug"),
+            ),
+            patch.object(service, "_persist_crashed_session", side_effect=capture_thread),
+        ):
+            mock_llm.return_value = valid_call
+            with pytest.raises(ComposerPluginCrashError):
+                await service.compose("Setup", [], state, session_id=self.session_id)
+
+        assert persist_thread is not None, "_persist_crashed_session was never called"
+        assert persist_thread is not event_loop_thread, (
+            "_persist_crashed_session ran on the event loop thread — "
+            "the synchronous Engine.begin() call blocks all concurrent "
+            "requests. It must be offloaded via asyncio.to_thread(...)"
+        )
+
 
 class TestToolExecutionThreadOffloading:
     """execute_tool() must run in a worker thread, not the event loop thread.

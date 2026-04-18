@@ -140,7 +140,38 @@ class JWKSTokenValidator:
                 # different failure mode than a network blip and should
                 # surface as a clean 401, not a silent fallback.
                 raise
-            except (httpx.HTTPError, KeyError, ValueError, TypeError, AttributeError) as exc:
+            except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+                # Narrowed from the historical (HTTPError, KeyError, ValueError,
+                # TypeError, AttributeError) catch so that programmer-bug
+                # exceptions no longer launder into a stale-cache fallback.
+                #
+                # After the shape validators (_validate_discovery_document,
+                # _validate_jwks_document) were added, IdP payload access at
+                # this Tier 3 boundary cannot produce KeyError / TypeError /
+                # AttributeError on the happy path — those shapes are
+                # rejected upstream as AuthenticationError. Anything in
+                # those classes reaching this catch would therefore be a
+                # bug in the surrounding try block, and suppressing it to
+                # serve stale keys would produce a confident-but-wrong
+                # auth decision (CLAUDE.md's "silent wrong result is worse
+                # than a crash" rule).
+                #
+                # The remaining catches preserve the legitimate Tier 3
+                # failure modes that must serve stale cache:
+                #   - httpx.HTTPError: connect/read timeouts, HTTP 5xx from
+                #     the IdP, transport errors. Base class of
+                #     RequestError / TransportError / ConnectError /
+                #     TimeoutException / HTTPStatusError (raised by
+                #     response.raise_for_status()).
+                #   - httpx.InvalidURL: explicitly named because it sits
+                #     OUTSIDE the HTTPError hierarchy (direct Exception
+                #     subclass). Fires when jwks_uri is a non-empty string
+                #     but not a parseable URL — the shape validator only
+                #     checks the string-ness, not URL syntax, so the IdP
+                #     can still feed us junk here.
+                #   - ValueError: covers json.JSONDecodeError and
+                #     UnicodeDecodeError from response.json() when the
+                #     IdP returns non-JSON or mis-encoded bytes.
                 if stale_jwks is not None:
                     # Serve stale cache -- JWKS keys are long-lived
                     self._next_refresh_at = now + self._jwks_failure_retry_seconds

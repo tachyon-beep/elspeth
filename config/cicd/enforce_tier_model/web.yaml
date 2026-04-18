@@ -378,6 +378,30 @@ allow_hits:
   reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
   safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
   expires: null
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=56fbd0a189e9caf9
+  owner: web-secrets
+  reason: |
+    TOCTOU boundary — resolve() runs has-check and get-call across multiple
+    independent DB connections (user path) or env-var reads (server path).
+    A concurrent DELETE /api/secrets/{name} or env-var clear landing in the
+    race window makes get_secret raise SecretNotFoundError even though the
+    has-check saw the row/value. The documented contract is "Returns None
+    for missing secrets" — the caller (resolve_secret_refs in
+    core/secrets.py) aggregates missing refs and translates them into a
+    SecretResolutionError at batch boundary. Letting SecretNotFoundError
+    escape from resolve() propagates as HTTP 500 instead of the intended
+    aggregated missing-ref error, violating the contract load-bearing for
+    /api/secrets/validate and composer wire-secret-ref probes.
+  safety: |
+    Exception is converted into None only for the narrow SecretNotFoundError
+    class; other exception classes (SQLAlchemyError, OSError, RuntimeError
+    from fingerprint computation, etc.) continue to propagate. The None
+    return is behaviorally identical to the LBYL-miss branches above it,
+    which callers already handle as "ref absent at this scope" in the
+    missing-ref aggregation. Regression coverage:
+    TestHasRefResolveInvariant.test_resolve_returns_none_when_user_secret_deleted_between_has_and_get
+    and test_resolve_returns_none_when_server_env_cleared_between_has_and_get.
+  expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
   owner: web-execution
   reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in recursive config traversal
