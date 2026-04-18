@@ -763,6 +763,57 @@ class TestBuildMessages:
         assert msgs1 is not msgs2  # different list objects
         assert msgs1 == msgs2  # same content
 
+    @pytest.mark.asyncio
+    async def test_build_messages_oserror_redacts_filename(self) -> None:
+        """OSError from deployment-skill loading MUST NOT leak its filename.
+
+        ``str(OSError)`` expands to "[Errno N] <strerror>: '<absolute
+        path>'".  That filename reveals the operator's data-dir layout
+        and — when the deployment skill lives under a user-scoped
+        subdirectory — the user identifier itself.  The wrapper
+        ``ComposerServiceError`` flows into the 502 response body in
+        ``sessions/routes.py::send_message`` and ``recompose``, so the
+        message MUST contain only the exception class name.
+
+        This test pins the redaction contract: the ``str(exc)`` of the
+        raised ``ComposerServiceError`` contains no substring of the
+        provoking OSError's filename or its strerror text.  Mirrors
+        the regression assertion added by commit 1a30d985 for the
+        SQLAlchemy-family 422 path.
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        secret_path = "/var/lib/elspeth/users/alice/skills/secret-deployment.md"
+
+        def _raise_oserror(*_args: object, **_kwargs: object) -> list[dict[str, Any]]:
+            raise PermissionError(13, "Permission denied", secret_path)
+
+        with (
+            patch("elspeth.web.composer.service.build_messages", side_effect=_raise_oserror),
+            pytest.raises(ComposerServiceError) as excinfo,
+        ):
+            service._build_messages([], state, "Hi")
+
+        body = str(excinfo.value)
+        # The filename MUST NOT appear in the wrapper message. Test
+        # against the full path AND its directory fragments, because
+        # partial leaks (e.g. "/var/lib/elspeth/users/alice") are just
+        # as damaging as the full path.
+        assert secret_path not in body
+        assert "alice" not in body
+        assert "Permission denied" not in body
+        # The class name IS part of the safe surface — operators
+        # reading the 502 still need to distinguish PermissionError
+        # from IsADirectoryError from FileNotFoundError.
+        assert "PermissionError" in body
+        # __cause__ preservation: full detail reaches server-side
+        # machinery even though the HTTP body is redacted.
+        assert isinstance(excinfo.value.__cause__, PermissionError)
+        assert excinfo.value.__cause__.filename == secret_path
+
 
 class TestComposerMultipleToolCallsPerTurn:
     @pytest.mark.asyncio

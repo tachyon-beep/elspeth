@@ -25,9 +25,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSo
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider
+from elspeth.web.blobs.protocol import BlobNotFoundError
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
-from elspeth.web.execution.protocol import ExecutionService
+from elspeth.web.execution.protocol import ExecutionService, StateAccessError
 from elspeth.web.execution.schemas import (
     RUN_STATUS_NON_TERMINAL_VALUES,
     CancelledData,
@@ -140,8 +141,34 @@ def create_execution_router() -> APIRouter:
         await _verify_session_ownership(session_id, user, request)
         try:
             run_id = await service.execute(session_id, state_id, user_id=user.user_id)
+        except StateAccessError:
+            # IDOR contract: the "state does not exist" and
+            # "state belongs to another session" branches in the
+            # service MUST surface here as byte-identical 404
+            # responses.  Distinguishable ``detail`` strings would
+            # let an authenticated attacker probe arbitrary UUIDs
+            # against their own /execute and learn which ones exist
+            # in OTHER users' sessions — the same oracle commit
+            # e73a921a closed on ``send_message``.  If a future
+            # refactor needs diagnostic precision, route it through
+            # server-side audit/telemetry, never through the HTTP
+            # response body.
+            raise HTTPException(status_code=404, detail="State not found") from None
+        except BlobNotFoundError:
+            # IDOR contract (mirrors StateAccessError above): the
+            # nonexistent-blob and cross-session-blob branches MUST
+            # surface here as byte-identical 404 responses.  Before
+            # this handler existed, nonexistent-blob propagated as a
+            # 500 while cross-session-blob returned a 404 — the HTTP
+            # status itself was a side channel.
+            raise HTTPException(status_code=404, detail="Blob not found") from None
         except ValueError as exc:
-            # get_state() raises ValueError for unknown/stale state IDs
+            # Remaining ValueError sources are non-IDOR: the user's
+            # OWN session having no composition state (when state_id
+            # is None), source/sink path-allowlist rejections that
+            # echo the caller's own input, and UUID parse errors on
+            # malformed blob_ref strings.  These are not cross-user
+            # oracles, so the diagnostic body is kept.
             raise HTTPException(status_code=404, detail=str(exc)) from None
         return {"run_id": str(run_id)}
 

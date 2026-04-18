@@ -1068,7 +1068,21 @@ class TestBlobOwnership:
         service: ExecutionServiceImpl,
         mock_session_service: MagicMock,
     ) -> None:
-        """Blob belonging to a different session is rejected."""
+        """Cross-session blob_ref raises ``BlobNotFoundError`` (IDOR collapse).
+
+        The exception type is load-bearing: the route handler relies
+        on cross-session and nonexistent blobs BOTH surfacing as
+        ``BlobNotFoundError`` so they produce byte-identical 404
+        responses.  Earlier this branch raised ``ValueError`` with a
+        "does not belong to session" message — a distinguishable
+        body AND a distinguishable status (404 vs the 500 that an
+        uncaught ``BlobNotFoundError`` produced for the nonexistent
+        case).  Do not revert to ``ValueError`` or add a specialised
+        subclass without also updating the route handler in
+        lockstep.
+        """
+        from elspeth.web.blobs.protocol import BlobNotFoundError
+
         executing_session_id = uuid4()
         other_session_id = uuid4()
         blob_ref = str(uuid4())
@@ -1086,7 +1100,7 @@ class TestBlobOwnership:
             "on_validation_failure": "quarantine",
         }
 
-        with pytest.raises(ValueError, match="does not belong to session"):
+        with pytest.raises(BlobNotFoundError):
             await service.execute(session_id=executing_session_id)
 
         # Critical: create_run was never called (rejected before run creation)
@@ -1771,7 +1785,7 @@ class TestFinalizeOutputBlobsCatchWidening:
         from elspeth.web.blobs.protocol import BlobQuotaExceededError
 
         blob_service = MagicMock()
-        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=BlobQuotaExceededError("sess-1", 100, 50))
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=BlobQuotaExceededError("sess-1", current_bytes=100, limit_bytes=50))
         svc = self._make_service_with_blob(blob_service, mock_settings, mock_session_service)
         svc._finalize_output_blobs(str(uuid4()), success=True)
 

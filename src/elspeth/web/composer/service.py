@@ -630,6 +630,18 @@ class ComposerServiceImpl:
         OSError from deployment skill loading (PermissionError,
         IsADirectoryError) is translated into ComposerServiceError so
         the route handler returns a structured 502 rather than a raw 500.
+
+        The HTTP body carries only ``type(exc).__name__`` — NOT
+        ``str(exc)`` — because ``OSError.__str__`` expands to a string
+        that includes the absolute filename (``[Errno 13] Permission
+        denied: '/var/lib/elspeth/data/skills/...'``) which would
+        leak filesystem layout and the operator's data-dir path into
+        the 502 response body.  Full detail including the filename is
+        preserved via ``raise ... from exc`` for the ASGI / server-log
+        machinery only.  Mirrors the redaction contract landed by
+        commits 1a30d985 (SQLAlchemy 422 path) and 127417cb (sibling
+        HTTP-path slog sites) — both narrow the HTTP surface to
+        class-name-only while preserving structured server-side detail.
         """
         try:
             return build_messages(
@@ -640,7 +652,7 @@ class ComposerServiceImpl:
                 data_dir=self._data_dir,
             )
         except OSError as exc:
-            raise ComposerServiceError(f"Failed to load deployment skill: {exc}") from exc
+            raise ComposerServiceError(f"Failed to load deployment skill ({type(exc).__name__})") from exc
 
     def _get_litellm_tools(self) -> list[dict[str, Any]]:
         """Convert tool definitions to LiteLLM function format."""

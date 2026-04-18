@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, Protocol, get_args, runtime_checkable
+from typing import ClassVar, Literal, Protocol, get_args, runtime_checkable
 from uuid import UUID
 
 from elspeth.contracts.freeze import freeze_fields
@@ -103,15 +103,68 @@ class BlobRunLinkRecord:
     direction: BlobRunLinkDirection
 
 
+# ─── Blob exception family ───────────────────────────────────────────
+#
+# Pattern parity with ``elspeth.web.composer.protocol.ComposerServiceError``
+# and siblings: every declared attribute is frozen after construction
+# via ``_FROZEN_ATTRS`` + ``__setattr__`` override, matching the
+# commit-landed contract in the composer family (see composer/protocol.py
+# for the full rationale block).  Why apply it here: these exception
+# instances flow into HTTP response bodies (404/409/413/500) and into
+# structured audit/telemetry emission sites; allowing post-construction
+# reassignment would let any intermediate layer silently rewrite what
+# downstream consumers see.
+#
+# Divergence from composer family — NO ``capture()`` classmethod:
+# the composer classes use ``capture()`` to encapsulate a derivation
+# rule (``partial_state = state if state.version > initial_version
+# else None``) as a single source of truth across raise sites.  Blob
+# exceptions have no such rule — every attribute is an input from the
+# raise site, not derived from surrounding scope.  Adding a pro-forma
+# ``capture()`` here would be ceremony without purpose.  If a future
+# blob exception grows a real derivation rule, introduce ``capture()``
+# at that point so the rule has one home.
+#
+# Identity args (``blob_id``, ``session_id``) are positional; secondary
+# payload args (``run_id``, byte counts, hashes, message text) are
+# keyword-only.  This matches the composer pattern's split and makes
+# raise sites self-documenting — operators scanning ``raise
+# BlobActiveRunError(blob_id, run_id=run)`` immediately see which
+# identifier is the subject and which is the context.
+
+
+def _guard_frozen_attr(instance: Exception, name: str, value: object) -> None:
+    """Shared freeze-guard helper for the blob exception family.
+
+    Exception-chain dunders (``__cause__``, ``__context__``,
+    ``__suppress_context__``, ``__traceback__``, ``__notes__``) remain
+    writable so ``raise ... from ...`` and ``add_note()`` continue to
+    work.  First-time write during ``__init__`` is allowed; subsequent
+    reassignment raises.
+    """
+    frozen: frozenset[str] = type(instance)._FROZEN_ATTRS  # type: ignore[attr-defined]
+    if name in frozen and name in instance.__dict__:
+        raise AttributeError(
+            f"{type(instance).__name__}.{name} is frozen after construction; "
+            "exception attributes flow into HTTP responses and audit telemetry."
+        )
+    Exception.__setattr__(instance, name, value)
+
+
 class BlobNotFoundError(Exception):
     """Raised when a blob lookup fails.
 
     Route handlers catching this error should return 404.
     """
 
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"blob_id"})
+
     def __init__(self, blob_id: str) -> None:
-        self.blob_id = blob_id
         super().__init__(f"Blob {blob_id} not found")
+        self.blob_id = blob_id
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _guard_frozen_attr(self, name, value)
 
 
 class BlobActiveRunError(Exception):
@@ -120,10 +173,15 @@ class BlobActiveRunError(Exception):
     Route handlers catching this error should return 409.
     """
 
-    def __init__(self, blob_id: str, run_id: str) -> None:
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"blob_id", "run_id"})
+
+    def __init__(self, blob_id: str, *, run_id: str) -> None:
+        super().__init__(f"Blob {blob_id} is linked to active run {run_id} and cannot be deleted")
         self.blob_id = blob_id
         self.run_id = run_id
-        super().__init__(f"Blob {blob_id} is linked to active run {run_id} and cannot be deleted")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _guard_frozen_attr(self, name, value)
 
 
 class BlobQuotaExceededError(Exception):
@@ -132,11 +190,16 @@ class BlobQuotaExceededError(Exception):
     Route handlers catching this error should return 413.
     """
 
-    def __init__(self, session_id: str, current_bytes: int, limit_bytes: int) -> None:
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"session_id", "current_bytes", "limit_bytes"})
+
+    def __init__(self, session_id: str, *, current_bytes: int, limit_bytes: int) -> None:
+        super().__init__(f"Session {session_id} blob storage ({current_bytes} bytes) would exceed quota ({limit_bytes} bytes)")
         self.session_id = session_id
         self.current_bytes = current_bytes
         self.limit_bytes = limit_bytes
-        super().__init__(f"Session {session_id} blob storage ({current_bytes} bytes) would exceed quota ({limit_bytes} bytes)")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _guard_frozen_attr(self, name, value)
 
 
 class BlobStateError(Exception):
@@ -148,9 +211,14 @@ class BlobStateError(Exception):
     anomaly (e.g. row vanishing mid-transaction) that should propagate.
     """
 
-    def __init__(self, blob_id: str, message: str) -> None:
-        self.blob_id = blob_id
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"blob_id"})
+
+    def __init__(self, blob_id: str, *, message: str) -> None:
         super().__init__(message)
+        self.blob_id = blob_id
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _guard_frozen_attr(self, name, value)
 
 
 class BlobIntegrityError(Exception):
@@ -164,11 +232,16 @@ class BlobIntegrityError(Exception):
     failures must propagate, never be swallowed.
     """
 
-    def __init__(self, blob_id: str, expected: str, actual: str) -> None:
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"blob_id", "expected_hash", "actual_hash"})
+
+    def __init__(self, blob_id: str, *, expected: str, actual: str) -> None:
+        super().__init__(f"Blob {blob_id} content integrity failure: stored hash {expected[:16]}... != computed hash {actual[:16]}...")
         self.blob_id = blob_id
         self.expected_hash = expected
         self.actual_hash = actual
-        super().__init__(f"Blob {blob_id} content integrity failure: stored hash {expected[:16]}... != computed hash {actual[:16]}...")
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _guard_frozen_attr(self, name, value)
 
 
 @dataclass(frozen=True, slots=True)

@@ -10,6 +10,27 @@ from elspeth.web.composer.state import CompositionState
 from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
 
 
+class StateAccessError(Exception):
+    """Raised when a client-supplied ``state_id`` cannot be accessed.
+
+    Deliberately does NOT distinguish between "state does not exist"
+    and "state exists but belongs to another user's session". Echoing
+    that distinction through the HTTP response body is an IDOR oracle:
+    an authenticated user can probe arbitrary UUIDs against their own
+    ``/execute`` endpoint and learn which ones exist in OTHER users'
+    sessions. The two cases are therefore folded into a single
+    exception type whose handler MUST return a byte-identical
+    ``{"detail": "State not found"}`` 404. See
+    ``sessions/routes.py::send_message`` and commit e73a921a for the
+    same contract on the chat-message IDOR surface.
+
+    If a future refactor needs diagnostic precision about which of the
+    two branches tripped (e.g. for ops dashboards), it MUST route that
+    signal through server-side audit/telemetry, never through the HTTP
+    response body or status code.
+    """
+
+
 class YamlGenerator(Protocol):
     """Protocol for objects that generate YAML from CompositionState.
 

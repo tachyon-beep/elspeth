@@ -226,31 +226,96 @@ class TestSessionCRUDRoutes:
         assert del_resp.status_code == 204
 
 
+def _collect_ownership_call_site_identities(module: object, helper_name: str) -> set[str]:
+    """Walk ``module``'s AST and return enclosing function names for each call to ``helper_name``.
+
+    Shared implementation for the IDOR drift guards across the three
+    session-scoped routers (sessions/, execution/, blobs/).  Each
+    router has its own ownership-check helper — the drift guard is
+    parametrized per (module, helper) pair so the failure message
+    points at one specific inventory that drifted, rather than
+    reporting an aggregate mismatch across all three.
+
+    Why a shared walker (not a per-module assertion) — the AST-walking
+    logic is identical across routers; duplicating it per drift test
+    would itself be a drift surface (a future fix to one copy would
+    silently leave the others subtly different).
+    """
+    import ast
+
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    # Build a child->parent map so each call can be attributed to
+    # its SMALLEST enclosing function def.  ``ast.walk`` alone would
+    # also match the outer factory (``create_session_router`` etc.)
+    # — which contains every nested endpoint — bloating the set with
+    # a non-endpoint name.  Walking upward from the call to the
+    # nearest FunctionDef / AsyncFunctionDef is the only correct way
+    # to attribute ownership to the handler that actually contains it.
+    parents: dict[ast.AST, ast.AST] = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+
+    identities: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == helper_name):
+            continue
+        # Walk up to the nearest function def.  A call outside any
+        # function (module level) is a structural anomaly we want the
+        # assertion to surface, not silently absorb — so we only
+        # record names of function-scoped calls, and let the set
+        # comparison below flag any missing endpoint.
+        current: ast.AST | None = parents.get(node)
+        while current is not None and not isinstance(current, ast.FunctionDef | ast.AsyncFunctionDef):
+            current = parents.get(current)
+        if current is not None:
+            identities.add(current.name)
+
+    # The helper's own def may contain a self-reference if a future
+    # refactor introduces recursion/delegation; drop it explicitly so
+    # the drift guard stays focused on ROUTE HANDLERS, not plumbing.
+    identities.discard(helper_name)
+    return identities
+
+
 class TestIDORCoverageDrift:
-    """Drift guard: enumerate endpoints that call ``_verify_session_ownership``.
+    """Drift guard: every session-scoped endpoint across all three routers must invoke an ownership check.
 
-    ``TestIDORProtection.test_idor_session_crud`` walks one cross-session
-    request for each session-scoped endpoint. The risk is that someone
-    adds a new route that calls ``_verify_session_ownership`` but forgets
-    to add a matching IDOR assertion — the ownership primitive is in
-    place, but its coverage in this suite silently rots.
+    ``TestIDORProtection.test_idor_session_crud`` walks one
+    cross-session request for each session-scoped endpoint.  The risk
+    is that someone adds a new route that calls an ownership-check
+    helper but forgets to add a matching IDOR assertion — the
+    ownership primitive is in place, but its coverage in this suite
+    silently rots.
 
-    This test parses ``sessions/routes.py`` and asserts the SET of
-    enclosing function names for every ``_verify_session_ownership``
-    call equals a fixed inventory. A pure count would silently accept
-    "added endpoint X, removed endpoint Y, count unchanged" — masking
-    real drift. Set-equality forces the specific endpoint identities
-    to match, so an unintended swap fails the assertion with a diff
-    the author can read directly.
+    Session-scoped endpoints live in three routers, each with its
+    own ownership-check helper:
 
-    The inventory mirrors ``TestIDORProtection`` docstring verbatim: if
-    a new endpoint is added upstream, both this set and the assertion
-    walk in ``test_idor_session_crud`` must be updated in the same
-    commit. Bumping either without the other leaves the audit in a
-    lying state.
+    * ``sessions/routes.py`` via ``_verify_session_ownership`` — the
+      chat-and-state endpoints (``GET``/``DELETE``/``POST`` under
+      ``/api/sessions/{id}``).
+    * ``execution/routes.py`` via ``_verify_session_ownership`` —
+      ``/validate`` and ``/execute``.  Also hosts run-scoped endpoints
+      which use ``_verify_run_ownership`` (not a session-ownership
+      helper, but the same drift risk for run identities; covered by
+      a separate inventory).
+    * ``blobs/routes.py`` via ``_verify_session_and_get_blob_service``
+      — blob upload/list/metadata/download/delete.  This helper is
+      dual-role (checks ownership AND returns the service); both
+      branches of its callers depend on the ownership check for
+      IDOR safety.
+
+    Each (module, helper, inventory) tuple is pinned independently so
+    a failure message names exactly which router's audit drifted.  A
+    pure count across all three would satisfy ``{add endpoint X in
+    router A, drop endpoint Y in router B}`` — the count stays
+    constant while the audit silently swaps a covered endpoint for an
+    uncovered one in a different router.
     """
 
-    EXPECTED_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
+    EXPECTED_SESSIONS_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
         {
             "get_session",
             "delete_session",
@@ -266,87 +331,120 @@ class TestIDORCoverageDrift:
         }
     )
 
-    def test_idor_audit_matches_ownership_call_site_identities(self) -> None:
-        """Walk routes.py's AST, collect the enclosing function name of every
-        ``_verify_session_ownership`` call, and assert set-equality with
-        ``EXPECTED_OWNERSHIP_ENDPOINTS``.
+    EXPECTED_EXECUTION_SESSION_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
+        {
+            "validate_session_pipeline",
+            "execute_pipeline",
+        }
+    )
 
-        Why set-equality rather than count:
+    EXPECTED_EXECUTION_RUN_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
+        {
+            "get_run_status",
+            "cancel_run",
+            "get_run_results",
+        }
+    )
 
-        * A count-based guard is satisfied by ``{add endpoint X, drop
-          endpoint Y}`` — the count stays at 11 while the IDOR audit
-          silently swaps a covered endpoint for an uncovered one.
-        * Set-equality surfaces exactly which identity appeared or
-          disappeared, so the failure message points the author at the
-          specific endpoint whose audit coverage must be reconciled.
+    EXPECTED_BLOBS_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
+        {
+            "create_blob_upload",
+            "create_blob_inline",
+            "list_blobs",
+            "get_blob_metadata",
+            "download_blob_content",
+            "delete_blob",
+        }
+    )
 
-        Why walk function-def bodies rather than using parent pointers:
-
-        * ``ast.walk`` yields nodes in no defined order and without
-          parentage. We instead enumerate top-level class bodies and
-          their async/sync function defs, and for each one check
-          whether any ``_verify_session_ownership`` call appears in
-          its subtree. This gives us the (function_name, has_call)
-          mapping the assertion needs.
-        """
-        import ast
-
-        from elspeth.web.sessions import routes
-
-        source = Path(routes.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-        # Build a child->parent map so each call can be attributed to
-        # its SMALLEST enclosing function def. ``ast.walk`` alone would
-        # also match the outer factory ``create_session_router`` — which
-        # contains every nested endpoint — bloating the set with a
-        # non-endpoint name. Walking upward from the call to the nearest
-        # FunctionDef / AsyncFunctionDef is the only correct way to
-        # attribute ownership to the handler that actually contains it.
-        parents: dict[ast.AST, ast.AST] = {}
-        for parent in ast.walk(tree):
-            for child in ast.iter_child_nodes(parent):
-                parents[child] = parent
-
-        endpoints_with_ownership_check: set[str] = set()
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "_verify_session_ownership"):
-                continue
-            # Walk up to the nearest function def. A call outside any
-            # function (module level) is a structural anomaly we want
-            # the assertion to surface, not silently absorb — so we
-            # only record names of function-scoped calls, and let the
-            # set comparison below flag any missing endpoint.
-            current: ast.AST | None = parents.get(node)
-            while current is not None and not isinstance(current, ast.FunctionDef | ast.AsyncFunctionDef):
-                current = parents.get(current)
-            if current is not None:
-                endpoints_with_ownership_check.add(current.name)
-
-        # ``_verify_session_ownership`` itself contains no such call, so
-        # the helper's own def does not appear in the set. We also drop
-        # it explicitly in case a future refactor introduces a
-        # self-reference (recursion, delegation) — the drift guard is
-        # about ROUTE HANDLERS, not the helper.
-        endpoints_with_ownership_check.discard("_verify_session_ownership")
-
-        missing = self.EXPECTED_OWNERSHIP_ENDPOINTS - endpoints_with_ownership_check
-        unexpected = endpoints_with_ownership_check - self.EXPECTED_OWNERSHIP_ENDPOINTS
-
-        assert endpoints_with_ownership_check == self.EXPECTED_OWNERSHIP_ENDPOINTS, (
-            "IDOR audit drift detected in sessions/routes.py.\n"
-            f"  Expected endpoints calling _verify_session_ownership: "
-            f"{sorted(self.EXPECTED_OWNERSHIP_ENDPOINTS)}\n"
-            f"  Found: {sorted(endpoints_with_ownership_check)}\n"
+    @staticmethod
+    def _assert_inventory(router_label: str, helper_name: str, expected: frozenset[str], found: set[str]) -> None:
+        """Render the drift-diagnostic message and assert set-equality."""
+        missing = expected - found
+        unexpected = found - expected
+        assert found == expected, (
+            f"IDOR audit drift detected in {router_label}.\n"
+            f"  Expected endpoints calling {helper_name!r}: {sorted(expected)}\n"
+            f"  Found: {sorted(found)}\n"
             f"  Missing (endpoint advertised in audit but no call found): {sorted(missing)}\n"
             f"  Unexpected (endpoint calls helper but not in audit inventory): {sorted(unexpected)}\n"
-            "Update BOTH the ``TestIDORProtection`` docstring inventory AND "
-            "``test_idor_session_crud`` with a matching cross-session request "
-            "when endpoints enter or leave this set, then update "
-            "EXPECTED_OWNERSHIP_ENDPOINTS here. Do NOT bump the inventory "
-            "without adding a paired assertion — the whole point of the "
-            "guard is to force the three locations (inventory, assertion, "
-            "handler set) to stay in sync."
+            "Update BOTH the corresponding IDOR assertion walk AND the "
+            "inventory here in the SAME commit when endpoints enter or "
+            "leave this set. Bumping one without the other leaves the "
+            "audit in a lying state — the whole point of this drift "
+            "guard is to force the three locations (inventory, "
+            "assertion, handler set) to stay in sync."
+        )
+
+    def test_sessions_routes_ownership_call_sites(self) -> None:
+        """sessions/routes.py — _verify_session_ownership inventory."""
+        from elspeth.web.sessions import routes
+
+        found = _collect_ownership_call_site_identities(routes, "_verify_session_ownership")
+        self._assert_inventory(
+            "sessions/routes.py",
+            "_verify_session_ownership",
+            self.EXPECTED_SESSIONS_OWNERSHIP_ENDPOINTS,
+            found,
+        )
+
+    def test_execution_routes_session_ownership_call_sites(self) -> None:
+        """execution/routes.py — _verify_session_ownership inventory.
+
+        Independent from the sessions/ inventory because the two
+        helpers — while presently sharing a name — are file-local
+        symbols.  A symbol rename in one router must not silently
+        pass because the other router still uses the old name.
+        """
+        from elspeth.web.execution import routes
+
+        found = _collect_ownership_call_site_identities(routes, "_verify_session_ownership")
+        self._assert_inventory(
+            "execution/routes.py",
+            "_verify_session_ownership",
+            self.EXPECTED_EXECUTION_SESSION_OWNERSHIP_ENDPOINTS,
+            found,
+        )
+
+    def test_execution_routes_run_ownership_call_sites(self) -> None:
+        """execution/routes.py — _verify_run_ownership inventory.
+
+        Run-scoped endpoints (``/api/runs/{run_id}``) verify a
+        different identity dimension (run ownership, resolved through
+        the run's parent session).  The IDOR surface is identical in
+        principle: an authenticated user probing run_id UUIDs against
+        their own endpoints must not be able to distinguish "doesn't
+        exist" from "exists in another user's session".
+        """
+        from elspeth.web.execution import routes
+
+        found = _collect_ownership_call_site_identities(routes, "_verify_run_ownership")
+        self._assert_inventory(
+            "execution/routes.py",
+            "_verify_run_ownership",
+            self.EXPECTED_EXECUTION_RUN_OWNERSHIP_ENDPOINTS,
+            found,
+        )
+
+    def test_blobs_routes_ownership_call_sites(self) -> None:
+        """blobs/routes.py — _verify_session_and_get_blob_service inventory.
+
+        The helper is dual-role (ownership check + service lookup).
+        Every blob-management endpoint that operates under a
+        ``/api/sessions/{session_id}/blobs`` path MUST call it.  A
+        handler that acquires the blob service directly from
+        ``request.app.state`` without the ownership check would
+        bypass the session IDOR guard entirely — that is the drift
+        this inventory exists to catch.
+        """
+        from elspeth.web.blobs import routes
+
+        found = _collect_ownership_call_site_identities(routes, "_verify_session_and_get_blob_service")
+        self._assert_inventory(
+            "blobs/routes.py",
+            "_verify_session_and_get_blob_service",
+            self.EXPECTED_BLOBS_OWNERSHIP_ENDPOINTS,
+            found,
         )
 
 
@@ -857,6 +955,146 @@ class TestMessageRoutes:
         assert messages[0]["role"] == "user"
         assert messages[1]["content"] == "Sure, I can help."
         assert messages[1]["role"] == "assistant"
+
+
+class TestLiteLLMErrorRedaction:
+    """LiteLLM exception bodies must not leak provider internals.
+
+    ``str(LiteLLMAuthError)`` / ``str(LiteLLMAPIError)`` includes the
+    provider name, model ID, request payload fragments, and — on
+    certain provider code paths — the upstream HTTP response body
+    which has been observed to echo the ``Authorization`` header.
+    The 502 HTTP body must therefore carry only the class name, not
+    ``str(exc)``.  Paired send_message + recompose assertions pin
+    the two mirror paths; any future divergence becomes a selective
+    leak surface.
+    """
+
+    _CANARY_MESSAGE = (
+        "Auth failed for provider=openai model=gpt-4 "
+        "request_payload={'key': 'sk-secret-xyz'} "
+        "response='Authorization: Bearer sk-leaked-token-abc123'"
+    )
+
+    def _make_auth_error(self):
+        from litellm.exceptions import AuthenticationError as LiteLLMAuthError
+
+        return LiteLLMAuthError(
+            message=self._CANARY_MESSAGE,
+            llm_provider="openai",
+            model="gpt-4",
+        )
+
+    def _make_api_error(self):
+        from litellm.exceptions import APIError as LiteLLMAPIError
+
+        return LiteLLMAPIError(
+            status_code=503,
+            message=self._CANARY_MESSAGE,
+            llm_provider="openai",
+            model="gpt-4",
+        )
+
+    def _assert_redacted(self, resp, expected_error_type: str, expected_exc_class: str) -> None:
+        """Assert the 502 body is class-name-only and contains no canary strings."""
+        assert resp.status_code == 502
+        body = resp.json()
+        detail = body["detail"]
+        assert detail["error_type"] == expected_error_type
+        # The ``detail`` field now carries ONLY the exception class name,
+        # not the leaky ``str(exc)``.  Byte equality is the load-bearing
+        # assertion — a substring check would admit "AuthenticationError:
+        # Auth failed for provider=openai ..." which is precisely the
+        # shape the redaction exists to prevent.
+        assert detail["detail"] == expected_exc_class
+        # Defence-in-depth: assert the canary fragments are absent
+        # anywhere in the serialised body. Catches any future code path
+        # that re-introduces str(exc) into a different field, or that
+        # serialises the __cause__ chain into JSON.
+        serialised = resp.text
+        assert "sk-secret-xyz" not in serialised
+        assert "sk-leaked-token-abc123" not in serialised
+        assert "Authorization: Bearer" not in serialised
+        assert "request_payload=" not in serialised
+
+    def test_send_message_auth_error_body_carries_class_name_only(self, tmp_path) -> None:
+        """LiteLLMAuthError from compose() → 502 with class-name-only detail."""
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(side_effect=self._make_auth_error())
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        msg_resp = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Hello"},
+        )
+        self._assert_redacted(msg_resp, "llm_auth_error", "AuthenticationError")
+
+    def test_send_message_api_error_body_carries_class_name_only(self, tmp_path) -> None:
+        """LiteLLMAPIError from compose() → 502 with class-name-only detail."""
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(side_effect=self._make_api_error())
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        msg_resp = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Hello"},
+        )
+        self._assert_redacted(msg_resp, "llm_unavailable", "APIError")
+
+    def test_recompose_auth_error_body_carries_class_name_only(self, tmp_path) -> None:
+        """recompose path must mirror send_message's redaction."""
+        import asyncio
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(side_effect=self._make_auth_error())
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        # recompose precondition: last message must be user turn.
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(service.add_message(uuid.UUID(session_id), "user", "Build a pipeline"))
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+        self._assert_redacted(recompose_resp, "llm_auth_error", "AuthenticationError")
+
+    def test_recompose_api_error_body_carries_class_name_only(self, tmp_path) -> None:
+        """recompose path must mirror send_message's redaction for APIError too."""
+        import asyncio
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(side_effect=self._make_api_error())
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Test"})
+        session_id = resp.json()["id"]
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(service.add_message(uuid.UUID(session_id), "user", "Build a pipeline"))
+        loop.close()
+
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+        self._assert_redacted(recompose_resp, "llm_unavailable", "APIError")
 
 
 class TestRecomposeConvergencePartialState:

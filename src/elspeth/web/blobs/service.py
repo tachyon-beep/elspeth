@@ -207,7 +207,11 @@ class BlobServiceImpl:
                     # COALESCE guarantees an int; non-int = Tier 1 anomaly
                     assert isinstance(current_total, int), f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int"
                     if current_total + len(content) > self._max_storage_per_session:
-                        raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
+                        raise BlobQuotaExceededError(
+                            session_id_str,
+                            current_bytes=current_total,
+                            limit_bytes=self._max_storage_per_session,
+                        )
 
                     conn.execute(
                         blobs_table.insert().values(
@@ -322,7 +326,10 @@ class BlobServiceImpl:
                     raise BlobNotFoundError(blob_id_str)
 
                 if row.status != "pending":
-                    raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
+                    raise BlobStateError(
+                        blob_id_str,
+                        message=f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'",
+                    )
                 # Hash-format validation runs after the state check so a
                 # callers confused by a stale blob hear about the lifecycle
                 # problem first.  See _validate_finalize_hash() docstring.
@@ -402,7 +409,7 @@ class BlobServiceImpl:
                     .where(runs_table.c.status.in_(["pending", "running"]))
                 ).first()
                 if active_link is not None:
-                    raise BlobActiveRunError(blob_id_str, active_link.run_id)
+                    raise BlobActiveRunError(blob_id_str, run_id=active_link.run_id)
 
                 # 2. Pre-link window: _execute_locked() creates the run record
                 #    before link_blob_to_run() inserts the blob_run_links row.
@@ -424,7 +431,7 @@ class BlobServiceImpl:
                     .where(runs_table.c.status.in_(["pending", "running"]))
                 ).first()
                 if active_run is not None and _source_references_blob(active_run.source, blob_id_str, row.storage_path):
-                    raise BlobActiveRunError(blob_id_str, active_run.id)
+                    raise BlobActiveRunError(blob_id_str, run_id=active_run.id)
 
                 # Delete backing file first — orphaned DB row is recoverable,
                 # orphaned file with no metadata is not
@@ -463,7 +470,7 @@ class BlobServiceImpl:
                 if row.status != "ready":
                     raise BlobStateError(
                         blob_id_str,
-                        f"Cannot read blob {blob_id_str} — status is '{row.status}', expected 'ready'",
+                        message=f"Cannot read blob {blob_id_str} — status is '{row.status}', expected 'ready'",
                     )
 
                 storage = Path(row.storage_path)
@@ -481,7 +488,7 @@ class BlobServiceImpl:
                 )
                 actual = content_hash(data)
                 if not hmac.compare_digest(actual, row.content_hash):
-                    raise BlobIntegrityError(blob_id_str, row.content_hash, actual)
+                    raise BlobIntegrityError(blob_id_str, expected=row.content_hash, actual=actual)
 
                 return data
 
@@ -688,7 +695,11 @@ class BlobServiceImpl:
 
         current_usage = await self._run_sync(_check_quota)
         if current_usage + total_source_bytes > self._max_storage_per_session:
-            raise BlobQuotaExceededError(target_session_id_str, current_usage, self._max_storage_per_session)
+            raise BlobQuotaExceededError(
+                target_session_id_str,
+                current_bytes=current_usage,
+                limit_bytes=self._max_storage_per_session,
+            )
 
         # Copy blobs — clean up partial writes on any failure.
         # Build old_id → new_blob mapping for source reference rewriting.
@@ -774,7 +785,10 @@ class BlobServiceImpl:
             if row is None:
                 raise BlobNotFoundError(blob_id_str)
             if row.status != "pending":
-                raise BlobStateError(blob_id_str, f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'")
+                raise BlobStateError(
+                    blob_id_str,
+                    message=f"Cannot finalize blob {blob_id_str} — status is '{row.status}', expected 'pending'",
+                )
 
             # Enforce quota when finalizing with a real size — pending blobs
             # were reserved at size_bytes=0, so this is the first time the
@@ -790,7 +804,11 @@ class BlobServiceImpl:
                 ).scalar()
                 assert isinstance(current_total, int), f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int"
                 if current_total + size_bytes > self._max_storage_per_session:
-                    raise BlobQuotaExceededError(session_id_str, current_total, self._max_storage_per_session)
+                    raise BlobQuotaExceededError(
+                        session_id_str,
+                        current_bytes=current_total,
+                        limit_bytes=self._max_storage_per_session,
+                    )
 
             updates: dict[str, Any] = {"status": status}
             if size_bytes is not None:
@@ -859,12 +877,12 @@ def _validate_finalize_hash(
     if content_hash_val is None:
         raise BlobStateError(
             blob_id_str,
-            f"Tier 1: cannot finalize blob {blob_id_str} as 'ready' without content_hash — audit integrity requires a hash",
+            message=f"Tier 1: cannot finalize blob {blob_id_str} as 'ready' without content_hash — audit integrity requires a hash",
         )
     # ``fullmatch`` (not ``match``) — see the _SHA256_HEX_PATTERN comment
     # above for why ``^...$`` + ``match`` admits trailing newlines.
     if not _SHA256_HEX_PATTERN.fullmatch(content_hash_val):
         raise BlobStateError(
             blob_id_str,
-            f"Tier 1: content_hash must be 64 lowercase hex characters (SHA-256), got {content_hash_val!r}",
+            message=f"Tier 1: content_hash must be 64 lowercase hex characters (SHA-256), got {content_hash_val!r}",
         )

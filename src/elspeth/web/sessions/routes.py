@@ -502,14 +502,43 @@ def create_session_router() -> APIRouter:
             response_body = await _handle_convergence_error(exc, service, session.id, "convergence")
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:
+            # ``str(exc)`` on LiteLLM exceptions can embed the provider
+            # name, model ID, request payload fragments, and — on
+            # certain provider code paths — the upstream HTTP response
+            # body, which has been observed to echo the Authorization
+            # header.  Redact the HTTP ``detail`` field to the class
+            # name only; route the full exception to structured
+            # server-side logging via ``slog.error`` with session
+            # correlation.  Mirrors the partial_state_save_error
+            # contract landed by commit 1a30d985 (SQLAlchemy 422 path).
+            # exc_info deliberately omitted for the same reason
+            # SQLAlchemy ``exc_info`` was dropped in 127417cb:
+            # ``__cause__`` chains on these exception classes can
+            # carry upstream provider detail that must not be
+            # retained in structured logs either.
+            slog.error(
+                "compose_llm_auth_error",
+                session_id=str(session_id),
+                exc_class=type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=502,
-                detail={"error_type": "llm_auth_error", "detail": str(exc)},
+                detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
             ) from exc
         except LiteLLMAPIError as exc:
+            # Same redaction rationale as the auth-error block above.
+            # ``LiteLLMAPIError`` message shape varies by provider (OpenAI,
+            # Azure OpenAI, Anthropic, Bedrock) and can include
+            # rate-limit window details, account/tenant identifiers,
+            # and upstream request IDs that are operator-only material.
+            slog.error(
+                "compose_llm_unavailable",
+                session_id=str(session_id),
+                exc_class=type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=502,
-                detail={"error_type": "llm_unavailable", "detail": str(exc)},
+                detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
             ) from exc
         except ComposerPluginCrashError as crash:
             # Plugin-crash path: _compose_loop wraps any non-ToolArgumentError
@@ -644,14 +673,30 @@ def create_session_router() -> APIRouter:
             response_body = await _handle_convergence_error(exc, service, session.id, "recompose_convergence")
             raise HTTPException(status_code=422, detail=response_body) from exc
         except LiteLLMAuthError as exc:
+            # Recompose mirror of the redaction contract in send_message
+            # (see block comment there for full rationale).  The two
+            # paths MUST carry byte-identical response shapes and
+            # redaction granularity — any future divergence becomes a
+            # selective leak surface (attacker picks whichever endpoint
+            # still echoes str(exc)).
+            slog.error(
+                "recompose_llm_auth_error",
+                session_id=str(session_id),
+                exc_class=type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=502,
-                detail={"error_type": "llm_auth_error", "detail": str(exc)},
+                detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
             ) from exc
         except LiteLLMAPIError as exc:
+            slog.error(
+                "recompose_llm_unavailable",
+                session_id=str(session_id),
+                exc_class=type(exc).__name__,
+            )
             raise HTTPException(
                 status_code=502,
-                detail={"error_type": "llm_unavailable", "detail": str(exc)},
+                detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
             ) from exc
         except ComposerPluginCrashError as crash:
             # Plugin-crash path: mirror /messages handler. See the send_message

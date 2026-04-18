@@ -44,7 +44,7 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError, BlobServiceProtocol, BlobStateError
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
-from elspeth.web.execution.protocol import ExecutionService, YamlGenerator
+from elspeth.web.execution.protocol import ExecutionService, StateAccessError, YamlGenerator
 from elspeth.web.execution.schemas import (
     CancelledData,
     CompletedData,
@@ -284,12 +284,27 @@ class ExecutionServiceImpl:
 
         # B4 fix: get_composition_state() doesn't exist on SessionService.
         # Use get_state() for explicit state_id, get_current_state() for latest.
+        #
+        # IDOR contract: the two "state unreachable" branches below
+        # (state does not exist anywhere / state exists in another
+        # user's session) MUST be indistinguishable from the client's
+        # perspective.  They are folded into a single ``StateAccessError``
+        # whose route handler returns a fixed "State not found" literal.
+        # See ``protocol.StateAccessError`` for the full rationale and
+        # the send_message precedent (commit e73a921a).  Do NOT
+        # re-introduce distinguishable messages here: the whole reason
+        # this branch exists as a discriminated check is to prevent
+        # the attacker's probe, and a distinguishable message reopens
+        # exactly the oracle the check was added to close.
         state_record = None
         if state_id is not None:
-            state_record = await self._session_service.get_state(state_id)
+            try:
+                state_record = await self._session_service.get_state(state_id)
+            except ValueError as exc:
+                raise StateAccessError(str(state_id)) from exc
             # Verify state belongs to the requested session (IDOR prevention)
             if state_record.session_id != session_id:
-                raise ValueError(f"State {state_id} does not belong to session {session_id}")
+                raise StateAccessError(str(state_id))
         else:
             state_record = await self._session_service.get_current_state(session_id)
             if state_record is None:
@@ -353,9 +368,21 @@ class ExecutionServiceImpl:
             blob_ref = composition_state.source.options.get("blob_ref")
             if blob_ref is not None:
                 parsed_blob_id = UUID(blob_ref)
+                # IDOR contract (mirrors the state_id branch above): the
+                # nonexistent-blob and cross-session-blob cases MUST be
+                # indistinguishable from the client's perspective.  Both
+                # surface as ``BlobNotFoundError`` — ``get_blob`` already
+                # raises it for missing rows; we raise the same type for
+                # cross-session rows so the route handler returns a
+                # byte-identical "Blob not found" 404.  Raising
+                # ``ValueError`` here (as an earlier iteration did) not
+                # only produced a distinguishable body but also a
+                # distinguishable HTTP status (404 vs 500, because
+                # ``BlobNotFoundError`` was uncaught), a two-channel
+                # oracle strictly worse than the state_id surface.
                 blob_record = await self._blob_service.get_blob(parsed_blob_id)
                 if blob_record.session_id != session_id:
-                    raise ValueError(f"Blob {blob_ref} does not belong to session {session_id}")
+                    raise BlobNotFoundError(blob_ref)
 
         # B9 fix: create_run() generates its own UUID internally and returns
         # a RunRecord. Read the run_id back from the returned record so our

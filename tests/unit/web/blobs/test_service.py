@@ -1342,7 +1342,7 @@ class TestFinalizeRunOutputBlobsPartialFailure:
 
         def _patched(blob_id, *args, **kwargs):
             if blob_id == b2.id:
-                raise BlobStateError(str(blob_id), "Cannot finalize — status is 'ready', expected 'pending'")
+                raise BlobStateError(str(blob_id), message="Cannot finalize — status is 'ready', expected 'pending'")
             return original(blob_id, *args, **kwargs)
 
         blob_service._finalize_blob_sync = _patched

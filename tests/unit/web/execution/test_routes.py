@@ -173,23 +173,109 @@ class TestExecuteEndpoint:
 
 
 class TestExecuteIDORAndPathTraversal:
-    """IDOR and path traversal defense-in-depth checks in execute()."""
+    """IDOR and path traversal defense-in-depth checks in execute().
+
+    The state_id and blob_ref IDOR surfaces have strict parity
+    contracts: the "does not exist anywhere" and "exists in another
+    user's session" branches MUST produce byte-identical responses.
+    Asserting substring containment ("does not belong" in body) is
+    itself a pin of the oracle and is forbidden here — parity tests
+    use byte equality of the full response body AND status code.
+    See ``StateAccessError`` / commit e73a921a for the rationale.
+    """
 
     @pytest.mark.asyncio
-    async def test_execute_cross_session_state_id_returns_404(self) -> None:
-        """state_id belonging to a different session is rejected (IDOR)."""
+    async def test_execute_cross_session_state_id_returns_idor_safe_body(self) -> None:
+        """Cross-session state_id surfaces as the fixed "State not found" literal.
+
+        The service raises ``StateAccessError``; the route MUST
+        collapse it to a byte-identical 404 body that does not
+        distinguish cross-session from nonexistent.
+        """
+        from elspeth.web.execution.protocol import StateAccessError
+
         svc = MagicMock()
-        svc.execute = AsyncMock(side_effect=ValueError("State xyz does not belong to session abc"))
+        svc.execute = AsyncMock(side_effect=StateAccessError("any-state-uuid"))
         app = _create_test_app(execution_service=svc)
-        session_id = uuid4()
-        foreign_state_id = uuid4()
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.post(
-                f"/api/sessions/{session_id}/execute",
-                params={"state_id": str(foreign_state_id)},
+                f"/api/sessions/{uuid4()}/execute",
+                params={"state_id": str(uuid4())},
             )
             assert resp.status_code == 404
-            assert "does not belong" in resp.json()["detail"]
+            assert resp.json() == {"detail": "State not found"}
+
+    @pytest.mark.asyncio
+    async def test_execute_state_id_idor_branches_are_byte_identical(self) -> None:
+        """Nonexistent state_id and cross-session state_id MUST be indistinguishable.
+
+        This is the canonical IDOR-parity check: run both branches
+        through the route with distinct arguments and assert the
+        raw response bytes (status + body) are identical.  A future
+        regression that re-introduces a distinguishable message will
+        fail here with a diff an operator can read directly.
+        """
+        from elspeth.web.execution.protocol import StateAccessError
+
+        # Branch 1: state UUID does not exist anywhere in the DB.
+        svc_a = MagicMock()
+        svc_a.execute = AsyncMock(side_effect=StateAccessError(str(uuid4())))
+        app_a = _create_test_app(execution_service=svc_a)
+
+        # Branch 2: state UUID exists but belongs to another session.
+        svc_b = MagicMock()
+        svc_b.execute = AsyncMock(side_effect=StateAccessError(str(uuid4())))
+        app_b = _create_test_app(execution_service=svc_b)
+
+        async with (
+            AsyncClient(transport=ASGITransport(app=app_a), base_url="http://test") as client_a,
+            AsyncClient(transport=ASGITransport(app=app_b), base_url="http://test") as client_b,
+        ):
+            resp_a = await client_a.post(
+                f"/api/sessions/{uuid4()}/execute",
+                params={"state_id": str(uuid4())},
+            )
+            resp_b = await client_b.post(
+                f"/api/sessions/{uuid4()}/execute",
+                params={"state_id": str(uuid4())},
+            )
+
+        assert resp_a.status_code == resp_b.status_code == 404
+        assert resp_a.content == resp_b.content
+        assert resp_a.json() == {"detail": "State not found"}
+
+    @pytest.mark.asyncio
+    async def test_execute_blob_ref_idor_branches_are_byte_identical(self) -> None:
+        """Nonexistent blob_ref and cross-session blob_ref MUST be indistinguishable.
+
+        Before this fix, nonexistent-blob propagated as an uncaught
+        ``BlobNotFoundError`` (HTTP 500) while cross-session-blob
+        raised ``ValueError`` (HTTP 404, body leaking "does not
+        belong to session").  The HTTP status itself was a side
+        channel — a two-layer oracle strictly worse than state_id's.
+        Both branches now surface as ``BlobNotFoundError``; the
+        route collapses them to a byte-identical 404.
+        """
+        from elspeth.web.blobs.protocol import BlobNotFoundError
+
+        svc_a = MagicMock()
+        svc_a.execute = AsyncMock(side_effect=BlobNotFoundError(str(uuid4())))
+        app_a = _create_test_app(execution_service=svc_a)
+
+        svc_b = MagicMock()
+        svc_b.execute = AsyncMock(side_effect=BlobNotFoundError(str(uuid4())))
+        app_b = _create_test_app(execution_service=svc_b)
+
+        async with (
+            AsyncClient(transport=ASGITransport(app=app_a), base_url="http://test") as client_a,
+            AsyncClient(transport=ASGITransport(app=app_b), base_url="http://test") as client_b,
+        ):
+            resp_a = await client_a.post(f"/api/sessions/{uuid4()}/execute")
+            resp_b = await client_b.post(f"/api/sessions/{uuid4()}/execute")
+
+        assert resp_a.status_code == resp_b.status_code == 404
+        assert resp_a.content == resp_b.content
+        assert resp_a.json() == {"detail": "Blob not found"}
 
     @pytest.mark.asyncio
     async def test_execute_source_path_traversal_returns_404(self) -> None:

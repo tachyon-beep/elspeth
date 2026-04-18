@@ -135,10 +135,41 @@ class JWKSTokenValidator:
                     self._jwks = validated
                     self._next_refresh_at = now + self._jwks_cache_ttl_seconds
             except AuthenticationError:
-                # Shape-validation failure: do not serve stale cache. The
-                # response was reachable but structurally wrong, which is a
-                # different failure mode than a network blip and should
-                # surface as a clean 401, not a silent fallback.
+                # Shape-validation failure — advance the refresh horizon
+                # by ``_jwks_failure_retry_seconds`` (the same throttle the
+                # network-failure branch below applies) BEFORE re-raising.
+                #
+                # Why throttle here too: without the horizon advance, a
+                # malformed-JSON outage at the IdP causes every concurrent
+                # auth request in the critical section to re-hit the IdP —
+                # the partial-DoS vector elspeth-32982f17cf closed for
+                # network errors.  Shape-failure is functionally
+                # indistinguishable at this layer (reachable IdP, bad
+                # payload); the thundering herd is identical.
+                #
+                # Why we still re-raise (no stale-cache return on this
+                # path): the CURRENT caller — who triggered the validator
+                # — gets a clean 401 so an unrecoverable misconfiguration
+                # (IdP rotated its document schema, corrupt reverse proxy,
+                # etc.) surfaces as an auth failure rather than a silent
+                # fallback.  Subsequent callers within the throttle window
+                # short-circuit at the top of ``ensure_jwks`` via the
+                # ``self._jwks is not None and now < self._next_refresh_at``
+                # gate and receive the previously-validated cached keys —
+                # symmetric with the network-failure branch's stale-serve
+                # semantics, where only the first caller per window pays
+                # the cost of discovering the outage.  If cache is empty
+                # (shape failure during bootstrap), the top-of-function
+                # gate does not trigger and the window only throttles the
+                # single-caller path; every caller still gets 401 until
+                # the IdP returns valid JSON.
+                if stale_jwks is not None:
+                    self._next_refresh_at = now + self._jwks_failure_retry_seconds
+                    slog.debug(
+                        "JWKS shape validation failed; throttling refresh",
+                        issuer=self._issuer,
+                        next_refresh_in_seconds=self._jwks_failure_retry_seconds,
+                    )
                 raise
             except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
                 # Narrowed from the historical (HTTPError, KeyError, ValueError,

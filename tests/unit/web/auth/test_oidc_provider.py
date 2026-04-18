@@ -750,6 +750,108 @@ class TestOIDCStaleCacheBackoff:
         assert attempt_count == 2
 
 
+class TestOIDCShapeFailureBackoff:
+    """Shape-validation failures throttle IdP re-fetches within the retry window.
+
+    Paired with ``TestOIDCStaleCacheBackoff`` — the network-failure
+    branch already throttled; the shape-failure branch did not.
+    During an outage where the IdP returns malformed JSON (proxy
+    injecting an HTML error page, mid-rotation schema change, etc.),
+    every concurrent ``authenticate()`` call re-entered the critical
+    section and re-hit the IdP. This class pins the symmetric throttle
+    contract: the current caller still sees ``AuthenticationError``
+    (shape failures are not silently fallen back to stale cache), but
+    subsequent callers within the retry window short-circuit at the
+    top-of-function cache gate and receive the previously-validated
+    cached keys. See the block comment at oidc.py:137-170 for the
+    full asymmetry rationale.
+    """
+
+    @pytest.mark.asyncio
+    async def test_shape_failure_throttles_refetch_within_retry_window(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+        jwks_response,
+    ) -> None:
+        """Shape-malformed IdP response must advance _next_refresh_at.
+
+        Before: every concurrent auth request in the critical section
+        hit the IdP (partial DoS).  After: only the first call per
+        retry window does — subsequent callers hit cache.
+        """
+        private_key, _ = rsa_keypair
+        # TTL=0 so every call is past-due under the old implementation;
+        # failure-retry=60 so the second call falls well inside the
+        # throttle window.
+        provider = OIDCAuthProvider(
+            issuer=ISSUER,
+            audience=AUDIENCE,
+            jwks_cache_ttl_seconds=0,
+            jwks_failure_retry_seconds=60,
+        )
+        token = make_rs256_token(private_key, _valid_claims())
+
+        # Seed the cache with a successful fetch so the later
+        # top-of-function gate has something to short-circuit on.
+        with mock_httpx_discovery:
+            await provider.authenticate(token)
+
+        # Now simulate the IdP returning malformed JSON. Count network
+        # attempts — the throttle bug was that each concurrent call
+        # re-entered the critical section.
+        attempt_count = 0
+
+        async def shape_failing_get(url, **kwargs):
+            nonlocal attempt_count
+            attempt_count += 1
+            response = MagicMock()
+            response.raise_for_status = lambda: None
+            if ".well-known/openid-configuration" in url:
+                # Structurally wrong: JSON array where dict required.
+                response.json.return_value = []
+            else:
+                response.json.return_value = {"keys": []}
+            return response
+
+        shape_client = AsyncMock()
+        shape_client.get = shape_failing_get
+        shape_client.__aenter__ = AsyncMock(return_value=shape_client)
+        shape_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("elspeth.web.auth.oidc.httpx.AsyncClient", return_value=shape_client):
+            # First call: enters critical section, hits shape validator,
+            # propagates AuthenticationError. This is the "do not serve
+            # stale cache on the failure path" contract.
+            with pytest.raises(AuthenticationError, match="not a JSON object"):
+                await provider.authenticate(token)
+            # Subsequent calls within the 60s window MUST NOT re-hit the
+            # IdP — they short-circuit at the top-of-function cache gate
+            # because _next_refresh_at was advanced by the shape-failure
+            # branch.  They receive the previously-validated cached keys.
+            identity2 = await provider.authenticate(token)
+            identity3 = await provider.authenticate(token)
+
+        assert identity2.user_id == "user-123"
+        assert identity3.user_id == "user-123"
+        # The fix: only the first call reached the IdP.  The shape
+        # validator rejects the discovery document before a JWKS GET
+        # is issued, so that first critical-section entry is a single
+        # GET.  Subsequent calls short-circuit at the top-of-function
+        # cache gate and add zero.
+        #
+        # Pre-fix behaviour: 3 GETs (one discovery per authenticate
+        # call), because the shape-failure path re-raised without
+        # advancing ``_next_refresh_at`` — every concurrent call
+        # re-entered the critical section.
+        assert attempt_count == 1, (
+            f"Expected 1 IdP GET (the single discovery request in the single "
+            f"entered critical section), got {attempt_count}. Shape-failure path "
+            "is not advancing _next_refresh_at — concurrent auth requests during "
+            "a shape-failure outage are re-hitting the IdP (partial-DoS regression)."
+        )
+
+
 class TestOIDCConcurrentStaleDuringOutage:
     """Regression coverage for bug elspeth-32982f17cf: stale-serve must
     not serialize behind the refresh lock during an IdP outage.
