@@ -320,6 +320,42 @@ class TestWebSocketReconnectTier1Guards:
         ):
             pass
 
+    def test_completed_run_with_inconsistent_row_counts_raises(self) -> None:
+        """Tier 1 anomaly: row count decomposition mismatch in completed run.
+
+        Defence-in-depth: even if a session service bypasses the
+        RunStatusResponse validator (e.g., via ``model_construct`` on a
+        hot path), the WebSocket seeding handler must still fail with a
+        coherent Tier 1 anomaly message rather than an unhandled
+        ``pydantic.ValidationError`` that leaves the client disconnected
+        without explanation (routes.py close code 1011).
+        """
+        from starlette.testclient import TestClient
+
+        run_id = uuid4()
+        # Bypass the RunStatusResponse validator to simulate a bad DB read
+        # reaching the WebSocket seeding path.  Real callers never do this
+        # — the test is proving the catch in routes.py is armed.
+        bad_status = RunStatusResponse.model_construct(
+            run_id=str(run_id),
+            status="completed",
+            started_at=datetime.now(tz=UTC),
+            finished_at=datetime.now(tz=UTC),
+            rows_processed=100,
+            rows_succeeded=50,
+            rows_failed=20,
+            rows_quarantined=10,  # 50+20+10 = 80 != 100 — Tier 1 anomaly
+            error=None,
+            landscape_run_id="lscape-1",
+        )
+        app = self._make_ws_app(bad_status)
+        with (
+            pytest.raises(RuntimeError, match=r"Tier 1 anomaly.*audit trail inconsistent"),
+            TestClient(app) as client,
+            client.websocket_connect(f"/ws/runs/{run_id}?token=fake"),
+        ):
+            pass
+
 
 class TestRunStatusEndpoint:
     """GET /api/runs/{run_id}"""
@@ -432,3 +468,60 @@ class TestResultsEndpoint:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(f"/api/runs/{run_id}/results")
             assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_results_returns_409_for_pending(self) -> None:
+        """Covers the second non-terminal status in RUN_STATUS_NON_TERMINAL_VALUES."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="pending",
+                started_at=None,
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+        )
+        app = _create_test_app(execution_service=svc)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(f"/api/runs/{run_id}/results")
+            assert resp.status_code == 409
+            assert "pending" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_results_guard_uses_derived_set(self) -> None:
+        """Route guard is now derived from schema Literals, not hardcoded.
+
+        This test pins the contract: the guard rejects exactly every
+        non-terminal value in RUN_STATUS_NON_TERMINAL_VALUES, proving the
+        route no longer carries an independent copy of the list.
+        """
+        from elspeth.web.execution.schemas import RUN_STATUS_NON_TERMINAL_VALUES
+
+        for non_terminal in RUN_STATUS_NON_TERMINAL_VALUES:
+            run_id = uuid4()
+            svc = MagicMock()
+            svc.get_status = AsyncMock(
+                return_value=RunStatusResponse(
+                    run_id=str(run_id),
+                    status=non_terminal,  # type: ignore[arg-type]
+                    started_at=None,
+                    finished_at=None,
+                    rows_processed=0,
+                    rows_succeeded=0,
+                    rows_failed=0,
+                    rows_quarantined=0,
+                    error=None,
+                    landscape_run_id=None,
+                )
+            )
+            app = _create_test_app(execution_service=svc)
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.get(f"/api/runs/{run_id}/results")
+                assert resp.status_code == 409, f"non-terminal status {non_terminal!r} must produce 409"

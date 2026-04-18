@@ -8,6 +8,9 @@ import pydantic
 import pytest
 
 from elspeth.web.execution.schemas import (
+    RUN_STATUS_ALL_VALUES,
+    RUN_STATUS_NON_TERMINAL_VALUES,
+    RUN_STATUS_TERMINAL_VALUES,
     CancelledData,
     CompletedData,
     ErrorData,
@@ -626,6 +629,180 @@ class TestRunEventTimestampCoercion:
                 event_type="progress",
                 data=ProgressData(rows_processed=0, rows_failed=0),
             )
+
+
+class TestRunStatusDecomposition:
+    """RunStatusResponse enforces row count decomposition ONLY on terminal states.
+
+    Non-terminal states (pending/running) may have transiently inconsistent
+    counts while the orchestrator is mid-flight.  Terminal states must
+    decompose cleanly — a mismatch is a Tier 1 anomaly.
+    """
+
+    def test_running_accepts_inconsistent_counts(self) -> None:
+        """In-flight counts can be transiently inconsistent."""
+        resp = RunStatusResponse(
+            run_id="r1",
+            status="running",
+            started_at=datetime.now(tz=UTC),
+            finished_at=None,
+            rows_processed=5,
+            rows_succeeded=2,
+            rows_failed=1,
+            rows_quarantined=0,  # 2 + 1 + 0 = 3 != 5, but OK while running
+            error=None,
+            landscape_run_id=None,
+        )
+        assert resp.rows_processed == 5
+
+    def test_pending_accepts_inconsistent_counts(self) -> None:
+        resp = RunStatusResponse(
+            run_id="r1",
+            status="pending",
+            started_at=None,
+            finished_at=None,
+            rows_processed=10,
+            rows_succeeded=0,
+            rows_failed=0,
+            rows_quarantined=0,  # 0 != 10, but pending means nothing resolved
+            error=None,
+            landscape_run_id=None,
+        )
+        assert resp.rows_processed == 10
+
+    def test_completed_rejects_inconsistent_counts(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="decomposition mismatch"):
+            RunStatusResponse(
+                run_id="r1",
+                status="completed",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=100,
+                rows_succeeded=95,
+                rows_failed=5,
+                rows_quarantined=3,  # 95 + 5 + 3 = 103 != 100
+                error=None,
+                landscape_run_id="lscape-1",
+            )
+
+    def test_failed_rejects_inconsistent_counts(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="decomposition mismatch"):
+            RunStatusResponse(
+                run_id="r1",
+                status="failed",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=10,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_quarantined=0,  # 0 != 10
+                error="pipeline crashed",
+                landscape_run_id=None,
+            )
+
+    def test_cancelled_rejects_inconsistent_counts(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="decomposition mismatch"):
+            RunStatusResponse(
+                run_id="r1",
+                status="cancelled",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=50,
+                rows_succeeded=30,
+                rows_failed=10,
+                rows_quarantined=5,  # 30 + 10 + 5 = 45 != 50
+                error=None,
+                landscape_run_id=None,
+            )
+
+    def test_completed_accepts_consistent_counts(self) -> None:
+        resp = RunStatusResponse(
+            run_id="r1",
+            status="completed",
+            started_at=datetime.now(tz=UTC),
+            finished_at=datetime.now(tz=UTC),
+            rows_processed=100,
+            rows_succeeded=95,
+            rows_failed=3,
+            rows_quarantined=2,
+            error=None,
+            landscape_run_id="lscape-1",
+        )
+        assert resp.rows_processed == 100
+
+
+class TestRunResultsDecomposition:
+    """RunResultsResponse enforces row count decomposition unconditionally.
+
+    The Literal restricts status to terminal values, so the invariant
+    always applies — parity with CompletedData.
+    """
+
+    def test_consistent_counts_accepted(self) -> None:
+        resp = RunResultsResponse(
+            run_id="r1",
+            status="completed",
+            rows_processed=100,
+            rows_succeeded=95,
+            rows_failed=3,
+            rows_quarantined=2,
+            landscape_run_id="lscape-1",
+            error=None,
+        )
+        assert resp.rows_processed == 100
+
+    def test_inconsistent_counts_rejected(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="decomposition mismatch"):
+            RunResultsResponse(
+                run_id="r1",
+                status="completed",
+                rows_processed=100,
+                rows_succeeded=50,
+                rows_failed=20,
+                rows_quarantined=10,  # 50 + 20 + 10 = 80 != 100
+                landscape_run_id="lscape-1",
+                error=None,
+            )
+
+    def test_failed_status_inconsistent_counts_rejected(self) -> None:
+        """Unconditional check: any terminal status triggers validation."""
+        with pytest.raises(pydantic.ValidationError, match="decomposition mismatch"):
+            RunResultsResponse(
+                run_id="r1",
+                status="failed",
+                rows_processed=10,
+                rows_succeeded=1,
+                rows_failed=0,
+                rows_quarantined=0,  # 1 != 10
+                landscape_run_id=None,
+                error="kaboom",
+            )
+
+
+class TestRunStatusDerivedSets:
+    """Sets derived from Literal annotations — guards against drift."""
+
+    def test_terminal_is_subset_of_all(self) -> None:
+        assert RUN_STATUS_TERMINAL_VALUES.issubset(RUN_STATUS_ALL_VALUES)
+
+    def test_non_terminal_is_complement(self) -> None:
+        assert RUN_STATUS_NON_TERMINAL_VALUES == (RUN_STATUS_ALL_VALUES - RUN_STATUS_TERMINAL_VALUES)
+
+    def test_non_terminal_matches_hardcoded_expected(self) -> None:
+        """Pinning the current contract: pending/running are non-terminal.
+
+        If a maintainer adds a new non-terminal status (e.g., "paused"),
+        this test fails loudly — forcing a deliberate review of all
+        downstream consumers of the /results 409 guard.
+        """
+        assert frozenset({"pending", "running"}) == RUN_STATUS_NON_TERMINAL_VALUES
+
+    def test_terminal_matches_hardcoded_expected(self) -> None:
+        assert frozenset({"completed", "failed", "cancelled"}) == RUN_STATUS_TERMINAL_VALUES
+
+    def test_non_terminal_is_nonempty(self) -> None:
+        """The /results 409 guard depends on this set being non-empty."""
+        assert RUN_STATUS_NON_TERMINAL_VALUES
 
 
 class TestErrorEventRoundTrip:

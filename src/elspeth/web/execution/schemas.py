@@ -82,6 +82,29 @@ class ErrorData(_StrictResponse):
     row_id: str | None
 
 
+def _validate_row_decomposition(
+    rows_processed: int,
+    rows_succeeded: int,
+    rows_failed: int,
+    rows_quarantined: int,
+) -> None:
+    """Enforce rows_processed == rows_succeeded + rows_failed + rows_quarantined.
+
+    Shared by CompletedData, RunResultsResponse, and (conditionally on
+    terminal status) RunStatusResponse.  A mismatch is a Tier 1 anomaly —
+    the orchestrator and session service must produce consistent counts
+    on terminal states.  Crash at construction rather than propagating
+    wrong numbers to the frontend and audit trail.
+    """
+    expected = rows_succeeded + rows_failed + rows_quarantined
+    if rows_processed != expected:
+        raise ValueError(
+            f"Row count decomposition mismatch: rows_processed={rows_processed} "
+            f"!= rows_succeeded({rows_succeeded}) + rows_failed({rows_failed}) "
+            f"+ rows_quarantined({rows_quarantined}) = {expected}"
+        )
+
+
 class CompletedData(_StrictResponse):
     """Payload for ``completed`` events (terminal)."""
 
@@ -93,20 +116,12 @@ class CompletedData(_StrictResponse):
 
     @model_validator(mode="after")
     def _check_row_decomposition(self) -> Self:
-        """Enforce rows_processed == rows_succeeded + rows_failed + rows_quarantined.
-
-        The orchestrator must produce consistent counts.  A mismatch indicates
-        a bug in the orchestrator or a corrupt intermediate value — crash at
-        event construction rather than propagating wrong numbers to the
-        frontend and audit trail.
-        """
-        expected = self.rows_succeeded + self.rows_failed + self.rows_quarantined
-        if self.rows_processed != expected:
-            raise ValueError(
-                f"Row count decomposition mismatch: rows_processed={self.rows_processed} "
-                f"!= rows_succeeded({self.rows_succeeded}) + rows_failed({self.rows_failed}) "
-                f"+ rows_quarantined({self.rows_quarantined}) = {expected}"
-            )
+        _validate_row_decomposition(
+            self.rows_processed,
+            self.rows_succeeded,
+            self.rows_failed,
+            self.rows_quarantined,
+        )
         return self
 
 
@@ -221,6 +236,25 @@ class RunStatusResponse(_StrictResponse):
     error: str | None
     landscape_run_id: str | None
 
+    @model_validator(mode="after")
+    def _check_row_decomposition(self) -> Self:
+        """Enforce decomposition ONLY on terminal states.
+
+        Non-terminal states (pending/running) may have transiently
+        inconsistent counts while the orchestrator is mid-flight
+        (a row may be marked processed before being categorised).
+        Terminal states must decompose cleanly — a mismatch served
+        via REST is a Tier 1 anomaly.
+        """
+        if self.status in RUN_STATUS_TERMINAL_VALUES:
+            _validate_row_decomposition(
+                self.rows_processed,
+                self.rows_succeeded,
+                self.rows_failed,
+                self.rows_quarantined,
+            )
+        return self
+
 
 class RunResultsResponse(_StrictResponse):
     """REST response for terminal run results."""
@@ -233,3 +267,43 @@ class RunResultsResponse(_StrictResponse):
     rows_quarantined: int = Field(ge=0)
     landscape_run_id: str | None
     error: str | None
+
+    @model_validator(mode="after")
+    def _check_row_decomposition(self) -> Self:
+        _validate_row_decomposition(
+            self.rows_processed,
+            self.rows_succeeded,
+            self.rows_failed,
+            self.rows_quarantined,
+        )
+        return self
+
+
+# ── Status set derivation (Literal → frozenset) ────────────────────────
+#
+# The REST /results endpoint must reject non-terminal runs with 409.  The
+# set of non-terminal statuses is derived from the difference between
+# RunStatusResponse.status (all) and RunResultsResponse.status (terminal)
+# so that adding a new non-terminal Literal value (e.g., "paused") to
+# RunStatusResponse automatically propagates to the route guard.
+#
+# Import-time assertion catches the reverse drift (a Literal value in
+# RunResultsResponse.status that is NOT in RunStatusResponse.status) —
+# without this, a typo in one Literal would produce a runtime set diff
+# with surprising contents.
+
+RUN_STATUS_ALL_VALUES: frozenset[str] = frozenset(get_args(RunStatusResponse.model_fields["status"].annotation))
+RUN_STATUS_TERMINAL_VALUES: frozenset[str] = frozenset(get_args(RunResultsResponse.model_fields["status"].annotation))
+RUN_STATUS_NON_TERMINAL_VALUES: frozenset[str] = RUN_STATUS_ALL_VALUES - RUN_STATUS_TERMINAL_VALUES
+
+if not RUN_STATUS_TERMINAL_VALUES.issubset(RUN_STATUS_ALL_VALUES):
+    raise AssertionError(
+        f"RunResultsResponse.status terminal values {RUN_STATUS_TERMINAL_VALUES} "
+        f"must be a subset of RunStatusResponse.status values {RUN_STATUS_ALL_VALUES}"
+    )
+if not RUN_STATUS_NON_TERMINAL_VALUES:
+    raise AssertionError(
+        "RunStatusResponse must declare at least one non-terminal status "
+        "not present in RunResultsResponse — otherwise the /results 409 "
+        "guard is dead code"
+    )

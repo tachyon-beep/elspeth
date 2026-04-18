@@ -596,47 +596,47 @@ allow_hits:
   reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE — DB/IO faults expected; programmer bugs still propagate
   safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not a silent swallow
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=6c0b765eeb7a2af4
+- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=eb4418fa33779301
   owner: web-execution
   reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=457b5aa453b2f1fc
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=fa26a2c48eab3cbd
   owner: web-execution
   reason: Heartbeat timeout is an expected idle path, not an error swallow
   safety: Sends heartbeat to keep connection alive
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=a4809e0f4225d466
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=4af40982a6febcb1
   owner: web-execution
   reason: Narrowed heartbeat disconnect catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Breaks out of loop; falls through to unsubscribe
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=60be3c5861bd7ad4
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=095289dcfb39d52e
   owner: web-execution
   reason: WebSocketDisconnect is the expected disconnect control-flow path
   safety: Falls through to unsubscribe cleanup
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=332cc8c57af982d8
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=1cfba37b39e2b4f2
   owner: web-execution
   reason: Narrowed outer handler to (ConnectionError, OSError) — programming errors now propagate
   safety: Logged with slog.error; clean 1011 close sent to client
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=fe6475f1d3cdedea
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=765b2cc5aed5f53b
   owner: web-execution
   reason: Narrowed close catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Logged; already in error path
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=320fb385560e6214
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=717656f7d1a5851b
   owner: web-execution
   reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to except AuthenticationError only
   safety: Only auth failures close with 4001; infrastructure errors propagate to outer handler
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=22328521a378f729
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=af7754d4c6381199
   owner: web-execution
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
   safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=c348716c2cbe1830
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=558266ebded3433d
   owner: web-execution
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
@@ -849,32 +849,32 @@ allow_hits:
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
   safety: Continues to next delimiter; returns None for uncertain content; no data loss
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=a1808f9e934b4d29
+- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=81049e780f966e57
   owner: web-execution
   reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp, rejects int (Unix epoch)
   safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False) coercion scope
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=d100c71bbce019dc
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=b718b99e53713b61
   owner: web-execution
   reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip path; non-dict values handled by Pydantic
   safety: Structural dispatch for deserialization, not error suppression
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=cf970d0218bf474d
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=49ed85b5b2bfb3e1
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=1b9ad44da700262b
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=ace520a8c5968607
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=273695b5fe3c3ddb
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=9ace6092f23d776d
   owner: web-execution
   reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip resolution
   safety: Non-dict data falls through to Pydantic union matching
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=b2c0ae1ff2459787
+- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=6c0e789618dc5bce
   owner: web-execution
   reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator

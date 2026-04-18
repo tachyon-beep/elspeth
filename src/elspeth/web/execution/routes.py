@@ -18,6 +18,7 @@ import asyncio
 from typing import Literal, cast
 from uuid import UUID
 
+import pydantic
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
@@ -28,6 +29,7 @@ from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService
 from elspeth.web.execution.schemas import (
+    RUN_STATUS_NON_TERMINAL_VALUES,
     CancelledData,
     CompletedData,
     FailedData,
@@ -185,13 +187,15 @@ def create_execution_router() -> APIRouter:
         """Return final run results. 409 if run is not terminal."""
         await _verify_run_ownership(run_id, user, request)
         status = await service.get_status(run_id)
-        if status.status in ("pending", "running"):
+        if status.status in RUN_STATUS_NON_TERMINAL_VALUES:
             raise HTTPException(
                 status_code=409,
                 detail=f"Run is still {status.status}",
             )
-        # mypy can't narrow Literal through `in` guards — cast is safe
-        # because the guard above rejects non-terminal statuses.
+        # mypy can't narrow a Literal through frozenset membership — the
+        # cast is safe because RUN_STATUS_NON_TERMINAL_VALUES is the exact
+        # complement of RunResultsResponse's Literal values, enforced by a
+        # module-load assertion in schemas.py.
         terminal_status = cast(Literal["completed", "failed", "cancelled"], status.status)
         return RunResultsResponse(
             run_id=status.run_id,
@@ -264,13 +268,26 @@ def create_execution_router() -> APIRouter:
                         raise RuntimeError(
                             f"Completed run {current.run_id} has no landscape_run_id — Tier 1 anomaly (audit trail incomplete)"
                         )
-                    payload: CompletedData | FailedData | CancelledData = CompletedData(
-                        rows_processed=current.rows_processed,
-                        rows_succeeded=current.rows_succeeded,
-                        rows_failed=current.rows_failed,
-                        rows_quarantined=current.rows_quarantined,
-                        landscape_run_id=current.landscape_run_id,
-                    )
+                    # CompletedData enforces rows_processed decomposition via
+                    # model_validator.  The DB values are Tier 1 — a mismatch
+                    # is a system-integrity failure, not user input.  Wrap
+                    # pydantic.ValidationError in a RuntimeError with the same
+                    # "Tier 1 anomaly" framing as the explicit checks above so
+                    # the seeding path fails with a single, recognisable
+                    # exception shape regardless of which invariant tripped.
+                    try:
+                        payload: CompletedData | FailedData | CancelledData = CompletedData(
+                            rows_processed=current.rows_processed,
+                            rows_succeeded=current.rows_succeeded,
+                            rows_failed=current.rows_failed,
+                            rows_quarantined=current.rows_quarantined,
+                            landscape_run_id=current.landscape_run_id,
+                        )
+                    except pydantic.ValidationError as exc:
+                        raise RuntimeError(
+                            f"Completed run {current.run_id} failed CompletedData validation "
+                            f"— Tier 1 anomaly (audit trail inconsistent): {exc}"
+                        ) from exc
                 elif current.status == "failed":
                     if current.error is None:
                         raise RuntimeError(
