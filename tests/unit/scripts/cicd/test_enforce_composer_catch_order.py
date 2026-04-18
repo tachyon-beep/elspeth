@@ -353,14 +353,42 @@ class TestHierarchyConsistency:
     ``elspeth.web.composer.protocol`` would bypass the gate entirely. This
     test imports the real classes and asserts the dict agrees with Python's
     ``__mro__`` view so drift fails CI loudly, forcing the enforcer update.
+
+    Subclass discovery walks ``__subclasses__()`` **transitively**: a
+    second-level subclass (``class G(ComposerConvergenceError): ...``) is
+    still an ``except ComposerServiceError`` catch target, so shadowing
+    detection must cover the full subtree, not only direct children of
+    the root. Supertype verification likewise checks every composer-family
+    ancestor in the MRO — if ``G`` lists only ``ComposerConvergenceError``
+    but not ``ComposerServiceError``, a route that writes
+    ``except ComposerServiceError`` before ``except G`` would still
+    silently regress even though ``G`` appears in the declared map.
     """
+
+    @staticmethod
+    def _all_subclasses(cls: type) -> set[type]:
+        """Transitive closure of ``cls.__subclasses__()``.
+
+        ``__subclasses__()`` returns only direct children. A grandchild
+        added without updating the enforcer would silently bypass the
+        gate, which is exactly the drift this test is designed to fail.
+        """
+        discovered: set[type] = set()
+        stack: list[type] = [cls]
+        while stack:
+            parent = stack.pop()
+            for child in parent.__subclasses__():
+                if child not in discovered:
+                    discovered.add(child)
+                    stack.append(child)
+        return discovered
 
     def test_declared_map_matches_real_mro(self) -> None:
         from scripts.cicd.enforce_composer_catch_order import _SUBCLASS_TO_SUPERCLASSES
 
         from elspeth.web.composer.protocol import ComposerServiceError
 
-        real_subclasses = {cls.__name__ for cls in ComposerServiceError.__subclasses__()}
+        real_subclasses = {cls.__name__ for cls in self._all_subclasses(ComposerServiceError)}
         declared_subclasses = set(_SUBCLASS_TO_SUPERCLASSES.keys())
         assert real_subclasses == declared_subclasses, (
             "enforce_composer_catch_order._SUBCLASS_TO_SUPERCLASSES is out of "
@@ -380,4 +408,43 @@ class TestHierarchyConsistency:
                 f"{sub} entry missing ComposerServiceError supertype; the "
                 "gate would not detect a ComposerServiceError handler "
                 f"shadowing a {sub} handler."
+            )
+
+    def test_declared_supertypes_match_full_mro(self) -> None:
+        """Every declared subclass must list **every** composer-family
+        ancestor in its MRO — not only ``ComposerServiceError``.
+
+        Why: ``except <Ancestor>`` at any depth shadows a later
+        ``except <Descendant>`` handler.  If a grandchild class
+        ``G(ComposerConvergenceError)`` declared only
+        ``{ComposerConvergenceError}`` as its supertype, a route with
+        ``except ComposerServiceError:`` before ``except G:`` would pass
+        the enforcer (``ComposerServiceError`` is not in G's declared
+        supers), yet at runtime the G handler is unreachable.  The fix is
+        structural — match the declared supertypes to the real MRO slice
+        restricted to the composer family — not to expand the enforcer's
+        AST-level logic.
+        """
+        from scripts.cicd.enforce_composer_catch_order import _SUBCLASS_TO_SUPERCLASSES
+
+        from elspeth.web.composer.protocol import ComposerServiceError
+
+        composer_family: set[type] = {ComposerServiceError} | self._all_subclasses(ComposerServiceError)
+        name_to_cls = {cls.__name__: cls for cls in composer_family}
+
+        for sub_name, declared_supers in _SUBCLASS_TO_SUPERCLASSES.items():
+            cls = name_to_cls[sub_name]
+            real_supers = {
+                ancestor.__name__
+                for ancestor in cls.__mro__[1:]  # skip cls itself
+                if ancestor in composer_family
+            }
+            assert declared_supers == frozenset(real_supers), (
+                f"{sub_name} supertype declaration disagrees with its real MRO. "
+                f"Declared: {sorted(declared_supers)}  Real composer-family "
+                f"ancestors: {sorted(real_supers)}. Update the entry in "
+                "scripts/cicd/enforce_composer_catch_order.py so every "
+                "composer-family ancestor is listed — an ``except <Ancestor>`` "
+                "handler at any depth shadows the subclass handler and the "
+                "gate must see the full supertype set to detect it."
             )

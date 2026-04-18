@@ -73,8 +73,12 @@ class ProgressData(_StrictResponse):
 class ErrorData(_StrictResponse):
     """Payload for ``error`` events (non-terminal, per-row).
 
-    Currently no backend producer emits this event type, but the frontend
-    has a handler for it and it represents a legitimate future capability.
+    Reserved for per-row error reporting during a run: the frontend has a
+    handler for this event type (so dropping the schema would break the
+    contract with clients), and the producer side is defined here so
+    backend emission can be added without a second schema round-trip.
+    No routine producer path emits it yet; adding one is the intended
+    future use of this class.
     """
 
     message: str = Field(min_length=1)

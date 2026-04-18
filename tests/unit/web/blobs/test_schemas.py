@@ -89,3 +89,50 @@ class TestBlobHappyPath:
         kwargs["content_hash"] = None
         resp = BlobMetadataResponse(**kwargs)  # type: ignore[arg-type]
         assert resp.content_hash is None
+
+
+class TestBlobStrictnessViaJson:
+    """Parallel coverage for the ``model_validate_json`` path.
+
+    The constructor path is covered above; this class pins the same
+    strictness + extra-field-rejection contract through Pydantic's
+    JSON-parse surface so that a future Pydantic release decoupling the
+    two paths cannot silently admit ``storage_path`` on the wire.
+    ``extra="forbid"`` on the response model is the mechanical guard
+    that the ``BlobMetadataResponse`` docstring calls load-bearing;
+    both code paths must honour it.
+    """
+
+    def test_rejects_storage_path_leak_in_json(self) -> None:
+        """storage_path leak guard holds through the JSON-parse surface."""
+        payload = (
+            '{"id": "blob-1", "session_id": "sess-1", "filename": "data.csv", '
+            '"mime_type": "text/csv", "size_bytes": 1024, '
+            '"content_hash": "sha256:abc", "created_at": "2026-04-15T10:00:00+00:00", '
+            '"created_by": "user", "source_description": null, "status": "ready", '
+            '"storage_path": "/var/blobs/sess-1/blob-1"}'
+        )
+        with pytest.raises(ValidationError, match="extra"):
+            BlobMetadataResponse.model_validate_json(payload)
+
+    def test_rejects_string_int_size_bytes_in_json(self) -> None:
+        """Strict mode rejects JSON string-for-int coercion on size_bytes."""
+        payload = (
+            '{"id": "blob-1", "session_id": "sess-1", "filename": "data.csv", '
+            '"mime_type": "text/csv", "size_bytes": "1024", '
+            '"content_hash": "sha256:abc", "created_at": "2026-04-15T10:00:00+00:00", '
+            '"created_by": "user", "source_description": null, "status": "ready"}'
+        )
+        with pytest.raises(ValidationError):
+            BlobMetadataResponse.model_validate_json(payload)
+
+    def test_rejects_invalid_mime_type_in_json(self) -> None:
+        """AllowedMimeType Literal is enforced on the JSON-parse path."""
+        payload = (
+            '{"id": "blob-1", "session_id": "sess-1", "filename": "data.csv", '
+            '"mime_type": "application/unknown", "size_bytes": 1024, '
+            '"content_hash": "sha256:abc", "created_at": "2026-04-15T10:00:00+00:00", '
+            '"created_by": "user", "source_description": null, "status": "ready"}'
+        )
+        with pytest.raises(ValidationError):
+            BlobMetadataResponse.model_validate_json(payload)

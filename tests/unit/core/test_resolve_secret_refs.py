@@ -13,7 +13,7 @@ class FakeResolver:
         self._secrets = secrets
 
     def list_refs(self, user_id: str) -> list[SecretInventoryItem]:
-        return [SecretInventoryItem(name=k, scope="test", available=True) for k in self._secrets]
+        return [SecretInventoryItem(name=k, scope="user", available=True) for k in self._secrets]
 
     def has_ref(self, user_id: str, name: str) -> bool:
         return name in self._secrets

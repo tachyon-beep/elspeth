@@ -972,30 +972,84 @@ class TestLiteLLMErrorRedaction:
     leak surface.
     """
 
-    _CANARY_MESSAGE = (
-        "Auth failed for provider=openai model=gpt-4 "
-        "request_payload={'key': 'sk-secret-xyz'} "
-        "response='Authorization: Bearer sk-leaked-token-abc123'"
-    )
+    # Distinct, recognisably synthetic canaries per leakage surface.  Each
+    # probes a different way LiteLLM's ``str(exc)`` could expose provider
+    # internals:
+    #
+    # * ``_CANARY_MESSAGE_*`` — the ``message`` constructor argument, the
+    #   most common leak vector (Authorization headers, request payload
+    #   fragments, upstream response bodies).
+    # * ``_CANARY_PROVIDER`` / ``_CANARY_MODEL`` — fields LiteLLM embeds
+    #   in its ``__str__`` rendering; even though these are operator-
+    #   chosen today, a future provider name that carries credentials
+    #   (e.g. tenant-scoped Azure deployments) must not flow through.
+    # * ``_CANARY_CAUSE`` — the ``__cause__`` chain from ``raise ... from``;
+    #   a 502 body that serialises ``exc.__cause__`` / ``exc.__context__``
+    #   would leak upstream DB URLs, credentials, or internal tracebacks
+    #   that never appeared in the LiteLLM exception itself.  Mirror of
+    #   the SQLAlchemy-side canary coverage (see
+    #   ``test_recompose_convergence_save_failure_redacts_sqlalchemy_internals``).
+    _CANARY_MESSAGE_TOKEN = "__CANARY_LITELLM_MSG_sk_leaked_token_abc123__"
+    _CANARY_MESSAGE_AUTH_HEADER = "__CANARY_LITELLM_MSG_Authorization_Bearer__"
+    _CANARY_MESSAGE_PAYLOAD = "__CANARY_LITELLM_MSG_request_payload_opaque__"
+    _CANARY_PROVIDER = "__CANARY_LITELLM_PROVIDER_internal__"
+    _CANARY_MODEL = "__CANARY_LITELLM_MODEL_secret_deployment__"
+    _CANARY_CAUSE = "__CANARY_LITELLM_CAUSE_upstream_conn_str__"
+
+    @classmethod
+    def _canary_message(cls) -> str:
+        """Assemble a message that packs every message-field canary.
+
+        Kept as a single concatenated string so every canary rides
+        through the same ``message`` constructor argument — the exact
+        path the redaction contract is designed to sever.
+        """
+        return (
+            f"Auth failed token={cls._CANARY_MESSAGE_TOKEN} header={cls._CANARY_MESSAGE_AUTH_HEADER} payload={cls._CANARY_MESSAGE_PAYLOAD}"
+        )
+
+    @classmethod
+    def _all_canaries(cls) -> tuple[tuple[str, str], ...]:
+        """Canary name → value pairs for the leak-surface sweep.
+
+        Returned as ordered tuples so assertion failures identify the
+        specific leak surface (e.g. ``__cause__`` chain vs ``model`` field)
+        rather than a generic "something leaked" signal.
+        """
+        return (
+            ("message.token", cls._CANARY_MESSAGE_TOKEN),
+            ("message.auth_header", cls._CANARY_MESSAGE_AUTH_HEADER),
+            ("message.payload", cls._CANARY_MESSAGE_PAYLOAD),
+            ("llm_provider", cls._CANARY_PROVIDER),
+            ("model", cls._CANARY_MODEL),
+            ("__cause__", cls._CANARY_CAUSE),
+        )
 
     def _make_auth_error(self):
         from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 
-        return LiteLLMAuthError(
-            message=self._CANARY_MESSAGE,
-            llm_provider="openai",
-            model="gpt-4",
+        exc = LiteLLMAuthError(
+            message=self._canary_message(),
+            llm_provider=self._CANARY_PROVIDER,
+            model=self._CANARY_MODEL,
         )
+        # ``raise ... from cause`` chained manually so the test can run
+        # without an actual DB/network cause — what matters is that a
+        # serialiser that walks ``__cause__`` will encounter the canary.
+        exc.__cause__ = RuntimeError(f"upstream: {self._CANARY_CAUSE}")
+        return exc
 
     def _make_api_error(self):
         from litellm.exceptions import APIError as LiteLLMAPIError
 
-        return LiteLLMAPIError(
+        exc = LiteLLMAPIError(
             status_code=503,
-            message=self._CANARY_MESSAGE,
-            llm_provider="openai",
-            model="gpt-4",
+            message=self._canary_message(),
+            llm_provider=self._CANARY_PROVIDER,
+            model=self._CANARY_MODEL,
         )
+        exc.__cause__ = RuntimeError(f"upstream: {self._CANARY_CAUSE}")
+        return exc
 
     def _assert_redacted(self, resp, expected_error_type: str, expected_exc_class: str) -> None:
         """Assert the 502 body is class-name-only and contains no canary strings."""
@@ -1009,15 +1063,21 @@ class TestLiteLLMErrorRedaction:
         # Auth failed for provider=openai ..." which is precisely the
         # shape the redaction exists to prevent.
         assert detail["detail"] == expected_exc_class
-        # Defence-in-depth: assert the canary fragments are absent
-        # anywhere in the serialised body. Catches any future code path
-        # that re-introduces str(exc) into a different field, or that
-        # serialises the __cause__ chain into JSON.
+        # Defence-in-depth: sweep every canary across the full serialised
+        # body.  Per-surface failure messages so a regression names which
+        # leak channel opened (``message`` field vs ``__cause__`` chain vs
+        # ``model`` field) — mirrors the SQLAlchemy-side coverage in
+        # ``test_recompose_convergence_save_failure_redacts_sqlalchemy_internals``.
         serialised = resp.text
-        assert "sk-secret-xyz" not in serialised
-        assert "sk-leaked-token-abc123" not in serialised
-        assert "Authorization: Bearer" not in serialised
-        assert "request_payload=" not in serialised
+        for surface, canary in self._all_canaries():
+            assert canary not in serialised, (
+                f"LiteLLM canary leaked into HTTP response body via "
+                f"{surface!r} surface: {canary!r} appears in serialised 502 body. "
+                "The redaction contract requires the body to carry only the "
+                "exception class name — inspect the handler for a code path "
+                "that re-introduced str(exc), exc.__cause__, or an individual "
+                "exception field into the response."
+            )
 
     def test_send_message_auth_error_body_carries_class_name_only(self, tmp_path) -> None:
         """LiteLLMAuthError from compose() → 502 with class-name-only detail."""

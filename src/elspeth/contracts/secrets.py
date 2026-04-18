@@ -102,10 +102,16 @@ class ResolvedSecret:
 
 @dataclass(frozen=True, slots=True)
 class SecretInventoryItem:
-    """Browser-safe secret metadata — no value, no masked derivative."""
+    """Browser-safe secret metadata — no value, no masked derivative.
+
+    ``scope`` is narrowed to the production domain so it matches
+    ``CreateSecretResult.scope`` and ``ResolvedSecret.scope``: type-checked
+    callers cannot pass an invented scope value through the inventory
+    without first widening this Literal and every sibling schema.
+    """
 
     name: str
-    scope: str
+    scope: Literal["user", "server", "org"]
     available: bool
     source_kind: str = ""
 

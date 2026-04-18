@@ -91,3 +91,51 @@ class TestSecretResponseHappyPath:
     def test_validate_response(self) -> None:
         resp = ValidateSecretResponse(name="api_key", available=False)
         assert resp.available is False
+
+
+class TestSecretStrictnessViaJson:
+    """Parallel coverage for the ``model_validate_json`` path.
+
+    Pydantic 2.x applies ``strict=True`` / ``extra="forbid"`` uniformly
+    across the constructor path and the JSON-parse path, but nothing in
+    the other tests in this module would catch a future Pydantic release
+    that decoupled the two.  For the secrets response models the
+    no-value-on-way-out invariant is load-bearing: a JSON body
+    ``{"name": "n", "scope": "user", "available": true, "value": "..."}``
+    must be rejected even if a future Pydantic version silently drops
+    unknown fields for the JSON path but not for the constructor path.
+
+    These tests pin the invariant from the JSON surface and fail loudly
+    on any such drift.
+    """
+
+    def test_create_response_rejects_value_field_in_json(self) -> None:
+        """No-value-on-way-out holds through the JSON-parse surface."""
+        payload = '{"name": "n", "scope": "user", "available": true, "value": "super-secret"}'
+        with pytest.raises(ValidationError, match="extra"):
+            CreateSecretResponse.model_validate_json(payload)
+
+    def test_inventory_rejects_value_field_in_json(self) -> None:
+        payload = (
+            '{"name": "n", "scope": "user", "available": true, '
+            '"source_kind": "env", "value": "super-secret"}'
+        )
+        with pytest.raises(ValidationError, match="extra"):
+            SecretInventoryResponse.model_validate_json(payload)
+
+    def test_validate_response_rejects_value_field_in_json(self) -> None:
+        payload = '{"name": "n", "available": true, "value": "super-secret"}'
+        with pytest.raises(ValidationError, match="extra"):
+            ValidateSecretResponse.model_validate_json(payload)
+
+    def test_create_response_rejects_string_bool_in_json(self) -> None:
+        """Strict mode rejects JSON string-for-bool coercion."""
+        payload = '{"name": "n", "scope": "user", "available": "true"}'
+        with pytest.raises(ValidationError):
+            CreateSecretResponse.model_validate_json(payload)
+
+    def test_inventory_rejects_int_scope_in_json(self) -> None:
+        """Strict mode rejects JSON int-for-string coercion on the scope field."""
+        payload = '{"name": "n", "scope": 7, "available": true, "source_kind": "env"}'
+        with pytest.raises(ValidationError):
+            SecretInventoryResponse.model_validate_json(payload)

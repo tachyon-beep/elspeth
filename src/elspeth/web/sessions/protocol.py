@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from types import MappingProxyType
 from typing import Any, Literal, Protocol, runtime_checkable
 from uuid import UUID
 
@@ -21,13 +22,21 @@ from elspeth.contracts.freeze import freeze_fields
 
 # Legal run status transitions. Implementations MUST reject any
 # transition not in this table.
-LEGAL_RUN_TRANSITIONS: dict[str, frozenset[str]] = {
-    "pending": frozenset({"running", "failed", "cancelled"}),
-    "running": frozenset({"completed", "failed", "cancelled"}),
-    "completed": frozenset(),  # terminal
-    "failed": frozenset(),  # terminal
-    "cancelled": frozenset(),  # terminal
-}
+#
+# Wrapped in MappingProxyType so importers cannot mutate the module-level
+# table at runtime: ``LEGAL_RUN_TRANSITIONS["completed"] = frozenset({"running"})``
+# raises TypeError rather than silently redefining terminal-state policy
+# for every downstream consumer.  The inline dict has no retained alias,
+# so the proxy is the only reference — there is no mutable back-door.
+LEGAL_RUN_TRANSITIONS: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        "pending": frozenset({"running", "failed", "cancelled"}),
+        "running": frozenset({"completed", "failed", "cancelled"}),
+        "completed": frozenset(),  # terminal
+        "failed": frozenset(),  # terminal
+        "cancelled": frozenset(),  # terminal
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

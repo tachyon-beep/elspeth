@@ -29,10 +29,16 @@ one of its subclasses. The canonical file protected is
 the same invariant is enforced if a future module picks up the pair.
 
 Hierarchy is declared explicitly in ``_SUBCLASS_TO_SUPERCLASSES``. The
-test file (``tests/unit/scripts/cicd/test_enforce_composer_catch_order.py``)
-includes a consistency check that cross-references the real Python MRO
-so a new ``ComposerServiceError`` subclass fails CI until the enforcer
-is updated.
+enforcer itself scans AST text and does NOT walk runtime MRO — it only
+fires on the pairs declared in that dict. Transitive coverage (a
+second-level subclass shadowed by ``except ComposerServiceError``) is
+guaranteed by the companion test file
+(``tests/unit/scripts/cicd/test_enforce_composer_catch_order.py``),
+which walks ``__subclasses__()`` transitively and asserts that every
+declared subclass lists **every** composer-family ancestor in its
+declared supertype set. A grandchild class added without updating the
+dict — or an entry that lists only the immediate parent — fails CI
+loudly until the enforcer's declared map matches real MRO.
 
 Usage (production):
     python scripts/cicd/enforce_composer_catch_order.py check \\
