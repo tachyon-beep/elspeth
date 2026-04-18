@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import ValidationError
 
 from elspeth.web.sessions.schemas import (
+    ChatMessageResponse,
+    CompositionStateResponse,
     CreateSessionRequest,
     ForkSessionRequest,
+    ForkSessionResponse,
+    MessageWithStateResponse,
     RevertStateRequest,
     RunResponse,
     SendMessageRequest,
+    SessionResponse,
+    ValidationEntryResponse,
 )
 
 
@@ -102,3 +110,176 @@ class TestRunResponse:
             composition_version=1,
         )
         assert resp.status == "completed"
+
+
+def _valid_session_response_kwargs() -> dict[str, object]:
+    now = datetime.now(UTC)
+    return {
+        "id": "sess-1",
+        "user_id": "user-1",
+        "title": "Session",
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def _valid_chat_message_kwargs() -> dict[str, object]:
+    return {
+        "id": "msg-1",
+        "session_id": "sess-1",
+        "role": "user",
+        "content": "hello",
+        "tool_calls": None,
+        "created_at": datetime.now(UTC),
+    }
+
+
+def _valid_composition_state_kwargs() -> dict[str, object]:
+    return {
+        "id": "state-1",
+        "session_id": "sess-1",
+        "version": 1,
+        "source": None,
+        "nodes": None,
+        "edges": None,
+        "outputs": None,
+        "metadata": None,
+        "is_valid": True,
+        "validation_errors": None,
+        "validation_warnings": None,
+        "validation_suggestions": None,
+        "derived_from_state_id": None,
+        "created_at": datetime.now(UTC),
+    }
+
+
+def _valid_run_response_kwargs() -> dict[str, object]:
+    return {
+        "id": "run-1",
+        "session_id": "sess-1",
+        "status": "completed",
+        "rows_processed": 10,
+        "rows_failed": 0,
+        "started_at": datetime.now(UTC),
+        "composition_version": 1,
+    }
+
+
+# ── Tier 1 strictness regression tests ───────────────────────────────
+#
+# Session response models serialize system-owned data (Tier 1).  Silent
+# coercion or dropped extras on the way out would let a backend bug
+# (wrong type emitted by the service layer, or a stale field lingering
+# from a refactor) flow into the audit-visible API surface without
+# complaint.  Mirror the execution/schemas.py strictness contract.
+
+
+class TestSessionStrictCoercionRejected:
+    """String-to-int, string-to-bool, and string-to-datetime coercion must crash."""
+
+    def test_session_response_rejects_iso_string_datetime(self) -> None:
+        kwargs = _valid_session_response_kwargs()
+        kwargs["created_at"] = "2026-04-15T10:00:00+00:00"
+        with pytest.raises(ValidationError):
+            SessionResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_chat_message_response_rejects_iso_string_datetime(self) -> None:
+        kwargs = _valid_chat_message_kwargs()
+        kwargs["created_at"] = "2026-04-15T10:00:00+00:00"
+        with pytest.raises(ValidationError):
+            ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_string_int_version(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["version"] = "1"
+        with pytest.raises(ValidationError):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_string_bool_is_valid(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["is_valid"] = "true"
+        with pytest.raises(ValidationError):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_run_response_rejects_string_int_rows_processed(self) -> None:
+        kwargs = _valid_run_response_kwargs()
+        kwargs["rows_processed"] = "10"
+        with pytest.raises(ValidationError):
+            RunResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_run_response_rejects_iso_string_started_at(self) -> None:
+        kwargs = _valid_run_response_kwargs()
+        kwargs["started_at"] = "2026-04-15T10:00:00+00:00"
+        with pytest.raises(ValidationError):
+            RunResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_validation_entry_response_rejects_int_as_str(self) -> None:
+        with pytest.raises(ValidationError):
+            ValidationEntryResponse(component=42, message="m", severity="warning")  # type: ignore[arg-type]
+
+
+class TestSessionExtraFieldsRejected:
+    """Extra fields must raise, not be silently dropped."""
+
+    def test_session_response_rejects_extra(self) -> None:
+        kwargs = _valid_session_response_kwargs()
+        kwargs["extra_field"] = "nope"
+        with pytest.raises(ValidationError, match="extra"):
+            SessionResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_chat_message_response_rejects_extra(self) -> None:
+        kwargs = _valid_chat_message_kwargs()
+        kwargs["model_version"] = "gpt-5"
+        with pytest.raises(ValidationError, match="extra"):
+            ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_extra(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["hash"] = "deadbeef"
+        with pytest.raises(ValidationError, match="extra"):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_run_response_rejects_extra(self) -> None:
+        kwargs = _valid_run_response_kwargs()
+        kwargs["duration_ms"] = 1234
+        with pytest.raises(ValidationError, match="extra"):
+            RunResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_validation_entry_response_rejects_extra(self) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            ValidationEntryResponse(component="c", message="m", severity="warning", code="X1")  # type: ignore[call-arg]
+
+    def test_message_with_state_response_rejects_extra(self) -> None:
+        msg = ChatMessageResponse(**_valid_chat_message_kwargs())  # type: ignore[arg-type]
+        with pytest.raises(ValidationError, match="extra"):
+            MessageWithStateResponse(message=msg, state=None, usage_tokens=100)  # type: ignore[call-arg]
+
+    def test_fork_session_response_rejects_extra(self) -> None:
+        session = SessionResponse(**_valid_session_response_kwargs())  # type: ignore[arg-type]
+        with pytest.raises(ValidationError, match="extra"):
+            ForkSessionResponse(session=session, messages=[], composition_state=None, note="x")  # type: ignore[call-arg]
+
+
+class TestSessionResponseHappyPath:
+    """The strictness contract must still allow the production construction paths."""
+
+    def test_session_response_constructs_from_records(self) -> None:
+        kwargs = _valid_session_response_kwargs()
+        kwargs["forked_from_session_id"] = "sess-parent"
+        kwargs["forked_from_message_id"] = "msg-parent"
+        resp = SessionResponse(**kwargs)  # type: ignore[arg-type]
+        assert resp.forked_from_session_id == "sess-parent"
+
+    def test_composition_state_response_with_populated_containers(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["source"] = {"kind": "csv"}
+        kwargs["nodes"] = [{"id": "n1"}]
+        kwargs["validation_errors"] = ["boom"]
+        kwargs["validation_warnings"] = [
+            ValidationEntryResponse(component="c", message="m", severity="warning"),
+        ]
+        resp = CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+        assert resp.source == {"kind": "csv"}
+        assert resp.validation_errors == ["boom"]
+        assert resp.validation_warnings is not None
+        assert resp.validation_warnings[0].component == "c"

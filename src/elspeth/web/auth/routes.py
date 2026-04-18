@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.middleware import get_current_user
@@ -21,6 +21,19 @@ from elspeth.web.auth.protocol import AuthProvider, CredentialAuthProvider
 from elspeth.web.config import WebSettings
 from elspeth.web.middleware.rate_limit import check_auth_rate_limit
 from elspeth.web.validation import has_visible_content
+
+
+class _StrictResponse(BaseModel):
+    """Tier 1 base for auth responses — no coercion, no extras.
+
+    Auth responses carry identity material (user_id, groups, tokens) that
+    the audit trail and authorization boundary both rely on.  Strict
+    construction means a buggy provider adapter cannot smuggle unexpected
+    claims into ``/me`` or ``/config``, and cannot silently add a
+    ``refresh_token`` field to the bearer-only ``TokenResponse``.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
 
 
 class LoginRequest(BaseModel):
@@ -46,14 +59,14 @@ class RegisterRequest(BaseModel):
         return v
 
 
-class TokenResponse(BaseModel):
+class TokenResponse(_StrictResponse):
     """Response for login and token refresh."""
 
     access_token: str
     token_type: str = "bearer"
 
 
-class UserProfileResponse(BaseModel):
+class UserProfileResponse(_StrictResponse):
     """Response for GET /api/auth/me."""
 
     user_id: str
@@ -63,7 +76,7 @@ class UserProfileResponse(BaseModel):
     groups: list[str] = []
 
 
-class AuthConfigResponse(BaseModel):
+class AuthConfigResponse(_StrictResponse):
     """Response for GET /api/auth/config."""
 
     provider: str

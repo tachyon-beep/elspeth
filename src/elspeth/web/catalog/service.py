@@ -9,6 +9,7 @@ from elspeth.plugins.infrastructure.discovery import get_plugin_description
 from elspeth.plugins.infrastructure.manager import PluginManager, PluginNotFoundError
 from elspeth.web.catalog.schemas import (
     ConfigFieldSummary,
+    PluginKind,
     PluginSchemaInfo,
     PluginSummary,
 )
@@ -57,7 +58,7 @@ class CatalogServiceImpl:
     def list_sinks(self) -> list[PluginSummary]:
         return [self._to_summary(cls, "sink") for cls in self._sink_classes]
 
-    def get_schema(self, plugin_type: str, name: str) -> PluginSchemaInfo:
+    def get_schema(self, plugin_type: PluginKind, name: str) -> PluginSchemaInfo:
         plugin_cls = self._get_plugin_class(plugin_type, name)
 
         # Plugins own schema emission — single-model plugins use the default
@@ -78,14 +79,21 @@ class CatalogServiceImpl:
 
     # -- Private helpers --
 
-    def _get_plugin_class(self, plugin_type: str, name: str) -> PluginClass:
+    def _get_plugin_class(self, plugin_type: PluginKind, name: str) -> PluginClass:
         """Look up a plugin class by (type, name) with a descriptive error.
 
-        Raises ``ValueError`` on invalid ``plugin_type`` (programming error)
-        or when the plugin name is not registered. The narrower
-        ``PluginNotFoundError`` subtype from ``PluginManager`` is caught and
-        rewrapped so callers see a single consistent exception type regardless
-        of which lookup method rejected the name.
+        Raises ``ValueError`` when the plugin name is not registered. The
+        narrower ``PluginNotFoundError`` subtype from ``PluginManager`` is
+        caught and rewrapped so callers see a single consistent exception
+        type regardless of which lookup method rejected the name.
+
+        Defense-in-depth guard on ``plugin_type``: the parameter is typed
+        ``PluginKind`` so structurally reachable only with "source" /
+        "transform" / "sink", but composer tools dispatch via untyped
+        ``arguments["plugin_type"]`` reads — a bypass at that boundary
+        should crash here with a descriptive error, not silently fall
+        through to ``get_sink_by_name`` and surface as a misleading
+        "Unknown sink plugin" message.
         """
         if plugin_type not in _VALID_TYPES:
             raise ValueError(f"Unknown plugin type: {plugin_type}. Must be one of: {sorted(_VALID_TYPES)}")
@@ -100,7 +108,7 @@ class CatalogServiceImpl:
             available = self._available_names(plugin_type)
             raise ValueError(f"Unknown {plugin_type} plugin: {name}. Available: {available}") from exc
 
-    def _to_summary(self, plugin_cls: PluginClass, plugin_type: str) -> PluginSummary:
+    def _to_summary(self, plugin_cls: PluginClass, plugin_type: PluginKind) -> PluginSummary:
         """Convert a plugin class to a PluginSummary."""
         name: str = plugin_cls.name
         description = get_plugin_description(plugin_cls)
@@ -210,7 +218,7 @@ class CatalogServiceImpl:
             default=field_schema.get("default"),
         )
 
-    def _available_names(self, plugin_type: str) -> list[str]:
+    def _available_names(self, plugin_type: PluginKind) -> list[str]:
         """Get sorted list of available plugin names for a type."""
         if plugin_type == "source":
             classes: list[PluginClass] = list(self._source_classes)

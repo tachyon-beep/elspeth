@@ -14,7 +14,20 @@ from elspeth.web.blobs.protocol import (
 from elspeth.web.blobs.service import sanitize_filename
 
 
-class BlobMetadataResponse(BaseModel):
+class _StrictResponse(BaseModel):
+    """Tier 1 base for blob responses — no coercion, no extras.
+
+    ``extra="forbid"`` is load-bearing here: it mechanically enforces the
+    "storage_path is never included" promise in ``BlobMetadataResponse``.
+    A future refactor that accidentally forwards ``record.storage_path``
+    into the response constructor crashes rather than leaking the
+    internal filesystem path to clients.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class BlobMetadataResponse(_StrictResponse):
     """Response for blob metadata endpoints.
 
     storage_path is never included — it's an internal implementation detail.

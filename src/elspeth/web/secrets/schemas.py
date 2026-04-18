@@ -3,16 +3,28 @@
 SECURITY: No schema in this module may ever carry a plaintext secret value
 in a response model.  ``CreateSecretRequest`` accepts a value on the way *in*;
 ``CreateSecretResponse`` deliberately omits it on the way *out*.
+
+The response models inherit from ``_StrictResponse`` so that
+``extra="forbid"`` mechanically enforces the no-value-on-the-way-out
+promise: a future refactor that accidentally forwards a secret value
+into the response constructor crashes instead of being silently emitted.
+``strict=True`` additionally blocks type coercion on audit metadata.
 """
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from elspeth.web.validation import has_visible_content
 
 
-class SecretInventoryResponse(BaseModel):
+class _StrictResponse(BaseModel):
+    """Tier 1 base for secrets responses — no coercion, no extras."""
+
+    model_config = ConfigDict(strict=True, extra="forbid")
+
+
+class SecretInventoryResponse(_StrictResponse):
     """Public metadata for a secret reference -- NEVER includes the value."""
 
     name: str
@@ -35,7 +47,7 @@ class CreateSecretRequest(BaseModel):
         return v
 
 
-class CreateSecretResponse(BaseModel):
+class CreateSecretResponse(_StrictResponse):
     """Write-only acknowledgement -- NEVER includes the value."""
 
     name: str
@@ -43,7 +55,7 @@ class CreateSecretResponse(BaseModel):
     available: bool
 
 
-class ValidateSecretResponse(BaseModel):
+class ValidateSecretResponse(_StrictResponse):
     """Existence check -- confirms whether a named secret is resolvable."""
 
     name: str

@@ -1,4 +1,15 @@
-"""Pydantic request/response models for all session API endpoints."""
+"""Pydantic request/response models for all session API endpoints.
+
+Response models in this module serialize **system-owned data** (Tier 1 in
+the Data Manifesto).  They inherit from ``_StrictResponse`` so that
+coercion and unknown fields crash rather than silently passing through —
+the Landscape record and the HTTP response must agree exactly.
+
+Request models use plain ``BaseModel`` semantics: client input is Tier 3
+and the boundary-layer coercion rules (documented in ``tier-model-deep-dive``)
+apply.  Request-side extra-field rejection is considered per-model rather
+than globally; see ``web/blobs/schemas.py`` for the companion pattern.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +18,21 @@ from typing import Any, Literal
 from uuid import UUID
 
 import pydantic
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
+
+class _StrictResponse(BaseModel):
+    """Base model for session response schemas — Tier 1 trust rules.
+
+    ``strict=True`` rejects silent coercion (``"7"`` into an ``int`` field
+    crashes instead of becoming ``7``).  ``extra="forbid"`` rejects
+    unknown fields instead of dropping them.  Both are required for the
+    audit-trail integrity contract: the HTTP response must not contain
+    values the backend never emitted, and must not silently hide values
+    the backend did emit.
+    """
+
+    model_config = ConfigDict(strict=True, extra="forbid")
 
 
 class CreateSessionRequest(BaseModel):
@@ -16,7 +41,7 @@ class CreateSessionRequest(BaseModel):
     title: str = "New session"
 
 
-class SessionResponse(BaseModel):
+class SessionResponse(_StrictResponse):
     """Response for session CRUD operations."""
 
     id: str
@@ -35,7 +60,7 @@ class SendMessageRequest(BaseModel):
     state_id: UUID | None = None
 
 
-class ChatMessageResponse(BaseModel):
+class ChatMessageResponse(_StrictResponse):
     """Response for a single chat message."""
 
     id: str
@@ -47,7 +72,7 @@ class ChatMessageResponse(BaseModel):
     composition_state_id: str | None = None
 
 
-class MessageWithStateResponse(BaseModel):
+class MessageWithStateResponse(_StrictResponse):
     """Response for POST /api/sessions/{id}/messages.
 
     State is null when the composition version is unchanged; populated
@@ -58,7 +83,7 @@ class MessageWithStateResponse(BaseModel):
     state: CompositionStateResponse | None = None
 
 
-class ValidationEntryResponse(BaseModel):
+class ValidationEntryResponse(_StrictResponse):
     """Structured validation entry preserving component attribution.
 
     Mirrors ``ValidationEntry.to_dict()`` from the composer state module.
@@ -69,7 +94,7 @@ class ValidationEntryResponse(BaseModel):
     severity: str
 
 
-class CompositionStateResponse(BaseModel):
+class CompositionStateResponse(_StrictResponse):
     """Response for composition state endpoints."""
 
     id: str
@@ -95,7 +120,7 @@ class ForkSessionRequest(BaseModel):
     new_message_content: str
 
 
-class ForkSessionResponse(BaseModel):
+class ForkSessionResponse(_StrictResponse):
     """Response for POST /api/sessions/{id}/fork."""
 
     session: SessionResponse
@@ -109,7 +134,7 @@ class RevertStateRequest(BaseModel):
     state_id: UUID
 
 
-class RunResponse(BaseModel):
+class RunResponse(_StrictResponse):
     """Response for GET /api/sessions/{id}/runs."""
 
     id: str
