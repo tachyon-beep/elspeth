@@ -728,8 +728,8 @@ class BlobServiceImpl:
             # delete_blob leaves an orphan DB row in the target session
             # that auditors would interpret as a successfully copied blob.
             # Mirror the RecoveryFailed[...] convention used by
-            # _finalize_run_output_blobs_sync (lines 626-648): narrow the
-            # catch to (SQLAlchemyError, OSError) — programmer bugs must
+            # ``BlobServiceImpl._finalize_run_output_blobs_sync``: narrow
+            # the catch to (SQLAlchemyError, OSError) — programmer bugs must
             # propagate — collect every cleanup failure, and attach them
             # as notes on primary_exc.  The fallback file unlink stays for
             # disk-quota recovery, but the DB-row orphan is now visible

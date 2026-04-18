@@ -689,12 +689,18 @@ class SessionServiceImpl:
         Variant-A (delete orphans) has no DB-enforced invariant. This
         method raises ``AuditIntegrityError`` on any mismatch it
         encounters. The exception class is chosen deliberately to match
-        the cross-session blob-ref rejection at
-        ``sessions/routes.py`` (see commit c86f935d / b8ba2214): a Tier 1
-        anomaly in our own data must surface as corruption, not as a
-        soft 404. ``ValueError`` on "state does not exist at all" is
-        preserved from ``get_state`` for callers that still need to
-        distinguish absence from mismatch.
+        the cross-session blob-ref rejection in the
+        ``fork_from_message`` route handler (web/sessions/routes.py):
+        a Tier 1 anomaly in our own data must surface as corruption,
+        not as a soft 404. ``ValueError`` on "state does not exist at
+        all" is preserved from ``get_state`` for callers that still
+        need to distinguish absence from mismatch.
+
+        The ``AuditIntegrityError`` class is the same signal used by
+        the ``fork_from_message`` route handler in
+        ``sessions/routes.py`` for the cross-session blob-reference
+        rejection — the two guards are the read-side and write-side of
+        the same Tier 1 invariant.
         """
         record = await self.get_state(state_id)
         if record.session_id != session_id:

@@ -778,8 +778,8 @@ class TestBuildMessages:
         This test pins the redaction contract: the ``str(exc)`` of the
         raised ``ComposerServiceError`` contains no substring of the
         provoking OSError's filename or its strerror text.  Mirrors
-        the regression assertion added by commit 1a30d985 for the
-        SQLAlchemy-family 422 path.
+        the regression assertion on the SQLAlchemy-family 422 path in
+        ``_handle_convergence_error`` (web/sessions/routes.py).
         """
         catalog = _mock_catalog()
         settings = _make_settings()
@@ -2180,9 +2180,10 @@ class TestToolArgumentError:
     def test_inherits_from_exception_directly_not_composer_service_error(self) -> None:
         """ToolArgumentError must NOT inherit from ComposerServiceError.
 
-        If it did, the route-level `except ComposerServiceError` block at
-        routes.py:390 would silently absorb any escaped ToolArgumentError
-        as a 502, recreating the silent-laundering channel this plan closes.
+        If it did, the route-level ``except ComposerServiceError`` block
+        in ``send_message`` (sessions/routes.py) would silently absorb
+        any escaped ToolArgumentError as a 502, recreating the
+        silent-laundering channel this plan closes.
         Inheriting from Exception directly ensures an escaped
         ToolArgumentError (a compose-loop bug) surfaces loudly via FastAPI's
         default handler rather than being masked.

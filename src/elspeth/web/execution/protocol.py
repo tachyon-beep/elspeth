@@ -20,9 +20,9 @@ class StateAccessError(Exception):
     ``/execute`` endpoint and learn which ones exist in OTHER users'
     sessions. The two cases are therefore folded into a single
     exception type whose handler MUST return a byte-identical
-    ``{"detail": "State not found"}`` 404. See
-    ``sessions/routes.py::send_message`` and commit e73a921a for the
-    same contract on the chat-message IDOR surface.
+    ``{"detail": "State not found"}`` 404. The ``send_message`` route in
+    ``sessions/routes.py`` carries the same contract on the chat-message
+    IDOR surface.
 
     If a future refactor needs diagnostic precision about which of the
     two branches tripped (e.g. for ops dashboards), it MUST route that

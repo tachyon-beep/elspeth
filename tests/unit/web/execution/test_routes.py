@@ -181,7 +181,7 @@ class TestExecuteIDORAndPathTraversal:
     Asserting substring containment ("does not belong" in body) is
     itself a pin of the oracle and is forbidden here — parity tests
     use byte equality of the full response body AND status code.
-    See ``StateAccessError`` / commit e73a921a for the rationale.
+    See ``StateAccessError`` (web/execution/protocol.py) for the rationale.
     """
 
     @pytest.mark.asyncio

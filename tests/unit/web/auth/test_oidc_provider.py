@@ -763,8 +763,8 @@ class TestOIDCShapeFailureBackoff:
     (shape failures are not silently fallen back to stale cache), but
     subsequent callers within the retry window short-circuit at the
     top-of-function cache gate and receive the previously-validated
-    cached keys. See the block comment at oidc.py:137-170 for the
-    full asymmetry rationale.
+    cached keys. See the block comment at the top of ``ensure_jwks``
+    (web/auth/oidc.py) for the full asymmetry rationale.
     """
 
     @pytest.mark.asyncio

@@ -99,17 +99,18 @@ async def _periodic_orphan_cleanup(
             # re-raises the stored exception (the surrounding
             # contextlib.suppress narrows to CancelledError only).
             # Consistent with the audit-cleanup narrow catch in
-            # web/composer/service.py ComposerServiceImpl.compose and
-            # the cleanup-rollback sites in web/sessions/routes.py:968
-            # and :987.
+            # ``ComposerServiceImpl.compose`` (web/composer/service.py)
+            # and the cleanup-rollback sites in the
+            # ``fork_from_message`` route handler
+            # (web/sessions/routes.py).
             #
             # exc_info deliberately omitted: SQLAlchemyError __cause__
             # chains routinely carry the DB connection URL, schema
             # names, and the sqlite file path — the same leak vector
-            # that commit 59bdf514 closed in four HTTP-path slog.error
-            # sites. Structured logs carry exc_class only; operators
-            # reading logs get enough correlation to triage without
-            # the traceback text.
+            # closed across every HTTP-path slog.error site when the
+            # redaction pattern was standardised. Structured logs carry
+            # exc_class only; operators reading logs get enough
+            # correlation to triage without the traceback text.
             slog.error(
                 "periodic_orphan_cleanup_failed",
                 exc_class=type(cleanup_exc).__name__,
@@ -442,8 +443,8 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     # --- Secret-subsystem typed error translation ---
     # Trust-boundary translation layer: store/service-level typed errors
     # become deterministic HTTP contracts for API consumers.  Each handler
-    # follows the redaction pattern established by commit 59bdf514 for
-    # SQLAlchemy __cause__ chains:
+    # follows the canonical SQLAlchemy-redaction pattern used across the
+    # web package for handler-level ``__cause__`` chains:
     #
     #   * slog event carries ``exc_class`` only — NO ``exc_info``.
     #   * response body contains NO ``str(exc)`` — the message is a

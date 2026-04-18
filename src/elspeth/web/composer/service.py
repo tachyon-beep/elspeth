@@ -252,13 +252,13 @@ class ComposerServiceImpl:
                     #
                     # Catch is narrowed to (SQLAlchemyError, OSError) so that
                     # programmer-bug exceptions in _persist_crashed_session
-                    # itself — AssertionError from the engine guard,
+                    # itself — RuntimeError from the engine guard,
                     # AttributeError from a drifted table column, TypeError
                     # from a signature change — propagate instead of being
                     # laundered as "audit failure". Mirrors the cleanup-
-                    # rollback pattern at web/sessions/routes.py:968 and :987
-                    # in the same commit; see also the tier-model enforcer
-                    # entry for this call site.
+                    # rollback pattern in the ``fork_from_message`` route
+                    # handler (web/sessions/routes.py); see also the
+                    # tier-model enforcer entry for this call site.
                     #
                     # exc_info is deliberately omitted: the original plugin
                     # exception's message / __cause__ chain may carry DB
@@ -610,7 +610,14 @@ class ComposerServiceImpl:
         MUST NOT mask the original plugin-bug exception if persistence
         itself fails.
         """
-        assert self._session_engine is not None, "_persist_crashed_session must only be called when session_engine is set"
+        # Offensive guard (explicit raise, not assert): ``python -O`` strips
+        # assert statements, so a caller that somehow reaches this method
+        # with ``_session_engine is None`` would silently no-op under the
+        # optimised interpreter — turning a recoverable audit failure into
+        # a missed ``updated_at`` write with no trace.  A typed
+        # ``RuntimeError`` always fires.
+        if self._session_engine is None:
+            raise RuntimeError("_persist_crashed_session must only be called when session_engine is set")
         now = datetime.now(UTC)
         with self._session_engine.begin() as conn:
             conn.execute(update(sessions_table).where(sessions_table.c.id == session_id).values(updated_at=now))

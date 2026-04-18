@@ -290,8 +290,9 @@ class ExecutionServiceImpl:
         # user's session) MUST be indistinguishable from the client's
         # perspective.  They are folded into a single ``StateAccessError``
         # whose route handler returns a fixed "State not found" literal.
-        # See ``protocol.StateAccessError`` for the full rationale and
-        # the send_message precedent (commit e73a921a).  Do NOT
+        # See ``protocol.StateAccessError`` for the full rationale; the
+        # ``send_message`` route in ``sessions/routes.py`` is the
+        # canonical precedent for this IDOR contract.  Do NOT
         # re-introduce distinguishable messages here: the whole reason
         # this branch exists as a discriminated check is to prevent
         # the attacker's probe, and a distinguishable message reopens
@@ -695,7 +696,8 @@ class ExecutionServiceImpl:
             graph.validate_edge_compatibility()
 
             # Include aggregation transforms alongside regular transforms,
-            # following the CLI pattern (cli.py:868-878)
+            # following the CLI pattern (see ``_orchestrator_context``
+            # in ``elspeth.cli``).
             from elspeth.contracts.types import AggregationName
 
             all_transforms = [t.plugin for t in bundle.transforms]

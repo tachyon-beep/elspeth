@@ -375,18 +375,31 @@ class TestPeriodicOrphanCleanup:
 
     @pytest.mark.asyncio
     async def test_calls_cancel_all_with_max_age(self) -> None:
-        """Periodic cleanup passes max_age_seconds (not None) to cancel_all_orphaned_runs."""
+        """Periodic cleanup passes max_age_seconds (not None) to cancel_all_orphaned_runs.
+
+        Synchronisation: an ``asyncio.Event`` set by the mocked
+        ``cancel_all_orphaned_runs`` makes the test wait for exactly one
+        loop iteration — no wall-clock sleep, no inverted-flake risk if
+        the loop scheduler is slow on a loaded CI box.
+        """
+        called = asyncio.Event()
+
+        async def signal_called(**_: object) -> int:
+            called.set()
+            return 0
+
         mock_service = AsyncMock()
-        mock_service.cancel_all_orphaned_runs.return_value = 0
+        mock_service.cancel_all_orphaned_runs.side_effect = signal_called
         mock_exec = MagicMock()
         mock_exec.get_live_run_ids.return_value = frozenset()
 
         task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=900))
-        # Let the loop run long enough for at least one call
-        await asyncio.sleep(0.05)
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        try:
+            await asyncio.wait_for(called.wait(), timeout=5.0)
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
         mock_service.cancel_all_orphaned_runs.assert_called_with(
             max_age_seconds=900,
@@ -407,24 +420,27 @@ class TestPeriodicOrphanCleanup:
         companion programmer-bug test below).
 
         The leak assertions on the structured log entry verify that the
-        exc_info drop (aligned with commit 59bdf514) holds: the DB URL
-        fragment and SQL statement from the OperationalError __cause__ chain
-        must NOT appear in the emitted event.
+        exc_info drop holds: the DB URL fragment and SQL statement from
+        the OperationalError __cause__ chain must NOT appear in the
+        emitted event.
         """
         from structlog.testing import capture_logs
 
-        # Function-form side_effect rather than a two-item list: with
-        # interval_seconds=0 the loop body runs many times per 0.05s window,
-        # and a finite list exhausts into StopAsyncIteration (which the
-        # narrowed catch deliberately does NOT absorb). A callable cycling
-        # "fail once, then succeed forever" avoids that artifact while
-        # precisely modelling transient-failure-then-recovery.
+        # Function-form side_effect rather than a two-item list: a finite
+        # list exhausts into StopAsyncIteration (which the narrowed catch
+        # deliberately does NOT absorb). A callable cycling "fail once,
+        # then succeed forever" avoids that artifact while precisely
+        # modelling transient-failure-then-recovery.  An ``asyncio.Event``
+        # set on the second (recovery) call gates the test on observed
+        # behaviour, not a wall-clock sleep.
         call_count = {"n": 0}
+        recovered = asyncio.Event()
 
         async def cancel_side_effect(**_: object) -> int:
             call_count["n"] += 1
             if call_count["n"] == 1:
                 raise OperationalError("SELECT * FROM runs", {}, Exception("db unavailable"))
+            recovered.set()
             return 2
 
         mock_service = AsyncMock()
@@ -434,10 +450,12 @@ class TestPeriodicOrphanCleanup:
 
         with capture_logs() as cap_logs:
             task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
-            await asyncio.sleep(0.05)
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            try:
+                await asyncio.wait_for(recovered.wait(), timeout=5.0)
+            finally:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
         assert mock_service.cancel_all_orphaned_runs.call_count >= 2
 
@@ -445,7 +463,7 @@ class TestPeriodicOrphanCleanup:
         assert len(failure_events) >= 1, cap_logs
         event = failure_events[0]
         assert event["exc_class"] == "OperationalError"
-        # exc_info-derived fields MUST NOT appear — commit 59bdf514's
+        # exc_info-derived fields MUST NOT appear — the canonical
         # redaction pattern applies to every slog.error on a path that
         # handles SQLAlchemy __cause__ chains.
         assert "exc_info" not in event
@@ -495,13 +513,16 @@ class TestPeriodicOrphanCleanup:
 
         with capture_logs() as cap_logs:
             task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
-            await asyncio.sleep(0.05)
-            # Task must have terminated on its own with the AttributeError.
-            # Not cancelled: if the narrowing is wrong, cancel() would be
-            # needed and the assertion below would fail.
-            assert task.done(), "task should have terminated on programmer-bug propagation"
+            # Task must terminate on its own with the AttributeError.
+            # ``asyncio.wait_for`` provides the deterministic wait: if the
+            # narrow-catch regresses to ``except Exception``, the task
+            # stays alive and the wait_for fires TimeoutError instead of
+            # AttributeError — distinguishable failure modes in the
+            # pytest.raises block below.  No task.cancel() anywhere on
+            # the happy path — if the bug propagates, cancel is
+            # unnecessary; if it doesn't, cancel would mask the bug.
             with pytest.raises(AttributeError) as exc_info:
-                await task
+                await asyncio.wait_for(task, timeout=5.0)
 
         assert "_shutdown_events" in str(exc_info.value)
 
@@ -650,7 +671,7 @@ class TestSecretsExceptionHandlers:
     * ``SQLAlchemyError``            → 503 (database unavailable)
     * ``OSError``                    → 503 (SQLite / filesystem level)
 
-    Redaction invariants (from the commit 59bdf514 pattern):
+    Redaction invariants (from the canonical SQLAlchemy-redaction pattern):
       - response body never contains ``str(exc)`` or ``__cause__`` fragments
       - slog event omits ``exc_info`` / ``exception`` fields
       - DB URLs, SQL text, bound parameters absent from both

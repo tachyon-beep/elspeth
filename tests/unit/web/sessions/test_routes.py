@@ -566,10 +566,10 @@ class TestIDORProtection:
         assert resp.status_code == 404
 
         # Bob tries to POST recompose -- should be 404.  The ownership
-        # check runs before the rate limiter's side effects (see
-        # recompose handler at sessions/routes.py:569-570) so an
-        # attacker cannot use this endpoint to probe for session
-        # existence through rate-limit timing either.
+        # check runs before the rate limiter's side effects in the
+        # ``recompose`` route handler, so an attacker cannot use this
+        # endpoint to probe for session existence through rate-limit
+        # timing either.
         resp = bob_client.post(f"/api/sessions/{session_id}/recompose")
         assert resp.status_code == 404
 
@@ -590,8 +590,9 @@ class TestIDORProtection:
         # Bob tries to POST fork -- should be 404.  A successful fork
         # would create a new session owned by Bob but seeded from
         # Alice's state history, cross-contaminating audit lineage.
-        # The ownership check runs before fork_session() is called
-        # (sessions/routes.py:844), so no rows are written on denial.
+        # The ownership check runs before ``fork_session()`` is called
+        # in the ``fork_from_message`` route handler, so no rows are
+        # written on denial.
         resp = bob_client.post(
             f"/api/sessions/{session_id}/fork",
             json={
@@ -782,7 +783,8 @@ class TestSendMessageStateIdValidation:
         )
 
     def test_404_body_is_identical_for_unknown_and_cross_session(self, tmp_path) -> None:
-        """Gap 17: pin the "load-bearing" 404 parity claim from commit c86f935d.
+        """Gap 17: pin the "load-bearing" 404 parity claim that underpins
+        the cross-session IDOR guard on ``/messages``.
 
         Two distinct failure modes MUST produce byte-identical response
         bodies:
@@ -831,7 +833,7 @@ class TestSendMessageStateIdValidation:
         assert unknown_resp.content == cross_session_resp.content, (
             "404 body parity broken — unknown-UUID vs cross-session UUID "
             "responses differ. This re-introduces the IDOR information "
-            "leak commit c86f935d3 existed to prevent.\n"
+            "leak the route-level ownership check was added to prevent.\n"
             f"  unknown:       {unknown_resp.content!r}\n"
             f"  cross-session: {cross_session_resp.content!r}\n"
             "Unify the HTTPException detail strings in send_message's "

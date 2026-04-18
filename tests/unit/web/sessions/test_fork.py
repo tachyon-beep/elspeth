@@ -558,8 +558,8 @@ class TestForkEndpoint:
         the remap would leave the forked session's blob_ref pointing at the
         source session's blob (cross-session reference, audit-contradictory).
 
-        The fork-rollback machinery (commit b8ba2214) must archive the
-        partially-created fork session so no orphan artifacts remain.
+        The fork-rollback machinery in ``fork_from_message`` must archive
+        the partially-created fork session so no orphan artifacts remain.
         """
         app, service, blob_service = _make_fork_app(tmp_path)
 

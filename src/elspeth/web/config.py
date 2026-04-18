@@ -66,8 +66,18 @@ class WebSettings(BaseModel):
     # retry makes stale-serve windows longer (safer during brief IdP
     # outages); lowering it shrinks the partial-DoS blast radius during
     # a sustained outage — see elspeth-32982f17cf.
+    #
+    # ``jwks_failure_retry_seconds`` floor is 10, not 1: the whole point
+    # of the throttle is that during an IdP outage the FIRST caller pays
+    # the httpx timeout (≈15s worst case) and the REST short-circuit.
+    # A configured 1-second retry window means concurrent auth requests
+    # re-hit the dead IdP almost immediately, collapsing the shield
+    # back toward the per-request timeout and reinstating the cold-start
+    # DoS the throttle exists to close.  Ten seconds is tight enough for
+    # test fixtures to advance the window deliberately and loose enough
+    # that production operators cannot configure the throttle away.
     jwks_cache_ttl_seconds: int = Field(default=3600, ge=1)
-    jwks_failure_retry_seconds: int = Field(default=300, ge=1)
+    jwks_failure_retry_seconds: int = Field(default=300, ge=10)
 
     # Session database (sessions, messages, composition states, runs)
     # Separate from landscape_url (audit DB)

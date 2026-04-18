@@ -543,13 +543,14 @@ def create_session_router() -> APIRouter:
             # header.  Redact the HTTP ``detail`` field to the class
             # name only; route the full exception to structured
             # server-side logging via ``slog.error`` with session
-            # correlation.  Mirrors the partial_state_save_error
-            # contract landed by commit 1a30d985 (SQLAlchemy 422 path).
+            # correlation.  Mirrors the ``partial_state_save_error``
+            # contract on the SQLAlchemy 422 path in
+            # ``_handle_convergence_error`` above.
             # exc_info deliberately omitted for the same reason
-            # SQLAlchemy ``exc_info`` was dropped in 127417cb:
-            # ``__cause__`` chains on these exception classes can
-            # carry upstream provider detail that must not be
-            # retained in structured logs either.
+            # SQLAlchemy ``exc_info`` is dropped in the canonical
+            # narrow-catch sites: ``__cause__`` chains on these
+            # exception classes can carry upstream provider detail
+            # that must not be retained in structured logs either.
             slog.error(
                 "compose_llm_auth_error",
                 session_id=str(session_id),
@@ -1002,11 +1003,12 @@ def create_session_router() -> APIRouter:
                     # rather than silently skipping the remap.  Silent skip
                     # would leave the forked state's blob_ref pointing at
                     # the source session's blob, which is the cross-session
-                    # reference class closed at the FK layer by commit
-                    # c86f935d and is audit-contradictory on its face.
-                    # The enclosing `except Exception` block archives the
-                    # partially-created fork (commit b8ba2214), so this
-                    # crash does not leak artifacts.
+                    # reference class closed at the FK layer by the
+                    # migration-007 composite FK and is audit-contradictory
+                    # on its face.  The enclosing ``except Exception``
+                    # block archives the partially-created fork (see the
+                    # cleanup-rollback site below), so this crash does
+                    # not leak artifacts.
                     old_ref = options.get("blob_ref")
                     if old_ref is not None:
                         try:
@@ -1082,7 +1084,8 @@ def create_session_router() -> APIRouter:
             raise quota_exc from None
         except Exception as primary_exc:
             # Mirror the RecoveryFailed[...] convention from
-            # web/blobs/service.py:706-743 and _finalize_run_output_blobs_sync:
+            # ``BlobServiceImpl.copy_blobs_for_fork`` and
+            # ``_finalize_run_output_blobs_sync`` (web/blobs/service.py):
             # cleanup failures must NOT mask the original error.  Narrow the
             # catch to (SQLAlchemyError, OSError) — programmer bugs in
             # archive_session must propagate — and attach the cleanup

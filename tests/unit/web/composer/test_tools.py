@@ -3368,16 +3368,25 @@ class TestUpdateBlobSessionLockSerialisation:
         must then complete and produce a successful update.  A regression
         that skipped the lock would make the worker complete before the
         lock is released — the short-wait assertion catches that.
+
+        Inverted-flake guard: a ``started`` event set at the very top
+        of the worker body distinguishes "blocked by the lock as
+        intended" from "worker thread never ran" (scheduler stall,
+        import failure, etc.).  Without the probe, both cases look
+        identical (completed.wait returns False) and a broken test
+        would falsely pass.
         """
         import threading as stdlib_threading
 
         from elspeth.web.composer.tools import _session_blob_lock
 
         lock = _session_blob_lock(self.session_id)
+        started = stdlib_threading.Event()
         completed = stdlib_threading.Event()
         result_holder: list[Any] = []
 
         def worker() -> None:
+            started.set()
             try:
                 result = execute_tool(
                     "update_blob",
@@ -3395,6 +3404,11 @@ class TestUpdateBlobSessionLockSerialisation:
         try:
             t = stdlib_threading.Thread(target=worker, daemon=True)
             t.start()
+            # Probe first: the worker must actually enter its body
+            # before we interpret ``completed.wait`` returning False as
+            # "lock-blocked."  A thread that never scheduled would
+            # satisfy the completed-wait check for the wrong reason.
+            assert started.wait(timeout=2.0), "worker thread never entered its body"
             # While we hold the lock, the worker MUST NOT complete — if
             # it does, the tool bypassed the session lock.  0.3s is an
             # ample margin for a sub-millisecond in-memory SQLite
@@ -5033,7 +5047,8 @@ class TestPrevalidatePluginOptions:
     def test_null_source_no_config_model_returns_none(self) -> None:
         """NullSource is registered as None in the source registry — no config validation needed.
 
-        Exercises the config_cls is None branch (line 1077-1078). This is distinct from
+        Exercises the ``config_cls is None`` branch in
+        ``_prevalidate_plugin_options``. This is distinct from
         UnknownPluginTypeError: 'null' is a known, valid plugin that explicitly has no config
         class (it is a resume-only source with no options).
         """
@@ -5386,7 +5401,7 @@ class TestUpdateBlobTypeGuard:
 
 
 # ---------------------------------------------------------------------------
-# set_source_from_blob Tier-3 type guard (elspeth-7d32b34bf7)
+# set_source_from_blob Tier-3 type guard
 # ---------------------------------------------------------------------------
 
 

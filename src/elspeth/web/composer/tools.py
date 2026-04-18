@@ -1875,6 +1875,22 @@ def _execute_create_blob(
 # becomes a concern, ``clear_session_blob_lock(session_id)`` below is
 # the single-site cleanup hook; today there is no caller because
 # session teardown is not yet observable from this module.
+#
+# PROCESS-LOCAL CORRECTNESS PRECONDITION:
+# This registry holds Python ``threading.Lock`` objects — in-process
+# mutexes with zero cross-process visibility.  The I4 blob-file/DB
+# rollback race is serialised correctly ONLY because the web app
+# refuses to start in multi-worker mode: see the startup guard in
+# ``create_app`` (web/app.py) that raises ``RuntimeError`` on
+# ``--workers > 1`` / ``-w > 1`` / ``--workers=N``.  If that guard is
+# ever relaxed, every per-session lock becomes silently per-worker
+# and two workers handling the same session can interleave
+# blob-file writes and DB rollbacks.  The fix at that point is not
+# to widen this registry but to move the lock into a cross-process
+# coordination primitive (advisory DB lock / file lock / Redis) —
+# changing this dict from process-local is a design-level decision
+# that needs to be made alongside the multi-worker relaxation, not
+# after it.
 _SESSION_BLOB_LOCKS: dict[str, threading.Lock] = {}
 _SESSION_BLOB_LOCKS_REGISTRY_MUTEX = threading.Lock()
 
