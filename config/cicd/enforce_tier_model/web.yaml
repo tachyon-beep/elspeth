@@ -314,12 +314,12 @@ allow_hits:
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=73b0d6dd0fb7ff54
+- key: web/composer/tools.py:R6:_execute_list_models:fp=01f04498dc1b0b55
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=eeda9f85d024944f
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=9bcc9edc6ca0b832
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
@@ -328,25 +328,38 @@ allow_hits:
 # 2026-04-17 (silent-failure-hunter finding 3); fingerprint refreshed
 # 2026-04-18 when the function was restructured to acquire the
 # session-scoped mutex (I4) and to handle quota breaches via the
-# _BlobQuotaExceededInTxn sentinel exception (I5).  The DB-transaction
-# except block restores the prior file content via
-# storage_path.write_bytes(old_content); wrapping that rollback in
-# `except OSError` ensures a secondary disk fault (ENOSPC, EIO, EACCES)
-# cannot mask the primary DB exception.  The handler attaches a
-# diagnostic note via primary_exc.add_note() naming the blob_id and
-# flagging the file/DB inconsistency, then the outer bare `raise`
-# re-raises the primary exception (sys.exc_info() reverts after the
-# nested except).  Programmer bugs propagate per offensive-programming
-# policy.
+# _BlobQuotaExceededInTxn sentinel (I5); refreshed again on bug_004
+# when the function was restructured to write new bytes to a sibling
+# tempfile and swap them in via os.replace INSIDE the DB transaction
+# (AFTER the active-run guard, quota check, and UPDATE), closing the
+# audit-corruption window in which path-based / blob_ref sources
+# could observe new bytes against the stale DB content_hash.
+#
+# Under the atomic-rename design the rollback-write branch is
+# reachable ONLY when os.replace has already swapped the new bytes
+# in AND the transaction commit subsequently fails — a vanishingly
+# narrow window, but auditability-critical because it is the only
+# code path that can produce file/DB divergence.  Wrapping the
+# rollback in `except OSError` ensures a secondary disk fault
+# (ENOSPC, EIO, EACCES) cannot mask the primary commit exception;
+# add_note() attaches the blob_id and "manual reconciliation
+# required" diagnostic, then the outer bare `raise` re-raises the
+# primary exception (sys.exc_info() reverts after the nested
+# except).  Programmer bugs (TypeError, AttributeError, etc.)
+# propagate per offensive-programming policy.
 #
 # The sibling quota-rollback handler at the same structural position
 # is NOT allowlisted because it raises a RuntimeError inside the
 # handler itself (not outside) — the silent-except detector correctly
-# classifies it as re-raising and does not flag it.
-- key: web/composer/tools.py:R6:_execute_update_blob:fp=a27824edc6e1fb90
+# classifies it as re-raising and does not flag it.  The quota path
+# in the new design also no longer TRIGGERS the rollback branch
+# (quota is checked before os.replace, so no file mutation to roll
+# back); the rollback branch is retained as a defensive guardrail
+# for the post-replace commit-failure window only.
+- key: web/composer/tools.py:R6:_execute_update_blob:fp=461c91d2bf185b6e
   owner: web-composer
-  reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk faults during rollback expected; programmer bugs still propagate
-  safety: Rollback failure attached as add_note() on primary_exc with blob_id and "manual reconciliation required"; primary DB exception remains the headline (verified by test_rollback_oserror_does_not_mask_primary_db_exception)
+  reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk faults during post-replace divergence rollback expected; programmer bugs still propagate
+  safety: Rollback failure attached as add_note() on primary_exc with blob_id and "manual reconciliation required"; primary commit exception remains the headline.  Pre-replace failures bypass the rollback branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback and test_quota_breach_returns_failure_without_touching_storage).
   expires: null
 - key: web/execution/validation.py:R5:validate_pipeline:fp=650270c571bb9401
   owner: web-execution

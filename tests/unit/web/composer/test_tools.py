@@ -3046,19 +3046,24 @@ class TestUpdateBlobQuota:
 
 
 class TestUpdateBlobRollbackPreservesPrimaryException:
-    """Rollback-failure must NOT mask the primary DB exception.
+    """Pre-``os.replace`` failures must propagate cleanly with storage intact.
 
-    _execute_update_blob writes new content to disk, then opens a DB
-    transaction.  If the transaction raises, the except block restores
-    the prior file content via storage_path.write_bytes(old_content).
-    If THAT rollback write itself raises (ENOSPC, EIO, EACCES, etc.),
-    a naive `raise` would let the rollback OSError propagate as the
-    headline exception while the DB error is buried in __context__.
-    Operators triaging the incident would investigate the disk fault
-    instead of the actual root cause.
+    Post atomic-rename refactor (bug_004), ``_execute_update_blob``
+    writes new content to a sibling tempfile and defers the file swap
+    to ``os.replace`` inside the DB transaction — AFTER the active-run
+    guard, quota check, and UPDATE.  Any failure BEFORE ``os.replace``
+    therefore cannot produce file/DB divergence because the backing
+    file was never touched, and the rollback-write branch must be
+    skipped (writing ``old_content`` back would be a needless write on
+    an unmodified file).
 
-    Contract: the primary DB exception is the headline; the rollback
-    failure is attached as a note describing the file/DB inconsistency.
+    Before the refactor the file was overwritten BEFORE the DB
+    transaction, so every DB failure required a rollback-write and an
+    add_note-on-rollback-OSError discipline.  That discipline is
+    retained in the code for the narrowed post-replace commit-failure
+    window (still reachable via ``except Exception`` when ``replaced``
+    is True), but the pre-replace scenarios — which dominate in
+    practice — now exit cleanly.
     """
 
     @pytest.fixture(autouse=True)
@@ -3117,38 +3122,41 @@ class TestUpdateBlobRollbackPreservesPrimaryException:
                 )
             )
 
-    def test_rollback_oserror_does_not_mask_primary_db_exception(self) -> None:
-        """When rollback write_bytes fails, primary DB exception stays as headline.
+    def test_primary_db_exception_before_replace_propagates_without_rollback(self) -> None:
+        """An in-transaction failure before ``os.replace`` must not trigger a rollback write.
 
-        Forces _check_blob_quota to raise RuntimeError mid-transaction, then
-        makes the rollback write_bytes raise OSError.  Asserts the operator
-        sees RuntimeError as the headline (not OSError) and that __notes__
-        carries the rollback-failure diagnostic.
+        Forces ``_check_blob_quota`` to raise RuntimeError mid-transaction.
+        Because the atomic-rename flow defers the file swap to
+        ``os.replace`` AFTER the quota check, storage_path is never
+        modified — the RuntimeError propagates cleanly with:
+
+        * no call to the rollback write branch (``replaced`` was never
+          set to True);
+        * no add_note diagnostic (no divergence occurred);
+        * storage_path still containing the original bytes;
+        * no stale tempfile in the storage directory.
         """
         from unittest.mock import patch
 
         from elspeth.web.composer.tools import _execute_update_blob
 
-        # Force a primary failure inside the DB transaction by making
-        # the in-transaction quota check raise.  Use content larger than
-        # current size so size_delta > 0 routes through _check_blob_quota.
         primary_message = "primary-db-fault"
 
         def _raise_primary(*_args: Any, **_kwargs: Any) -> str | None:
             raise RuntimeError(primary_message)
 
-        # Patch Path.write_bytes so the rollback (second call against
-        # this storage_path) raises OSError.  The first call writes the
-        # new content; the second call is the except-branch rollback.
-        real_write_bytes = Path.write_bytes
+        # A failing rollback-write patch WOULD be armed in the
+        # pre-fix design; under the new design no rollback-write
+        # runs so the patch is a negative guard — if any write to
+        # storage_path happens after the first read, the test fails
+        # via the tripwire counter.
         target_path_str = str(self.storage_path)
-        rollback_oserror = OSError(28, "No space left on device")
-        call_log: list[str] = []
+        write_bytes_calls_to_storage = [0]
+        real_write_bytes = Path.write_bytes
 
-        def _fake_write_bytes(path_self: Path, data: bytes) -> int:
-            call_log.append(str(path_self))
-            if str(path_self) == target_path_str and call_log.count(target_path_str) >= 2:
-                raise rollback_oserror
+        def _tripwire_write_bytes(path_self: Path, data: bytes) -> int:
+            if str(path_self) == target_path_str:
+                write_bytes_calls_to_storage[0] += 1
             return real_write_bytes(path_self, data)
 
         state = _empty_state()
@@ -3156,7 +3164,7 @@ class TestUpdateBlobRollbackPreservesPrimaryException:
 
         with (
             patch("elspeth.web.composer.tools._check_blob_quota", side_effect=_raise_primary),
-            patch.object(Path, "write_bytes", _fake_write_bytes),
+            patch.object(Path, "write_bytes", _tripwire_write_bytes),
             pytest.raises(RuntimeError, match=primary_message) as exc_info,
         ):
             _execute_update_blob(
@@ -3167,31 +3175,35 @@ class TestUpdateBlobRollbackPreservesPrimaryException:
                 session_id=self.session_id,
             )
 
-        # Headline must be the primary RuntimeError, not the rollback OSError.
-        assert type(exc_info.value) is RuntimeError, f"Rollback OSError masked primary exception: got {type(exc_info.value).__name__}"
-
-        # Rollback diagnostic must appear in __notes__ so operators see
-        # both causes in the traceback.
+        # Headline is the primary RuntimeError.
+        assert type(exc_info.value) is RuntimeError, f"Unexpected exception type: got {type(exc_info.value).__name__}"
+        # No rollback write was performed — the tempfile carries the new
+        # bytes but storage_path was never written.
+        assert write_bytes_calls_to_storage[0] == 0, (
+            f"Pre-replace failure should not trigger a storage_path rollback write; "
+            f"got {write_bytes_calls_to_storage[0]} writes to {target_path_str}"
+        )
+        # No add_note diagnostic — no divergence to record.
         notes = getattr(exc_info.value, "__notes__", [])
-        assert notes, "Expected add_note() to attach rollback diagnostic to primary exception"
-        rollback_note = next((n for n in notes if "Rollback failed" in n), None)
-        assert rollback_note is not None, f"Missing rollback note in {notes!r}"
-        assert "OSError" in rollback_note
-        assert "No space left on device" in rollback_note
-        assert self.blob_id in rollback_note, "Note must identify the affected blob_id for triage"
-        assert "Manual reconciliation required" in rollback_note, "Note must flag the file/DB inconsistency to the operator"
+        assert not any("Rollback failed" in n for n in notes), f"Spurious rollback note on pre-replace failure: {notes!r}"
+        # File contents intact.
+        assert self.storage_path.read_bytes() == self.original_content
+        # Tempfile cleaned up.
+        leftovers = [p for p in self.storage_path.parent.iterdir() if p != self.storage_path]
+        assert leftovers == [], f"Tempfile leaked: {leftovers}"
 
-    def test_successful_rollback_attaches_no_note(self) -> None:
-        """Happy rollback path: primary exception propagates, no note added.
+    def test_clean_db_failure_before_replace_leaves_no_residue(self) -> None:
+        """Pre-replace DB failure: file intact, no note, no tempfile residue.
 
-        When the rollback write_bytes succeeds (the common case), the primary
-        exception must propagate cleanly without a spurious diagnostic note.
+        Companion to the test above — same invariant but with the
+        cleanest possible setup (no write_bytes tripwire) so a future
+        reader can see the happy-path exit shape in isolation.
         """
         from unittest.mock import patch
 
         from elspeth.web.composer.tools import _execute_update_blob
 
-        primary_message = "primary-db-fault-clean-rollback"
+        primary_message = "primary-db-fault-clean-exit"
 
         def _raise_primary(*_args: Any, **_kwargs: Any) -> str | None:
             raise RuntimeError(primary_message)
@@ -3211,11 +3223,11 @@ class TestUpdateBlobRollbackPreservesPrimaryException:
                 session_id=self.session_id,
             )
 
-        # File must have been restored to original content
         assert self.storage_path.read_bytes() == self.original_content
-        # No rollback note when rollback succeeded
         notes = getattr(exc_info.value, "__notes__", [])
-        assert not any("Rollback failed" in n for n in notes), f"Spurious rollback note attached on successful rollback: {notes!r}"
+        assert not any("Rollback failed" in n for n in notes), f"Spurious rollback note attached on clean DB failure: {notes!r}"
+        leftovers = [p for p in self.storage_path.parent.iterdir() if p != self.storage_path]
+        assert leftovers == [], f"Tempfile leaked: {leftovers}"
 
 
 class TestSessionBlobLockRegistry:
@@ -3431,20 +3443,23 @@ class TestUpdateBlobSessionLockSerialisation:
 
 
 class TestUpdateBlobQuotaRollbackDivergence:
-    """Quota-rollback path must use the same add_note discipline as DB failure.
+    """Quota breach must return ``_failure_result`` without any file mutation.
 
-    Pre-I5, the quota-exceeded path did an unprotected
-    ``storage_path.write_bytes(old_content)`` — if that write itself
-    raised (ENOSPC mid-quota-rollback on a quota-tracked filesystem is
-    the realistic scenario), the file contained the uncommitted new
-    content while the DB row retained the prior metadata, and the
-    user saw an OSError "disk fault" instead of "quota exhausted".
-    Silent divergence, wrong triage signal.
+    Pre-atomic-rename, ``_execute_update_blob`` overwrote
+    ``storage_path`` BEFORE the DB transaction; a quota breach inside
+    the transaction therefore required a rollback write, and a
+    rollback-write OSError was surfaced via a RuntimeError with
+    add_note divergence discipline (the I5 fix).
 
-    The fix mirrors the outer DB-failure handler: wrap the rollback
-    write, attach add_note on OSError, and surface the divergence as a
-    RuntimeError (not a silent _failure_result) so the operator is
-    informed that the file and DB disagree.
+    Post atomic-rename (bug_004), the file is written to a sibling
+    tempfile and swapped in via ``os.replace`` only AFTER the quota
+    check has passed.  A quota breach therefore happens before any
+    file mutation — no rollback, no RuntimeError, no add_note; the
+    caller simply sees a ``ToolResult(success=False, ...)`` carrying
+    the quota message.  The divergence-on-rollback-OSError discipline
+    remains in the code as a defensive guardrail for the narrow
+    post-replace commit-failure window, but it is no longer reachable
+    via the quota path.
     """
 
     @pytest.fixture(autouse=True)
@@ -3503,53 +3518,42 @@ class TestUpdateBlobQuotaRollbackDivergence:
                 )
             )
 
-    def test_quota_rollback_oserror_surfaces_divergence_runtime_error(self) -> None:
-        """Rollback OSError on quota path raises RuntimeError, not silent failure.
+    def test_quota_breach_returns_failure_without_touching_storage(self) -> None:
+        """Quota failure returns ToolResult(success=False) with storage intact.
 
-        Patches ``Path.write_bytes`` so the FIRST call (overwriting
-        storage_path with the new oversized content) succeeds, and the
-        SECOND call (the in-quota-handler rollback) raises OSError.
-        Asserts:
+        Under the atomic-rename design the quota check runs BEFORE
+        ``os.replace``, so a quota breach leaves storage_path exactly
+        as it was.  No rollback write is needed, no RuntimeError is
+        raised, and no add_note is attached — the LLM simply sees a
+        failure result describing the quota exhaustion.
 
-        * A RuntimeError propagates (NOT a ToolResult).  A silent
-          _failure_result here would hide the file/DB divergence
-          behind a "quota exceeded, try smaller" message the LLM would
-          act on without knowing the audit trail is broken.
-        * The RuntimeError message carries the word "Manual
-          reconciliation" so operators investigating the traceback see
-          the repair signal.
-        * ``__notes__`` contains the rollback-failure note so the
-          divergence diagnostic is visible in the traceback alongside
-          the headline.
-        * The OSError is preserved as ``__cause__`` for forensic
-          chaining.
+        Tripwire: patches ``Path.write_bytes`` to fail on any write to
+        storage_path so an accidental regression to "write-first then
+        rollback" would surface as an ENOSPC-like error instead of a
+        clean quota failure.
         """
         from unittest.mock import patch
 
-        from elspeth.web.composer.tools import _execute_update_blob
-
         real_write_bytes = Path.write_bytes
         target_path_str = str(self.storage_path)
-        rollback_oserror = OSError(28, "No space left on device")
-        call_log: list[str] = []
+        tripwire_hits: list[str] = []
 
-        def _fake_write_bytes(path_self: Path, data: bytes) -> int:
-            call_log.append(str(path_self))
-            if str(path_self) == target_path_str and call_log.count(target_path_str) >= 2:
-                raise rollback_oserror
+        def _tripwire_write_bytes(path_self: Path, data: bytes) -> int:
+            if str(path_self) == target_path_str:
+                tripwire_hits.append("storage_path was written pre-replace")
+                raise OSError(28, "Tripwire: pre-replace write to storage_path not allowed")
             return real_write_bytes(path_self, data)
 
         state = _empty_state()
         catalog = _mock_catalog()
 
-        # Quota 10 bytes; new content 100 bytes; delta 85 bytes exceeds quota.
-        # First write_bytes (overwrite) succeeds; second (rollback) raises.
+        # Quota 10 bytes; new content 100 bytes → delta 85 exceeds quota.
         with (
             patch("elspeth.web.composer.tools._BLOB_QUOTA_BYTES", 10),
-            patch.object(Path, "write_bytes", _fake_write_bytes),
-            pytest.raises(RuntimeError) as exc_info,
+            patch.object(Path, "write_bytes", _tripwire_write_bytes),
         ):
-            _execute_update_blob(
+            result = execute_tool(
+                "update_blob",
                 {"blob_id": self.blob_id, "content": "x" * 100},
                 state,
                 catalog,
@@ -3557,42 +3561,16 @@ class TestUpdateBlobQuotaRollbackDivergence:
                 session_id=self.session_id,
             )
 
-        # Headline must document the divergence, not the raw OSError.
-        assert "Manual reconciliation required" in str(exc_info.value), (
-            f"RuntimeError headline is missing the divergence signal: {exc_info.value!r}"
-        )
-        assert self.blob_id in str(exc_info.value), (
-            f"RuntimeError headline must identify blob_id {self.blob_id!r} for triage: {exc_info.value!r}"
-        )
-        # Cause chain preserves the OSError for forensic analysis.
-        assert isinstance(exc_info.value.__cause__, OSError), (
-            f"Expected __cause__ to be the rollback OSError; got {type(exc_info.value.__cause__).__name__}"
-        )
-        assert exc_info.value.__cause__ is rollback_oserror
-        # Exception chain structure:
-        #   RuntimeError (headline)
-        #     .__cause__    = rollback_exc (OSError) — explicit via ``from``
-        #     .__context__  = rollback_exc — auto-set since we raise inside
-        #                     ``except OSError as rollback_exc``
-        #   rollback_exc (OSError)
-        #     .__context__  = quota_exc — auto-set since OSError was raised
-        #                     inside ``except _BlobQuotaExceededInTxn``
-        # So the quota sentinel (carrying add_note) is at depth-2 through
-        # __context__.  Traversing explicitly asserts the full chain survives
-        # the outer ``raise ... from rollback_exc``.
-        rollback_context = exc_info.value.__context__
-        assert isinstance(rollback_context, OSError), f"__context__ should be the rollback OSError; got {type(rollback_context).__name__}"
-        sentinel = rollback_context.__context__
-        assert sentinel is not None, "Expected quota sentinel at __context__.__context__"
-        sentinel_notes = getattr(sentinel, "__notes__", [])
-        assert any("Rollback failed" in n for n in sentinel_notes), (
-            f"Expected add_note rollback diagnostic on the quota sentinel; notes={sentinel_notes!r}"
-        )
-        # The note must carry the same divergence vocabulary the DB-failure
-        # handler emits so operators grepping logs find both incident types.
-        combined = " ".join(sentinel_notes)
-        assert "Manual reconciliation required" in combined, f"Sentinel note must flag manual reconciliation: {sentinel_notes!r}"
-        assert self.blob_id in combined, f"Sentinel note must identify blob_id {self.blob_id!r}: {sentinel_notes!r}"
+        # Clean failure result — no exception, no divergence.
+        assert result.success is False, f"Expected quota failure result, got {result!r}"
+        assert "quota" in result.data["error"].lower(), f"Quota failure message missing from error: {result.data['error']!r}"
+        # Tripwire must not have fired — no write to storage_path.
+        assert tripwire_hits == [], f"Pre-replace write to storage_path detected (atomic-rename regression): {tripwire_hits}"
+        # Storage unchanged.
+        assert self.storage_path.read_bytes() == self.original_content
+        # Tempfile cleaned up in finally.
+        leftovers = [p for p in self.storage_path.parent.iterdir() if p != self.storage_path]
+        assert leftovers == [], f"Tempfile leaked after quota breach: {leftovers}"
 
     def test_quota_rollback_success_returns_failure_result_not_exception(self) -> None:
         """When rollback succeeds on quota path, callers still get a ToolResult.
@@ -5473,3 +5451,735 @@ class TestSetSourceFromBlobTypeGuard:
                 session_engine=self.engine,
                 session_id=self.session_id,
             )
+
+
+# ---------------------------------------------------------------------------
+# get_blob_content — Tier-1 guards (bug_002: composer tool bypassed the
+# lifecycle / integrity / decode guards enforced by
+# BlobServiceImpl.read_blob_content).  Any path that returns blob bytes
+# to the LLM must refuse partial/failed blobs, detect corruption or
+# tampering via hash verification, and not crash the tool dispatcher on
+# non-UTF-8 bytes that the MIME allowlist happens to admit.
+# ---------------------------------------------------------------------------
+
+
+class TestGetBlobContentGuards:
+    """``get_blob_content`` must mirror BlobServiceImpl.read_blob_content guards.
+
+    The composer tool returns blob bytes to an LLM composing a pipeline.
+    Without these guards the LLM can:
+
+    * observe a partially-written blob (status=pending) and treat it as
+      authoritative;
+    * observe a blob whose on-disk bytes have drifted from the stored
+      content_hash (corruption, tampering, or a write-path bug) without
+      the Tier-1 BlobIntegrityError firing;
+    * crash the tool dispatcher with an unhandled UnicodeDecodeError on
+      non-UTF-8 bytes that the MIME allowlist admits (``text/csv`` is
+      frequently latin-1 in the wild).
+
+    The canonical read path — ``BlobServiceImpl.read_blob_content`` —
+    is async and engine-bound, so the fix mirrors its three guards
+    inline.  These tests pin the guard semantics so future drift is
+    caught at CI time.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.blobs.service import content_hash as _content_hash
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import blobs_table, sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        now = datetime.now(UTC)
+
+        # Real content with a real SHA-256 so hash verification can
+        # succeed on the happy path and be perturbed deterministically
+        # on the mismatch path.
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.content_bytes = b"col_a,col_b\n1,2\n3,4\n"
+        self.content_hash_hex = _content_hash(self.content_bytes)
+        self.storage_path.write_bytes(self.content_bytes)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.content_bytes),
+                    content_hash=self.content_hash_hex,
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def _set_status(self, status: str) -> None:
+        from elspeth.web.sessions.models import blobs_table
+
+        with self.engine.begin() as conn:
+            conn.execute(blobs_table.update().where(blobs_table.c.id == self.blob_id).values(status=status))
+
+    def test_ready_blob_with_matching_hash_returns_content(self) -> None:
+        """Happy path — status=ready, hash matches, bytes are UTF-8."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_blob_content",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert result.data["content"] == self.content_bytes.decode("utf-8")
+
+    def test_pending_blob_refused(self) -> None:
+        """Status guard — pending blobs may be partial writes."""
+        self._set_status("pending")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_blob_content",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "pending" in result.data["error"].lower() or "not readable" in result.data["error"].lower()
+
+    def test_error_blob_refused(self) -> None:
+        """Status guard — error blobs belong to failed runs and are not trustworthy."""
+        # The blobs CHECK constraint disallows reading ready→error without a hash,
+        # but error is a valid status value; flip it directly.
+        self._set_status("error")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_blob_content",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "error" in result.data["error"].lower() or "not readable" in result.data["error"].lower()
+
+    def test_hash_mismatch_raises_blob_integrity_error(self) -> None:
+        """Integrity guard — corruption/tampering must ESCALATE, not return failure.
+
+        Tier-1 policy: a mismatch between on-disk bytes and stored
+        content_hash is a Tier-1 anomaly (our hash, our file — a
+        mismatch means corruption, tampering, or a write-path bug).
+        Downgrading to a tool-failure result tells the LLM "retry",
+        masking a live audit-integrity event.
+        """
+        from elspeth.web.blobs.protocol import BlobIntegrityError
+
+        # Mutate the on-disk bytes without touching the DB — simulates
+        # filesystem corruption / tampering.
+        self.storage_path.write_bytes(b"col_a,col_b\n9,9\n9,9\n")
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        with pytest.raises(BlobIntegrityError) as exc_info:
+            execute_tool(
+                "get_blob_content",
+                {"blob_id": self.blob_id},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+        assert exc_info.value.blob_id == self.blob_id
+
+    def test_null_content_hash_on_ready_blob_raises_audit_integrity_error(self) -> None:
+        """A ready blob with NULL content_hash is a DB-integrity anomaly.
+
+        The blobs table has CHECK constraints forbidding this state;
+        reaching it means the invariant was breached out-of-band.
+        Must escalate (Tier-1), not return a tool-failure.
+        """
+        from sqlalchemy import text
+
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.web.sessions.models import blobs_table
+
+        # Bypass the CHECK constraint by dropping then re-inserting via
+        # raw SQL — the test exercises the defensive read guard, not
+        # the write-side invariant.  Use PRAGMA to disable the
+        # constraint temporarily.
+
+        with self.engine.begin() as conn:
+            conn.execute(text("PRAGMA ignore_check_constraints = 1"))
+            conn.execute(blobs_table.update().where(blobs_table.c.id == self.blob_id).values(content_hash=None))
+            conn.execute(text("PRAGMA ignore_check_constraints = 0"))
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        with pytest.raises(AuditIntegrityError, match="NULL content_hash"):
+            execute_tool(
+                "get_blob_content",
+                {"blob_id": self.blob_id},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+    def test_non_utf8_bytes_return_failure_not_crash(self) -> None:
+        """Decode safety — UnicodeDecodeError must not escape the tool.
+
+        The MIME allowlist admits ``text/csv``, ``text/plain`` etc.
+        without constraining encoding.  A latin-1 CSV (common in the
+        wild) raises UnicodeDecodeError on ``read_text(encoding='utf-8')``;
+        without a decode guard this crashes the tool dispatcher with
+        an unhandled exception.  The correct behaviour is a structured
+        failure so the compose loop can surface a helpful message.
+        """
+        from elspeth.web.blobs.service import content_hash as _content_hash
+
+        # Bytes that are valid latin-1 but invalid UTF-8 (0xFE is an
+        # invalid leading byte in UTF-8).
+        non_utf8_bytes = b"na\xefve,col_b\n1,2\n"
+        self.storage_path.write_bytes(non_utf8_bytes)
+
+        # Update the DB hash so integrity check passes — the test
+        # targets the decode step, not the integrity step.
+        from elspeth.web.sessions.models import blobs_table
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                blobs_table.update()
+                .where(blobs_table.c.id == self.blob_id)
+                .values(
+                    size_bytes=len(non_utf8_bytes),
+                    content_hash=_content_hash(non_utf8_bytes),
+                )
+            )
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_blob_content",
+            {"blob_id": self.blob_id},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "utf-8" in result.data["error"].lower()
+
+
+# ---------------------------------------------------------------------------
+# update_blob — active-run guard (bug_004: composer could mutate blob bytes
+# while an ExecutionService run was actively consuming them).  Mirrors the
+# delete_blob two-check pattern: blob_run_links lookup + composition_states
+# source scan for the pre-link window.
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateBlobActiveRunGuard:
+    """update_blob must refuse to mutate blobs referenced by active runs.
+
+    Two corruption modes without the guard:
+
+    * Path-based sources: the pipeline reads the new bytes but records
+      them under the old content_hash — silent Tier-1 audit corruption.
+    * blob_ref sources: a mid-run BlobIntegrityError fires as a
+      false-positive tamper event because the recomputed hash no
+      longer matches the stored hash.
+
+    Both modes are closed by refusing the update while any active
+    (pending/running) run in the blob's session references the blob.
+    Mirrors the pattern in _execute_delete_blob so the two mutating
+    tools enforce the same invariant.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import blobs_table, sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.run_id = str(uuid4())
+        now = datetime.now(UTC)
+
+        storage_dir = tmp_path / "blobs" / self.session_id
+        storage_dir.mkdir(parents=True)
+        self.storage_path = storage_dir / f"{self.blob_id}_data.csv"
+        self.original_content = b"a,b\n1,2"
+        self.storage_path.write_bytes(self.original_content)
+
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.original_content),
+                    content_hash=_STUB_SHA256,
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def _insert_run_and_link(self, status: str) -> None:
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import (
+            blob_run_links_table,
+            composition_states_table,
+            runs_table,
+        )
+
+        now = datetime.now(UTC)
+        state_id = str(uuid4())
+        with self.engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=self.session_id,
+                    version=1,
+                    source=None,
+                    nodes=None,
+                    edges=None,
+                    outputs=None,
+                    metadata_=None,
+                    is_valid=False,
+                    validation_errors=None,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=self.run_id,
+                    session_id=self.session_id,
+                    state_id=state_id,
+                    status=status,
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=self.blob_id,
+                    run_id=self.run_id,
+                    direction="input",
+                )
+            )
+
+    def _insert_run_without_link(self, status: str, *, source: dict[str, Any] | None = None) -> None:
+        """Simulate the pre-link window (run exists, blob_run_links row not yet inserted)."""
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import (
+            composition_states_table,
+            runs_table,
+        )
+
+        if source is None:
+            source = {
+                "plugin": "csv",
+                "options": {"blob_ref": self.blob_id, "path": str(self.storage_path)},
+            }
+
+        now = datetime.now(UTC)
+        state_id = str(uuid4())
+        with self.engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=self.session_id,
+                    version=1,
+                    source=source,
+                    nodes=None,
+                    edges=None,
+                    outputs=None,
+                    metadata_=None,
+                    is_valid=False,
+                    validation_errors=None,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=self.run_id,
+                    session_id=self.session_id,
+                    state_id=state_id,
+                    status=status,
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+
+    def test_update_succeeds_when_no_runs_exist(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "new,content\n9,9"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert self.storage_path.read_bytes() == b"new,content\n9,9"
+
+    def test_update_rejected_when_pending_run_linked(self) -> None:
+        self._insert_run_and_link("pending")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "new"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.read_bytes() == self.original_content, "File must not change when the active-run guard blocks the update"
+
+    def test_update_rejected_when_running_run_linked(self) -> None:
+        self._insert_run_and_link("running")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "new"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.read_bytes() == self.original_content
+
+    def test_update_succeeds_when_completed_run_linked(self) -> None:
+        """Completed runs have released the blob — update must proceed."""
+        self._insert_run_and_link("completed")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "post,run\n1,1"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert self.storage_path.read_bytes() == b"post,run\n1,1"
+
+    def test_update_rejected_pre_link_window_blob_ref_source(self) -> None:
+        """Pre-link window: run exists, blob_run_links not yet inserted, source uses blob_ref."""
+        self._insert_run_without_link("pending")
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "new"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.read_bytes() == self.original_content
+
+    def test_update_rejected_pre_link_window_path_source(self) -> None:
+        """Pre-link window: run exists with source.path matching storage_path (no blob_ref)."""
+        self._insert_run_without_link(
+            "running",
+            source={"plugin": "csv", "options": {"path": str(self.storage_path)}},
+        )
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "new"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert "active run" in result.data["error"].lower()
+        assert self.storage_path.read_bytes() == self.original_content
+
+    def test_update_succeeds_when_active_run_references_different_source(self) -> None:
+        """Unrelated active run (different source) must NOT block update — scoped guard."""
+        self._insert_run_without_link(
+            "pending",
+            source={"plugin": "csv", "options": {"path": "/data/external/unrelated.csv"}},
+        )
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "should,proceed\n1,1"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is True
+        assert self.storage_path.read_bytes() == b"should,proceed\n1,1"
+
+
+# ---------------------------------------------------------------------------
+# update_blob — atomic write-order (bug_004: the file write happened BEFORE
+# the DB transaction began, creating a window in which a pipeline reader
+# would see new bytes against the stale DB hash even with a correct
+# active-run guard).  The fix writes to a sibling tempfile and swaps in
+# the new content with os.replace only after the guard + quota + UPDATE
+# have all succeeded.
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateBlobAtomicWrite:
+    """update_blob must not modify storage_path until DB guards have passed.
+
+    Before the fix, _execute_update_blob called ``write_bytes`` before
+    ``session_engine.begin()`` — so any subsequent guard failure (active
+    run, quota) forced a rollback-write, and any concurrent reader saw
+    new bytes against the stale DB hash in the intervening window.
+
+    The fix serialises the file swap to AFTER guard + quota + UPDATE,
+    via ``os.replace(tmp, storage_path)`` inside the transaction.  These
+    tests pin that ordering by asserting the storage file is unchanged
+    on every guard-rejection path and by exercising a simulated DB
+    failure to confirm no orphaned tempfiles remain.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path: Path):
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from sqlalchemy.pool import StaticPool
+
+        from elspeth.web.sessions.engine import create_session_engine
+        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.models import blobs_table, sessions_table
+
+        self.engine = create_session_engine(
+            "sqlite:///:memory:",
+            poolclass=StaticPool,
+            connect_args={"check_same_thread": False},
+        )
+        run_migrations(self.engine)
+
+        self.session_id = str(uuid4())
+        self.blob_id = str(uuid4())
+        self.storage_dir = tmp_path / "blobs" / self.session_id
+        self.storage_dir.mkdir(parents=True)
+        self.storage_path = self.storage_dir / f"{self.blob_id}_data.csv"
+        self.original_content = b"ORIGINAL-BYTES"
+        self.storage_path.write_bytes(self.original_content)
+
+        now = datetime.now(UTC)
+        with self.engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=self.session_id,
+                    user_id="test-user",
+                    auth_provider_type="local",
+                    title="Test",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+            conn.execute(
+                blobs_table.insert().values(
+                    id=self.blob_id,
+                    session_id=self.session_id,
+                    filename="data.csv",
+                    mime_type="text/csv",
+                    size_bytes=len(self.original_content),
+                    content_hash=_STUB_SHA256,
+                    storage_path=str(self.storage_path),
+                    created_at=now,
+                    created_by="user",
+                    source_description=None,
+                    status="ready",
+                )
+            )
+
+    def test_guard_rejection_leaves_storage_untouched_and_no_tempfile(self) -> None:
+        """When active-run guard fires, storage_path bytes are unchanged and no tempfile leaks."""
+        from datetime import UTC, datetime
+        from uuid import uuid4
+
+        from elspeth.web.sessions.models import (
+            blob_run_links_table,
+            composition_states_table,
+            runs_table,
+        )
+
+        # Insert a pending run linked to our blob to force the guard.
+        now = datetime.now(UTC)
+        run_id = str(uuid4())
+        state_id = str(uuid4())
+        with self.engine.begin() as conn:
+            conn.execute(
+                composition_states_table.insert().values(
+                    id=state_id,
+                    session_id=self.session_id,
+                    version=1,
+                    source=None,
+                    nodes=None,
+                    edges=None,
+                    outputs=None,
+                    metadata_=None,
+                    is_valid=False,
+                    validation_errors=None,
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                runs_table.insert().values(
+                    id=run_id,
+                    session_id=self.session_id,
+                    state_id=state_id,
+                    status="pending",
+                    started_at=now,
+                    rows_processed=0,
+                    rows_failed=0,
+                )
+            )
+            conn.execute(
+                blob_run_links_table.insert().values(
+                    blob_id=self.blob_id,
+                    run_id=run_id,
+                    direction="input",
+                )
+            )
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "update_blob",
+            {"blob_id": self.blob_id, "content": "would,corrupt,mid-run\n"},
+            state,
+            catalog,
+            session_engine=self.engine,
+            session_id=self.session_id,
+        )
+        assert result.success is False
+        assert self.storage_path.read_bytes() == self.original_content
+
+        # No sibling tempfiles must remain (stale tempfile accumulation
+        # would exhaust inodes and leak uncommitted content).
+        leftovers = [p for p in self.storage_dir.iterdir() if p != self.storage_path]
+        assert leftovers == [], f"Tempfiles leaked after guard rejection: {leftovers}"
+
+    def test_db_failure_leaves_storage_untouched_and_no_tempfile(self) -> None:
+        """Simulated DB failure: storage unchanged, no tempfiles remain.
+
+        After the fix, the file is not written to storage_path until
+        ``os.replace`` runs inside the transaction — so a DB failure
+        that happens before ``os.replace`` leaves the original bytes
+        intact by construction (no rollback-write needed).  The
+        tempfile cleanup runs unconditionally in a finally block.
+        """
+        from unittest.mock import patch
+
+        state = _empty_state()
+        catalog = _mock_catalog()
+
+        # Force a DB failure by making begin() raise.  This fires
+        # BEFORE any UPDATE / os.replace, so no file mutation can
+        # have occurred.
+        with (
+            patch.object(
+                self.engine,
+                "begin",
+                side_effect=RuntimeError("simulated DB failure"),
+            ),
+            pytest.raises(RuntimeError, match="simulated DB failure"),
+        ):
+            execute_tool(
+                "update_blob",
+                {"blob_id": self.blob_id, "content": "new"},
+                state,
+                catalog,
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+        assert self.storage_path.read_bytes() == self.original_content
+        leftovers = [p for p in self.storage_dir.iterdir() if p != self.storage_path]
+        assert leftovers == [], f"Tempfiles leaked after DB failure: {leftovers}"

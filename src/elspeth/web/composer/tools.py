@@ -9,7 +9,10 @@ L3 (web/composer/state, web/catalog/protocol).
 
 from __future__ import annotations
 
+import hmac
+import os
 import re
+import tempfile
 import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
@@ -20,7 +23,9 @@ from uuid import uuid4
 
 from sqlalchemy import Engine, delete, func, select, update
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.web.blobs.protocol import BlobIntegrityError
 from elspeth.web.blobs.service import _source_references_blob, content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.composer.protocol import ToolArgumentError
@@ -1945,6 +1950,39 @@ class _BlobQuotaExceededInTxn(Exception):
         self.user_message = message
 
 
+class _BlobUpdateBlockedByActiveRun(Exception):
+    """Internal sentinel raised inside the blob-update DB transaction.
+
+    The active-run guard fires INSIDE ``session_engine.begin()`` so it
+    shares SQLite's writer lock with concurrent run-creation attempts
+    (see ``_execute_locked``) — any new run row that would reference
+    this blob serialises behind the update transaction's guard check.
+    When the guard trips, we must (a) roll the DB transaction back so
+    no partial mutation leaks out, and (b) surface a tool-failure
+    result rather than an exception so the compose loop treats the
+    rejection as recoverable.
+
+    Raising a distinct sentinel lets the outer handler distinguish
+    three exit paths cleanly:
+
+    * ``except _BlobUpdateBlockedByActiveRun`` — returns
+      ``_failure_result`` (caller retries after the active run
+      completes).
+    * ``except _BlobQuotaExceededInTxn`` — returns a quota-specific
+      ``_failure_result``.
+    * ``except Exception`` — DB-layer or ``os.replace`` fault;
+      re-raises after attaching rollback diagnostics on divergence.
+
+    Keeping this separate from ``_BlobQuotaExceededInTxn`` is deliberate:
+    the two conditions reach the same rollback-on-divergence handler
+    but produce different user-facing failure messages.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.user_message = message
+
+
 def _execute_update_blob(
     arguments: dict[str, Any],
     state: CompositionState,
@@ -1997,116 +2035,209 @@ def _execute_update_blob(
         if blob is None:
             return _failure_result(state, f"Blob '{blob_id}' not found.")
 
+        storage_path = Path(blob["storage_path"])
         content_bytes = content.encode("utf-8")
         file_hash = content_hash(content_bytes)
-
-        # Overwrite storage file — snapshot old content for rollback on DB failure
-        storage_path = Path(blob["storage_path"])
-        old_content = storage_path.read_bytes()
-        storage_path.write_bytes(content_bytes)
-
         new_size = len(content_bytes)
 
-        # Atomic quota check + update.  size_bytes is re-read inside the
-        # transaction so the delta reflects the current DB row, not the
-        # pre-transaction snapshot (which may be stale under writers that
-        # bypass the composer session lock — e.g. ``BlobServiceImpl``
-        # paths that share the same session_engine).
-        try:
-            with session_engine.begin() as conn:
-                current_size: int = conn.execute(
-                    select(blobs_table.c.size_bytes).where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
-                ).scalar_one()
-                size_delta = new_size - current_size
+        # Snapshot the prior bytes BEFORE any filesystem mutation so the
+        # post-replace divergence rollback (commit-failure window) can
+        # restore them.  read_bytes() precedes tempfile creation so a
+        # read-side OSError cannot orphan a tempfile.
+        old_content = storage_path.read_bytes()
 
-                if size_delta > 0:
-                    quota_error = _check_blob_quota(conn, session_id, size_delta)
-                    if quota_error is not None:
-                        # Signal the quota breach to the outer handler so
-                        # the file-rollback and add_note discipline is
-                        # identical to the DB-failure path (I5).  Raising
-                        # inside ``session_engine.begin()`` also rolls the
-                        # DB transaction back before the outer handler
-                        # runs, which is what we want: the caller sees
-                        # no DB change.
-                        raise _BlobQuotaExceededInTxn(quota_error)
-                conn.execute(
-                    update(blobs_table)
-                    .where(blobs_table.c.id == blob_id, blobs_table.c.session_id == session_id)
-                    .values(
-                        size_bytes=new_size,
-                        content_hash=file_hash,
+        # Write the NEW content to a sibling tempfile; ``os.replace``
+        # swaps it in atomically only after the active-run guard, quota
+        # check, and DB UPDATE have all succeeded.  Writing to a tempfile
+        # (rather than overwriting storage_path up front as the pre-fix
+        # code did) closes two audit-corruption windows:
+        #
+        # * Path-based sources reading the backing file mid-update would
+        #   observe the new bytes against the stale DB content_hash —
+        #   silent Tier-1 audit corruption.
+        # * blob_ref sources recomputing the hash mid-update would raise
+        #   a false-positive BlobIntegrityError because the on-disk
+        #   bytes no longer match the stored hash.
+        #
+        # ``tempfile.mkstemp`` in ``storage_path.parent`` guarantees a
+        # same-filesystem swap (required for POSIX ``os.replace``
+        # atomicity).  The ``dot-prefix + .tmp`` suffix keeps stray
+        # tempfiles (if any survive a kill) out of directory listings
+        # that assume blob files are exactly ``{blob_id}_*`` — the
+        # composer listing logic filters on that prefix.
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=storage_path.parent,
+            prefix=f".{storage_path.name}.",
+            suffix=".tmp",
+        )
+        tmp_path = Path(tmp_name)
+        replaced = False
+        try:
+            with os.fdopen(tmp_fd, "wb") as tmp_file:
+                tmp_file.write(content_bytes)
+
+            try:
+                with session_engine.begin() as conn:
+                    # Active-run guard (two checks — mirror of the
+                    # pattern in ``_execute_delete_blob``).  Lives
+                    # INSIDE the transaction so SQLite's writer lock
+                    # serialises it against concurrent run inserts —
+                    # ``_execute_locked`` cannot slip a new run row
+                    # past this guard because its INSERT would block on
+                    # our transaction's lock.
+                    #
+                    # 1. Explicit link: ``blob_run_links`` already
+                    #    points at an active run.
+                    active_link = conn.execute(
+                        select(blob_run_links_table)
+                        .join(runs_table, blob_run_links_table.c.run_id == runs_table.c.id)
+                        .where(blob_run_links_table.c.blob_id == blob_id)
+                        .where(runs_table.c.status.in_(["pending", "running"]))
+                    ).first()
+                    if active_link is not None:
+                        raise _BlobUpdateBlockedByActiveRun(
+                            f"Blob '{blob_id}' is linked to active run '{active_link.run_id}' and cannot be updated."
+                        )
+
+                    # 2. Pre-link window: ``_execute_locked`` creates
+                    #    the run record before ``link_blob_to_run``
+                    #    inserts the link row.  During that gap the
+                    #    explicit-link check sees nothing, but the
+                    #    backing file is about to be read.  Scan the
+                    #    active run's composition source for a
+                    #    ``blob_ref`` match OR a ``path``/``file`` that
+                    #    matches ``storage_path``.
+                    active_run = conn.execute(
+                        select(runs_table.c.id, composition_states_table.c.source)
+                        .join(
+                            composition_states_table,
+                            runs_table.c.state_id == composition_states_table.c.id,
+                        )
+                        .where(runs_table.c.session_id == session_id)
+                        .where(runs_table.c.status.in_(["pending", "running"]))
+                    ).first()
+                    if active_run is not None and _source_references_blob(active_run.source, blob_id, str(storage_path)):
+                        raise _BlobUpdateBlockedByActiveRun(
+                            f"Blob '{blob_id}' cannot be updated while active run '{active_run.id}' references it."
+                        )
+
+                    # Atomic quota check.  ``size_bytes`` is re-read
+                    # inside the transaction so the delta reflects the
+                    # current DB row rather than a pre-transaction
+                    # snapshot (stale under writers that bypass the
+                    # composer session lock — e.g. ``BlobServiceImpl``
+                    # paths that share the same session_engine).
+                    current_size: int = conn.execute(
+                        select(blobs_table.c.size_bytes).where(
+                            blobs_table.c.id == blob_id,
+                            blobs_table.c.session_id == session_id,
+                        )
+                    ).scalar_one()
+                    size_delta = new_size - current_size
+                    if size_delta > 0:
+                        quota_error = _check_blob_quota(conn, session_id, size_delta)
+                        if quota_error is not None:
+                            # Raising inside the ``with`` rolls the DB
+                            # transaction back before the outer handler
+                            # runs.  ``os.replace`` has not executed,
+                            # so storage_path is still the prior bytes
+                            # and no rollback write is required.
+                            raise _BlobQuotaExceededInTxn(quota_error)
+
+                    conn.execute(
+                        update(blobs_table)
+                        .where(
+                            blobs_table.c.id == blob_id,
+                            blobs_table.c.session_id == session_id,
+                        )
+                        .values(size_bytes=new_size, content_hash=file_hash)
                     )
-                )
-        except _BlobQuotaExceededInTxn as quota_exc:
-            # Mirror of the DB-failure handler below: attempt the file
-            # rollback, attach add_note on rollback OSError, and surface
-            # the divergence rather than silently returning a failure
-            # result.  ``except _BlobQuotaExceededInTxn`` appears BEFORE
-            # ``except Exception`` so the sentinel is handled here and
-            # never reaches the DB-failure clause (which would perform
-            # a redundant second rollback write).
-            try:
-                storage_path.write_bytes(old_content)
-            except OSError as rollback_exc:
-                quota_exc.add_note(
-                    f"Rollback failed: could not restore prior content of {storage_path} "
-                    f"({type(rollback_exc).__name__}: {rollback_exc}). "
-                    f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
-                    f"inconsistent — the file may contain the new (uncommitted) bytes "
-                    f"while the DB row retains the prior size_bytes/content_hash. "
-                    f"Manual reconciliation required."
-                )
-                # Rollback failed: surface the divergence as a
-                # RuntimeError rather than returning a _failure_result.
-                # A silent failure-result here would tell the LLM
-                # "quota exceeded, try again" while the file and DB
-                # disagree about this blob's content — the worst
-                # possible outcome for audit integrity.  ``from
-                # rollback_exc`` preserves the OSError cause chain and
-                # ``quota_exc`` carries the add_note diagnostic so both
-                # root causes appear in the traceback.
-                raise RuntimeError(
-                    f"Blob quota rollback diverged for {blob_id!r}: "
-                    f"{quota_exc.user_message}  Rollback write_bytes raised "
-                    f"{type(rollback_exc).__name__}: {rollback_exc}. "
-                    f"storage_path {storage_path!s} contains the uncommitted "
-                    f"new content while the DB row retains the prior "
-                    f"size_bytes/content_hash.  Manual reconciliation required."
-                ) from rollback_exc
-            return _failure_result(state, quota_exc.user_message)
-        except Exception as primary_exc:
-            # Restore old content so file matches DB metadata.  Exception
-            # (not BaseException) because write_bytes() is not atomic — under
-            # KeyboardInterrupt the rollback write could truncate the file,
-            # leaving it inconsistent with both old and new DB state.
-            #
-            # Wrap the rollback write so a secondary OSError (ENOSPC, EIO, EACCES,
-            # parent-dir vanished mid-flight) cannot mask primary_exc.  Without
-            # this wrapper the new OSError would propagate as the headline and
-            # operators triaging the incident would investigate the disk fault
-            # instead of the actual root cause (the failed DB transaction).
-            # Narrow to OSError per offensive-programming policy: programmer bugs
-            # (TypeError, AttributeError, AssertionError) must propagate so a
-            # broken rollback isn't silently downgraded to a note.  add_note()
-            # attaches the rollback diagnostic to primary_exc without changing
-            # its type — upstream `except <PrimaryType>:` clauses still match,
-            # but operators see both causes in the traceback.  The bare `raise`
-            # below re-raises primary_exc (sys.exc_info() reverts to the outer
-            # frame after the nested except completes), so primary_exc remains
-            # the headline.
-            try:
-                storage_path.write_bytes(old_content)
-            except OSError as rollback_exc:
-                primary_exc.add_note(
-                    f"Rollback failed: could not restore prior content of {storage_path} "
-                    f"({type(rollback_exc).__name__}: {rollback_exc}). "
-                    f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
-                    f"inconsistent — the file may contain the new (uncommitted) bytes "
-                    f"while the DB row retains the prior size_bytes/content_hash. "
-                    f"Manual reconciliation required."
-                )
-            raise
+
+                    # Atomic file swap — the final mutation before the
+                    # with-block commit.  If ``os.replace`` raises,
+                    # control exits the with-block via exception and
+                    # the DB transaction rolls back — neither the file
+                    # nor the DB row changes.  On success, control
+                    # returns to the with-block which then commits;
+                    # file and DB land in sync on the happy path.
+                    #
+                    # The residual divergence window is narrow and
+                    # handled by the ``except Exception`` arm below:
+                    # (os.replace succeeded) ∧ (commit subsequently
+                    # failed).
+                    os.replace(tmp_path, storage_path)
+                    replaced = True
+            except _BlobUpdateBlockedByActiveRun as blocked:
+                # Guard rejected the update BEFORE ``os.replace`` ran;
+                # DB transaction has rolled back, tempfile awaits
+                # cleanup in the outer finally, storage_path is
+                # unchanged.  Surface as tool-failure so the compose
+                # loop treats the rejection as recoverable.
+                return _failure_result(state, blocked.user_message)
+            except _BlobQuotaExceededInTxn as quota_exc:
+                # Quota raised BEFORE ``os.replace`` ran; storage_path
+                # is unchanged.  If for any reason ``replaced`` is True
+                # here (defensive — current ordering raises before
+                # replace), restore old_content with add_note
+                # discipline mirroring the DB-failure path so
+                # divergence is surfaced, not silenced.
+                if replaced:
+                    try:
+                        storage_path.write_bytes(old_content)
+                    except OSError as rollback_exc:
+                        quota_exc.add_note(
+                            f"Rollback failed: could not restore prior content of {storage_path} "
+                            f"({type(rollback_exc).__name__}: {rollback_exc}). "
+                            f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
+                            f"inconsistent — the file may contain the new (uncommitted) bytes "
+                            f"while the DB row retains the prior size_bytes/content_hash. "
+                            f"Manual reconciliation required."
+                        )
+                        raise RuntimeError(
+                            f"Blob quota rollback diverged for {blob_id!r}: "
+                            f"{quota_exc.user_message}  Rollback write_bytes raised "
+                            f"{type(rollback_exc).__name__}: {rollback_exc}. "
+                            f"storage_path {storage_path!s} contains the uncommitted "
+                            f"new content while the DB row retains the prior "
+                            f"size_bytes/content_hash.  Manual reconciliation required."
+                        ) from rollback_exc
+                return _failure_result(state, quota_exc.user_message)
+            except Exception as primary_exc:
+                # DB-layer fault (commit OSError, UPDATE I/O error,
+                # SQLAlchemy error) or ``os.replace`` fault.  If
+                # ``replaced`` is True, ``os.replace`` has already
+                # swapped the new bytes in and storage_path now
+                # diverges from the (un-committed or about-to-fail) DB
+                # row — restore from old_content.  Narrow the
+                # rollback-error handler to OSError per
+                # offensive-programming policy: programmer bugs
+                # (TypeError, AttributeError, AssertionError) must
+                # propagate so a broken rollback isn't silently
+                # downgraded to a note.  Catching ``Exception`` (not
+                # ``BaseException``) preserves KeyboardInterrupt /
+                # SystemExit — asserted by
+                # ``test_blob_rollback_does_not_catch_keyboard_interrupt``.
+                if replaced:
+                    try:
+                        storage_path.write_bytes(old_content)
+                    except OSError as rollback_exc:
+                        primary_exc.add_note(
+                            f"Rollback failed: could not restore prior content of {storage_path} "
+                            f"({type(rollback_exc).__name__}: {rollback_exc}). "
+                            f"Storage file and DB metadata for blob_id={blob_id!r} may now be "
+                            f"inconsistent — the file may contain the new (uncommitted) bytes "
+                            f"while the DB row retains the prior size_bytes/content_hash. "
+                            f"Manual reconciliation required."
+                        )
+                raise
+        finally:
+            # Unconditional tempfile cleanup.  On the happy path
+            # ``os.replace`` moves the inode and ``tmp_path`` vanishes
+            # (unlink becomes a no-op via missing_ok).  On every
+            # failure path the tempfile still exists and must be
+            # removed to prevent inode exhaustion and leakage of
+            # uncommitted content to any directory listing.
+            tmp_path.unlink(missing_ok=True)
 
         return _discovery_result(
             state,
@@ -2207,7 +2338,35 @@ def _execute_get_blob_content(
     session_engine: Engine | None = None,
     session_id: str | None = None,
 ) -> ToolResult:
-    """Retrieve the content of a blob for inspection."""
+    """Retrieve the content of a blob for inspection.
+
+    Mirrors the three Tier-1 guards enforced by
+    ``BlobServiceImpl.read_blob_content`` so the composer read path and
+    the HTTP read path apply the same invariants:
+
+    1. **Lifecycle guard** — only ``ready`` blobs have finalised,
+       trustworthy content.  ``pending`` blobs may be partial writes;
+       ``error`` blobs belong to failed runs whose output is not
+       authoritative.  Returned as a ``_failure_result`` so the
+       compose loop can surface a helpful message to the LLM.
+    2. **Integrity verification** — recompute SHA-256 of the on-disk
+       bytes and compare (``hmac.compare_digest`` — constant-time) to
+       the stored ``content_hash``.  A mismatch is a Tier-1 anomaly
+       (our hash, our file) indicating filesystem corruption,
+       tampering, or a write-path bug; it must ESCALATE via
+       ``BlobIntegrityError``, not degrade to a tool-failure result.
+    3. **Decode safety** — the MIME allowlist admits encodings other
+       than UTF-8 (``text/csv`` is frequently latin-1 in the wild).
+       ``UnicodeDecodeError`` is converted to a ``_failure_result``
+       so the tool dispatcher is not crashed by admissible-but-
+       undecodable content.
+
+    The canonical path — ``BlobServiceImpl.read_blob_content`` — is
+    async and engine-bound, so the guards are mirrored inline rather
+    than shared via a common helper.  Any drift between this function
+    and ``BlobServiceImpl.read_blob_content`` is caught by
+    ``TestGetBlobContentGuards`` at CI time.
+    """
     if session_engine is None or session_id is None:
         return _failure_result(state, "Blob tools require session context.")
 
@@ -2216,11 +2375,43 @@ def _execute_get_blob_content(
     if blob is None:
         return _failure_result(state, f"Blob '{blob_id}' not found.")
 
+    # Guard 1 — lifecycle.  Pending/error blobs are not readable.
+    blob_status = blob["status"]
+    if blob_status != "ready":
+        return _failure_result(
+            state,
+            f"Blob '{blob_id}' is not readable — status is '{blob_status}', expected 'ready'.",
+        )
+
     storage_path = Path(blob["storage_path"])
     if not storage_path.exists():
         return _failure_result(state, f"Blob storage file missing for '{blob_id}'.")
 
-    content = storage_path.read_text(encoding="utf-8")
+    data = storage_path.read_bytes()
+
+    # Guard 2 — integrity.  A ``ready`` blob must always have a
+    # content_hash (enforced by the ``ck_blobs_ready_hash`` CHECK
+    # constraint at write time); NULL here is a DB-integrity anomaly
+    # and must escalate, not silently fall through to a bytes-return.
+    stored_hash = blob["content_hash"]
+    if stored_hash is None:
+        raise AuditIntegrityError(f"Tier 1: ready blob {blob_id} has NULL content_hash — DB integrity anomaly, cannot verify")
+    actual_hash = content_hash(data)
+    if not hmac.compare_digest(actual_hash, stored_hash):
+        raise BlobIntegrityError(blob_id, expected=stored_hash, actual=actual_hash)
+
+    # Guard 3 — decode safety.  Non-UTF-8 bytes are a Tier-3 external
+    # input condition (the operator supplied content in an encoding we
+    # cannot losslessly round-trip to the LLM); surface as
+    # tool-failure so the compose loop treats it as recoverable rather
+    # than raising an unhandled exception out of the dispatcher.
+    try:
+        content = data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        return _failure_result(
+            state,
+            f"Blob '{blob_id}' is not valid UTF-8 text ({exc.reason} at byte offset {exc.start}).",
+        )
 
     # Truncate very large content to avoid overwhelming the LLM context
     max_chars = 50_000
