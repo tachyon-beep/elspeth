@@ -680,9 +680,9 @@ allow_hits:
   reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=9bf25120b03e9edc
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=608eac5450fa472b
   owner: web-sessions
-  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors
+  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors. Hardened to log exc_class (not str) for Tier-1 redaction symmetry with _handle_plugin_crash.
   safety: Returns 422 with structured error, does not swallow
   expires: null
 - key: web/sessions/routes.py:R6:_handle_convergence_error:fp=3d86a6af9a39356d

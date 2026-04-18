@@ -80,8 +80,10 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/text_source.py:TextSource._validate_and_yield:row"
 
   # Pooling executor - row processing
+  # _execute_single.row is now Mapping[str, Any] (IM-2 fix — freeze_fields
+  # replaces the bound value with MappingProxyType, so the annotation must
+  # describe the read-only runtime type).
   - "src/elspeth/plugins/infrastructure/pooling/executor.py:PooledExecutor.get_stats:return"
-  - "src/elspeth/plugins/infrastructure/pooling/executor.py:PooledExecutor._execute_single:row"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # PLUGIN CONFIG (TRUST BOUNDARY)
@@ -280,9 +282,9 @@ allowed_dict_patterns:
 
   # RAG retrieval transform (config is user YAML — Tier 3 boundary, parsed into RAGRetrievalConfig)
   - "src/elspeth/plugins/transforms/rag/transform.py:RAGRetrievalTransform.__init__:config"
-  # Multi-query partial output (keys are dynamic: query-spec-dependent field names — _QuerySuccess.fields)
-  # Pool work context (PooledExecutor row interface is dict[str, Any])
-  - "src/elspeth/plugins/transforms/llm/transform.py:MultiQueryStrategy._process_fn:work"
+  # _process_fn.work is now Mapping[str, Any] (IM-2 fix — the pool hands off
+  # ctx.row, which is MappingProxyType after RowContext.__post_init__
+  # freezes it). _QuerySuccess.fields is likewise Mapping[str, Any].
 
   # BaseSink diversion — row_data is the pipeline row dict (Tier 2 data) being diverted to failsink
   - "src/elspeth/plugins/infrastructure/base.py:BaseSink._divert_row:row_data"
@@ -348,16 +350,12 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/clients/replayer.py:CallReplayer.replay:request_data"
   - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:request_data"
   - "src/elspeth/plugins/infrastructure/clients/verifier.py:CallVerifier.verify:live_response"
-  # VerificationResult factory classmethods — dict[str, Any] for external API responses (Tier 3 data)
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.matched:live_response"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.matched:recorded_response"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:live_response"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:recorded_response"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.mismatched:differences"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_recording:live_response"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_payload:live_response"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.missing_payload:differences"
-  - "src/elspeth/plugins/infrastructure/clients/verifier.py:VerificationResult.no_recorded_response:live_response"
+  # VerificationResult dataclass fields and factory classmethod inputs were
+  # narrowed to Mapping[str, Any] in IM-2 (frozen-field type-lie fix) — the
+  # fields are deep-frozen to MappingProxyType via freeze_fields, so the
+  # dict[str, Any] whitelist entries that used to exempt them are no longer
+  # needed. External API response content remains Tier-3; the redaction
+  # discipline is unchanged.
 
   # ═══════════════════════════════════════════════════════════════════════════
   # TUI - Display of dynamic audit data

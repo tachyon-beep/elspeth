@@ -986,10 +986,29 @@ class ExecutionServiceImpl:
             # it means _run_pipeline re-raised — the slog call may or
             # may not have succeeded.  One extra last-resort log line is
             # acceptable to ensure the failure is never invisible.
+            #
+            # Class names only (no ``str(exc)``): pipeline exceptions may
+            # chain SQLAlchemyError ([SQL: ...] / [parameters: ...]),
+            # Tier-3 sanitizer output, or source-rendering fragments via
+            # ``__cause__`` / ``__context__``. Censor-by-length (``[:200]``)
+            # is not redaction — the prefix still carries Tier-3 material.
+            # The chain walk preserves the diagnostic signal (fault
+            # topology) without the payload.
+            exc_class_chain: list[str] = []
+            current: BaseException | None = exc
+            seen: set[int] = set()
+            while current is not None and len(exc_class_chain) < 5:
+                if id(current) in seen:
+                    # ``__context__`` cycles are rare but possible;
+                    # bound the walk defensively.
+                    break
+                seen.add(id(current))
+                exc_class_chain.append(type(current).__name__)
+                current = current.__cause__ or current.__context__
             slog.error(
                 "pipeline_done_callback_exception",
                 exc_type=type(exc).__name__,
-                exc_msg=str(exc)[:200],
+                exc_class_chain=exc_class_chain,
             )
 
     def _to_run_event(self, run_id: str, progress: ProgressEvent) -> RunEvent:

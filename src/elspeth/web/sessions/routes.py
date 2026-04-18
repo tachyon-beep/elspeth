@@ -181,7 +181,16 @@ async def _handle_convergence_error(
         try:
             validation = exc.partial_state.validate()
         except (ValueError, TypeError, KeyError) as val_err:
-            slog.warning(f"{log_prefix}_validation_failed", error=str(val_err))
+            # Class name only: ``str(val_err)`` can surface fragments of
+            # the partial composition state (user-authored source text,
+            # node options) that the validator was mid-way through
+            # inspecting. Symmetric with the sibling handler
+            # _handle_plugin_crash, hardened in 302dd34d.
+            slog.warning(
+                f"{log_prefix}_validation_failed",
+                session_id=str(session_id),
+                exc_class=type(val_err).__name__,
+            )
             validation = ValidationSummary(
                 is_valid=False,
                 errors=(ValidationEntry("validation", "validation_failed", "high"),),

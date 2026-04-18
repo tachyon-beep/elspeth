@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from threading import Lock
@@ -70,7 +70,11 @@ def _warn_telemetry_before_start(event: Any) -> None:
 class _RowSuccess:
     """Successful single-row result in OpenRouter batch."""
 
-    row: dict[str, Any]
+    # ``Mapping`` (not ``dict``): ``freeze_fields`` replaces the bound
+    # value with ``MappingProxyType``; the annotation must describe the
+    # read-only runtime type callers observe. See
+    # ``PooledExecutor.RowContext`` for the same pattern.
+    row: Mapping[str, Any]
     finish_reason: str | None = None
 
     def __post_init__(self) -> None:
@@ -81,7 +85,7 @@ class _RowSuccess:
 class _RowFailure:
     """Failed single-row result in OpenRouter batch."""
 
-    error: dict[str, Any]
+    error: Mapping[str, Any]
 
     def __post_init__(self) -> None:
         freeze_fields(self, "error")
@@ -168,7 +172,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     name = "openrouter_batch_llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:64293c08d7b3c8a2"
+    source_file_hash: str | None = "sha256:e03d2e739816244f"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = OpenRouterBatchConfig
 

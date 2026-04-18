@@ -11,7 +11,7 @@ Manages concurrent requests while:
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from threading import Event, Lock, Semaphore
@@ -48,7 +48,12 @@ class RowContext:
         row_index: Original index for result ordering
     """
 
-    row: dict[str, Any]
+    # ``Mapping`` (not ``dict``): ``freeze_fields`` below replaces the
+    # bound value with ``MappingProxyType`` in ``__post_init__``. The
+    # runtime type is a read-only view; the annotation must describe
+    # what callers actually observe, not the pre-freeze construction
+    # type. Callers wanting a writable dict must ``dict(ctx.row)``.
+    row: Mapping[str, Any]
     state_id: str
     row_index: int
 
@@ -217,7 +222,7 @@ class PooledExecutor:
     def execute_batch(
         self,
         contexts: list[RowContext],
-        process_fn: Callable[[dict[str, Any], str], TransformResult],
+        process_fn: Callable[[Mapping[str, Any], str], TransformResult],
     ) -> list[BufferEntry[TransformResult]]:
         """Execute batch of rows with parallel processing.
 
@@ -255,7 +260,7 @@ class PooledExecutor:
     def _execute_batch_locked(
         self,
         contexts: list[RowContext],
-        process_fn: Callable[[dict[str, Any], str], TransformResult],
+        process_fn: Callable[[Mapping[str, Any], str], TransformResult],
     ) -> list[BufferEntry[TransformResult]]:
         """Internal batch execution (must be called while holding _batch_lock).
 
@@ -420,9 +425,9 @@ class PooledExecutor:
     def _execute_single(
         self,
         buffer_idx: int,
-        row: dict[str, Any],
+        row: Mapping[str, Any],
         state_id: str,
-        process_fn: Callable[[dict[str, Any], str], TransformResult],
+        process_fn: Callable[[Mapping[str, Any], str], TransformResult],
     ) -> tuple[int, TransformResult]:
         """Execute single row with capacity error retry and timeout.
 

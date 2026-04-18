@@ -451,8 +451,13 @@ class MultiQueryStrategy:
         ``_QuerySuccess | TransformResult`` instead of ``dict | TransformResult``.
         """
 
-        fields: dict[str, Any]
-        audit_metadata: dict[str, str | None]
+        # ``Mapping`` (not ``dict``): ``freeze_fields`` replaces both
+        # fields with ``MappingProxyType``; the annotation must describe
+        # the read-only runtime type callers observe. Consumers needing
+        # a writable dict must ``dict(result.fields)`` (see the
+        # ``PipelineRow(dict(result.fields), ...)`` call below).
+        fields: Mapping[str, Any]
+        audit_metadata: Mapping[str, str | None]
 
         def __post_init__(self) -> None:
             freeze_fields(self, "fields", "audit_metadata")
@@ -824,7 +829,11 @@ class MultiQueryStrategy:
         # Side channel for audit metadata — _process_fn writes here, outer scope reads after pool.
         # Protected by lock: PooledExecutor runs _process_fn across ThreadPoolExecutor
         # workers, so concurrent dict writes require synchronization.
-        audit_metadata_by_index: dict[int, dict[str, str | None]] = {}
+        # ``Mapping`` value type (not ``dict``): ``_QuerySuccess.audit_metadata``
+        # is frozen via ``freeze_fields`` and surfaces as ``MappingProxyType``.
+        # Declaring the slot as ``dict`` would make the assignment below a
+        # silent type lie (see IM-2: ``dict[str, Any]`` after ``freeze_fields``).
+        audit_metadata_by_index: dict[int, Mapping[str, str | None]] = {}
         audit_metadata_lock = threading.Lock()
 
         # Build RowContext for each query — the pool treats each as a "row"
@@ -845,7 +854,7 @@ class MultiQueryStrategy:
             for i, spec in enumerate(self.query_specs)
         ]
 
-        def _process_fn(work: dict[str, Any], _work_state_id: str) -> TransformResult:
+        def _process_fn(work: Mapping[str, Any], _work_state_id: str) -> TransformResult:
             """Pool process function — wraps _execute_one_query for pool interface."""
             result = self._execute_one_query(
                 work["query_idx"],
@@ -977,7 +986,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     name = "llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:d3063c722f9b741a"
+    source_file_hash: str | None = "sha256:ac98190f359a9266"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
 

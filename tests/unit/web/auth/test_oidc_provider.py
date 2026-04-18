@@ -415,7 +415,7 @@ class TestOIDCJWKSFailures:
                 "elspeth.web.auth.oidc.httpx.AsyncClient",
                 return_value=client_mock,
             ),
-            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+            pytest.raises(AuthenticationError, match="JWKS unavailable"),
         ):
             await provider.authenticate("some-token")
 
@@ -469,7 +469,7 @@ class TestOIDCJWKSFailures:
                 "elspeth.web.auth.oidc.httpx.AsyncClient",
                 return_value=client_mock,
             ),
-            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+            pytest.raises(AuthenticationError, match="JWKS unavailable"),
         ):
             await provider.authenticate("some-token")
 
@@ -554,7 +554,7 @@ class TestOIDCJWKSFailures:
                 "elspeth.web.auth.oidc.httpx.AsyncClient",
                 return_value=client_mock,
             ),
-            pytest.raises(AuthenticationError, match="Failed to fetch JWKS"),
+            pytest.raises(AuthenticationError, match="JWKS unavailable"),
         ):
             await provider.authenticate("some-token")
 

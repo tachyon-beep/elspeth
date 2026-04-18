@@ -14,6 +14,7 @@ The verifier uses DeepDiff for flexible comparison with configurable exclusions.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -51,10 +52,14 @@ class VerificationResult:
     """
 
     request_hash: str
-    live_response: dict[str, Any]
-    recorded_response: dict[str, Any] | None
+    # ``Mapping`` (not ``dict``): ``freeze_fields`` in ``__post_init__``
+    # replaces these with ``MappingProxyType`` (and ``None`` passes
+    # through untouched for ``recorded_response``). The annotation must
+    # describe the read-only runtime type callers observe.
+    live_response: Mapping[str, Any]
+    recorded_response: Mapping[str, Any] | None
     is_match: bool | None
-    differences: dict[str, Any] = field(default_factory=dict)
+    differences: Mapping[str, Any] = field(default_factory=dict)
     recorded_call_missing: bool = False
     payload_missing: bool = False
     no_response_recorded: bool = False
@@ -84,8 +89,8 @@ class VerificationResult:
     def matched(
         cls,
         request_hash: str,
-        live_response: dict[str, Any],
-        recorded_response: dict[str, Any],
+        live_response: Mapping[str, Any],
+        recorded_response: Mapping[str, Any],
     ) -> VerificationResult:
         """Live response matches recorded baseline."""
         return cls(
@@ -99,9 +104,9 @@ class VerificationResult:
     def mismatched(
         cls,
         request_hash: str,
-        live_response: dict[str, Any],
-        recorded_response: dict[str, Any],
-        differences: dict[str, Any],
+        live_response: Mapping[str, Any],
+        recorded_response: Mapping[str, Any],
+        differences: Mapping[str, Any],
     ) -> VerificationResult:
         """Live response differs from recorded baseline."""
         return cls(
@@ -116,7 +121,7 @@ class VerificationResult:
     def missing_recording(
         cls,
         request_hash: str,
-        live_response: dict[str, Any],
+        live_response: Mapping[str, Any],
     ) -> VerificationResult:
         """No recorded call found for this request."""
         return cls(
@@ -131,10 +136,10 @@ class VerificationResult:
     def missing_payload(
         cls,
         request_hash: str,
-        live_response: dict[str, Any],
+        live_response: Mapping[str, Any],
         *,
         is_match: bool | None = None,
-        differences: dict[str, Any] | None = None,
+        differences: Mapping[str, Any] | None = None,
     ) -> VerificationResult:
         """Call exists but response payload is missing or purged.
 
@@ -156,7 +161,7 @@ class VerificationResult:
     def no_recorded_response(
         cls,
         request_hash: str,
-        live_response: dict[str, Any],
+        live_response: Mapping[str, Any],
     ) -> VerificationResult:
         """Call never had a response (e.g., connection timeout, DNS failure)."""
         return cls(

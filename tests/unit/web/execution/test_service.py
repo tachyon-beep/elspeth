@@ -365,6 +365,41 @@ class TestB7ExceptionHandling:
             call_kwargs = mock_slog.error.call_args
             assert call_kwargs[0][0] == "pipeline_done_callback_exception"
             assert call_kwargs[1]["exc_type"] == "RuntimeError"
+            # Redaction contract: the slog emits ONLY class names via
+            # ``exc_class_chain``. ``exc_msg`` (length-truncated
+            # ``str(exc)``) is forbidden because pipeline exceptions may
+            # chain SQLAlchemyError payloads, Tier-3 sanitizer text, or
+            # source-rendering fragments through ``__cause__`` /
+            # ``__context__``.
+            assert "exc_msg" not in call_kwargs[1]
+            assert call_kwargs[1]["exc_class_chain"] == ["RuntimeError"]
+
+    def test_done_callback_walks_exception_chain(self, service: ExecutionServiceImpl) -> None:
+        """Chained exceptions surface as a class-name chain — no payloads.
+
+        Regression: ``exc_msg=str(exc)[:200]`` leaked truncated-but-still-
+        sensitive text. The chain walk visits ``__cause__`` / ``__context__``
+        and records only ``type(current).__name__``.
+        """
+        try:
+            try:
+                raise ValueError("secret=deadbeef")  # Tier-3-ish payload
+            except ValueError as inner:
+                raise RuntimeError("outer") from inner
+        except RuntimeError as outer:
+            future: Future[None] = Future()
+            future.set_exception(outer)
+
+        with patch("elspeth.web.execution.service.slog") as mock_slog:
+            service._on_pipeline_done(future)
+            call_kwargs = mock_slog.error.call_args[1]
+            assert call_kwargs["exc_type"] == "RuntimeError"
+            assert call_kwargs["exc_class_chain"] == ["RuntimeError", "ValueError"]
+            # No ``str(exc)`` text should appear in any field.
+            for value in call_kwargs.values():
+                if isinstance(value, str):
+                    assert "secret" not in value
+                    assert "deadbeef" not in value
 
     def test_done_callback_noop_on_success(self, service: ExecutionServiceImpl) -> None:
         """done_callback does not log on successful completion."""

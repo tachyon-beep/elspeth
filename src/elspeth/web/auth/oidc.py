@@ -265,7 +265,15 @@ class JWKSTokenValidator:
                     error=str(exc),
                     next_refresh_in_seconds=self._jwks_failure_retry_seconds,
                 )
-                raise AuthenticationError(f"Failed to fetch JWKS: {exc}") from exc
+                # Class name only. ``str(exc)`` on httpx.InvalidURL carries
+                # the raw jwks_uri (Tier-3 IdP-provided string), and
+                # httpx.ConnectError can include the resolved IP of the IdP.
+                # ``AuthenticationError.detail`` flows verbatim into the 401
+                # response body via auth middleware, so payload-free text is
+                # the only safe channel here. Symmetric with the Tier-1
+                # redaction discipline applied to _handle_plugin_crash
+                # (routes.py) and the blob/plugin SQLAlchemyError sites.
+                raise AuthenticationError(f"JWKS unavailable: {type(exc).__name__}") from exc
 
         return self._jwks
 
@@ -298,7 +306,11 @@ class JWKSTokenValidator:
                 issuer=self._issuer,
             )
         except PyJWTError as exc:
-            raise AuthenticationError(f"Invalid token: {exc}") from exc
+            # Class name only. PyJWT exception messages may echo claim
+            # values (e.g. "Audience doesn't match. Expected: ... Got: ...")
+            # or token segments in decode errors, which AuthenticationError
+            # would surface into the 401 response body.
+            raise AuthenticationError(f"Invalid token: {type(exc).__name__}") from exc
         return payload
 
 
