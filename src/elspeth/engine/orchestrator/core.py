@@ -60,6 +60,11 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
+from elspeth.contracts.declaration_contracts import (
+    declaration_registry_is_frozen,
+    freeze_declaration_registry,
+    registered_declaration_contracts,
+)
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
     ExecutionError,
@@ -80,6 +85,7 @@ from elspeth.contracts.events import (
 from elspeth.contracts.hashing import repr_hash
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
+from elspeth.contracts.tier_registry import freeze_tier_registry
 from elspeth.contracts.types import (
     AggregationName,
     BranchName,
@@ -174,13 +180,6 @@ def prepare_for_run() -> None:
             import-order bug — ``elspeth.engine.executors.pass_through`` was
             not imported before this point.
     """
-    from elspeth.contracts.declaration_contracts import (
-        declaration_registry_is_frozen,
-        freeze_declaration_registry,
-        registered_declaration_contracts,
-    )
-    from elspeth.contracts.tier_registry import freeze_tier_registry
-
     # Short-circuit if the registry is already frozen — bootstrap already ran.
     # Idempotency is required because Orchestrator.run() can be called multiple
     # times in a single process (e.g. test suites). The non-empty assertion only
@@ -2840,6 +2839,14 @@ class Orchestrator:
         """
         if payload_store is None:
             raise OrchestrationInvariantError("payload_store is required for resume - row data must be retrieved from stored payloads")
+
+        # ADR-010 §Decision 3: freeze both registries at bootstrap, mirroring
+        # run(). Recovery happens in a new process — the module import chain
+        # registers PassThroughDeclarationContract, but without this call the
+        # registries are never frozen, leaving a window where
+        # register_declaration_contract() could succeed post-bootstrap on the
+        # resume path.
+        prepare_for_run()
 
         self._rebase_checkpoint_sequence(resume_point.sequence_number)
         state = self._reconstruct_resume_state(resume_point, payload_store)

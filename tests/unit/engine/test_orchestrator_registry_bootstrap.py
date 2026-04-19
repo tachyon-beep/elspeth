@@ -150,3 +150,24 @@ def test_bootstrap_freezes_tier_registry(_isolate_both_registries) -> None:
         @tier_1_error(reason="post-bootstrap: must fail")
         class _TooLate(Exception):
             pass
+
+
+def test_resume_calls_prepare_for_run() -> None:
+    """resume() must call prepare_for_run() before any recovery work.
+
+    The resume path runs in a new process. Module-level imports ensure
+    PassThroughDeclarationContract is registered, but without an explicit
+    prepare_for_run() call the registries are never frozen — leaving a window
+    where register_declaration_contract() could succeed after bootstrap.
+
+    This structural test confirms the call is present without requiring
+    a full Orchestrator construction (which needs a live LandscapeDB).
+    """
+    import inspect
+
+    from elspeth.engine.orchestrator.core import Orchestrator
+
+    source = inspect.getsource(Orchestrator.resume)
+    assert "prepare_for_run" in source, (
+        "Orchestrator.resume() must invoke prepare_for_run() to freeze registries on the recovery path (ADR-010 §Decision 3)"
+    )
