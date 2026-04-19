@@ -9,11 +9,11 @@ Three tests here:
   on mis-annotation.
 
 - **Backward invariant** (``test_non_pass_through_transforms_do_drop_fields``):
-  Diagnostic signal, does not fail CI. If a non-annotated transform appears
-  to preserve fields on 30 probe rows, fires a filigree observation
-  suggesting ``passes_through_input=True`` may be appropriate. Dedup by
-  ``(transform_qualname, "pass-through-candidate")``; the observation is
-  fire-and-forget.
+  Fails CI when a non-annotated transform that opted into probing (i.e.
+  implements ``probe_config()``) preserves all input fields on every probe
+  row. Remediation is either adding ``passes_through_input=True`` or
+  supplying a ``probe_config()`` that exercises a case the transform
+  demonstrably does not preserve.
 
 - **Skip-rate budget** (``test_harness_skip_rate_budget``): asserts
   ``skip_rate ≤ 25%`` across the annotated plugin set. Track 2 additions
@@ -26,7 +26,6 @@ list is empty (silent "0 tests" passes are the worst kind of theatre).
 
 from __future__ import annotations
 
-import inspect
 from typing import Any
 
 import pytest
@@ -210,50 +209,66 @@ def test_harness_skip_rate_budget() -> None:
     )
 
 
+# Backward-invariant sweep budget. Scalar-only probes — bounded to keep
+# invariant runs fast; the per-transform forward invariant carries the
+# correctness load, this one is a sanity check on non-annotated probeable
+# transforms. ``_SWEEP_MIN_PROBES`` guards against Hypothesis strategy
+# exhaustion masquerading as clean runs.
+_SWEEP_EXAMPLES = 15
+_SWEEP_MIN_PROBES = 5
+
+
 def test_non_pass_through_transforms_do_drop_fields(
     _non_pass_through_cls: type[BaseTransform],
 ) -> None:
-    """Backward invariant (diagnostic) — ADR-009 §Clause 4.
+    """Backward invariant — ADR-009 §Clause 4.
 
-    Does NOT fail CI. Runs scalar probe rows; if the transform appears to
-    preserve every input field on every probe, fires a filigree observation
-    suggesting ``passes_through_input=True`` may be appropriate.
+    For every non-annotated transform that opted into probing (i.e.,
+    implements ``probe_config()``), run ``_SWEEP_EXAMPLES`` probe rows and
+    assert at least one probe produces an emission that drops a field. A
+    transform that preserves all fields on every probe is either
+    mis-annotated (should carry ``passes_through_input=True``) or its
+    ``probe_config()`` does not exercise a case where fields are dropped
+    — both are governance defects that must be addressed in this PR.
 
-    Observations dedup by ``(transform_qualname, "pass-through-candidate")``
-    with a 14-day TTL. The signal-to-noise ratio is bounded: scalar-only
-    probes miss structured-data drops, so a preservation result doesn't
-    mean the transform IS pass-through — only that one probe mode couldn't
-    disprove it. Human review via the observation triage process decides
-    whether to promote to an issue.
+    Non-annotated transforms WITHOUT ``probe_config()`` are skipped silently:
+    probing is opt-in, and the forward invariant + skip-rate budget are the
+    load-bearing governance for annotated transforms. Transforms whose
+    ``probe_config()`` raises or whose constructor rejects it are also
+    skipped — those are diagnostic signals, not governance gates.
+
+    Scalar-only probes may miss structured-data drops, so remediation
+    options are either (a) add the annotation if the transform really is
+    pass-through, or (b) teach ``probe_config()`` to return a shape that
+    triggers the actual drop path.
     """
     try:
         transform = _probe_instantiate(_non_pass_through_cls)
     except _UnprobeableTransform:
-        # Unprobeable non-annotated transforms are fine here — the backward
-        # invariant is a diagnostic signal, not a governance gate.
+        # Non-annotated transforms that did not opt into probing — or whose
+        # probe config is incompatible with their constructor — are out of
+        # scope for the backward invariant. The forward invariant and
+        # skip-rate budget cover the annotated set; this test only
+        # exercises transforms that explicitly declared a probe config.
+        pytest.skip(f"{_non_pass_through_cls.__name__}: not probeable (no probe_config() or constructor mismatch).")
         return
-
-    from hypothesis import given as _given
 
     probes_preserved = True
     probe_count = 0
 
-    @_given(probe=probe_row())
+    @given(probe=probe_row())
     @settings(
-        max_examples=15,  # bounded — this is a diagnostic sweep
+        max_examples=_SWEEP_EXAMPLES,
         deadline=None,
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture],
     )
     def _sweep(probe: PipelineRow) -> None:
         nonlocal probes_preserved, probe_count
         probe_count += 1
-        try:
-            if transform.is_batch_aware:
-                result = transform.process([probe], _probe_context(transform))  # type: ignore[arg-type]
-            else:
-                result = transform.process(probe, _probe_context(transform))
-        except Exception:
-            return
+        if transform.is_batch_aware:
+            result = transform.process([probe], _probe_context(transform))  # type: ignore[arg-type]
+        else:
+            result = transform.process(probe, _probe_context(transform))
         if result.status != "success":
             return
         emitted_rows = _emitted_rows_from_result(result)
@@ -266,64 +281,23 @@ def test_non_pass_through_transforms_do_drop_fields(
                 probes_preserved = False
                 return
 
-    try:
-        _sweep()
-    except Exception:
-        # Strategy exhaustion, instantiation quirks — don't fail CI.
-        return
+    _sweep()
 
-    if probes_preserved and probe_count >= 5:
-        _fire_filigree_observation(
-            title=f"Transform {_non_pass_through_cls.__name__!r} may be passes_through_input=True",
-            body=(
-                f"In {probe_count} scalar probe rows, {_non_pass_through_cls.__name__} "
-                "preserved all input fields on every emission. Consider annotating "
-                "passes_through_input=True. Fire-and-forget observation; expires in 14 days. "
-                "Scalar probes miss structured-data drops — promote to issue only "
-                "after confirming on realistic inputs."
-            ),
-            file_path=inspect.getfile(_non_pass_through_cls),
-            dedup_key=f"{_non_pass_through_cls.__qualname__}:pass-through-candidate",
+    if probe_count < _SWEEP_MIN_PROBES:
+        # Strategy exhaustion is a harness failure, not a plugin failure —
+        # make the operator aware without blaming the transform.
+        pytest.fail(
+            f"{_non_pass_through_cls.__name__}: only {probe_count} probe rows "
+            f"exercised (expected ≥ {_SWEEP_MIN_PROBES}). Harness probe generation "
+            "is under-powered for this transform."
         )
 
-
-def _fire_filigree_observation(
-    *,
-    title: str,
-    body: str,
-    file_path: str,
-    dedup_key: str,
-) -> None:
-    """Fire-and-forget observation via filigree.
-
-    CI must not fail on filigree unavailability — this is a diagnostic
-    signal, not a governance gate. The implementation is a best-effort
-    no-op if filigree is not reachable from the test environment (e.g.,
-    CI container without MCP access).
-    """
-    # Best-effort: attempt to call the filigree CLI if available; otherwise
-    # silently skip. Observation dedup is the filigree CLI's responsibility
-    # given the 14-day TTL — duplicate fire-and-forget calls are tolerated.
-    import subprocess
-
-    try:
-        subprocess.run(
-            [
-                "filigree",
-                "observe",
-                title,
-                "--body",
-                body,
-                "--file-path",
-                file_path,
-                "--dedup-key",
-                dedup_key,
-            ],
-            timeout=2.0,
-            check=False,
-            capture_output=True,
+    if probes_preserved:
+        pytest.fail(
+            f"{_non_pass_through_cls.__name__} is NOT annotated "
+            f"passes_through_input=True but preserved every input field in "
+            f"{probe_count} probe rows. Either (a) add passes_through_input=True "
+            "if the transform is in fact pass-through, or (b) extend "
+            f"{_non_pass_through_cls.__name__}.probe_config() to return a "
+            "shape that triggers the field-dropping code path."
         )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        # filigree CLI not installed or unreachable — the backward invariant
-        # is diagnostic, not a gate. Silent no-op.
-        return
