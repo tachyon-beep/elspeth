@@ -120,12 +120,37 @@ def _bases_include_audit_evidence_base(bases: list[ast.expr]) -> bool:
 
 
 def _class_defines_to_audit_dict(class_node: ast.ClassDef) -> bool:
-    """Return True if the class body directly contains a ``to_audit_dict`` method.
+    """Return True if the class body directly contains a ``to_audit_dict`` definition.
+
+    Detects three forms:
+    - ``def to_audit_dict(self): ...``             (FunctionDef)
+    - ``async def to_audit_dict(self): ...``       (AsyncFunctionDef)
+    - ``to_audit_dict = lambda self: ...``         (Assign)
 
     Only checks the immediate body — inherited definitions in base classes are
     not considered (we want to flag the class that introduces the method).
+
+    **Transitive-inheritance design note:** This scanner flags any class that
+    *introduces* ``to_audit_dict`` in its own body, even if a base class already
+    inherits from ``AuditEvidenceBase``.  Resolving import chains from AST is
+    unreliable, so the scanner cannot follow transitive inheritance.  This is
+    deliberate: the risk being defended against is an accidental ``to_audit_dict``
+    in a class that does not explicitly acknowledge the audit-evidence contract.
+    When a subclass legitimately overrides ``to_audit_dict`` on a chain whose root
+    *is* ``AuditEvidenceBase``, the intended mechanism is an allowlist entry.
+
+    **Known gap:** ``to_audit_dict: Callable = lambda self: {}`` (AnnAssign) is
+    not detected.  It is an unusual pattern; if it appears, add AnnAssign handling
+    here and note it in the test suite.
     """
-    return any(isinstance(node, ast.FunctionDef) and node.name == "to_audit_dict" for node in class_node.body)
+    for node in class_node.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "to_audit_dict":
+            return True
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == "to_audit_dict":
+                    return True
+    return False
 
 
 def scan_file(file_path: Path, root: Path) -> list[Finding]:
@@ -135,7 +160,11 @@ def scan_file(file_path: Path, root: Path) -> list[Finding]:
     a parse error is evidence of broken code that must be investigated, not
     silently skipped.
     """
-    source = file_path.read_text(encoding="utf-8")
+    try:
+        source = file_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        print(f"Fatal: Could not read {file_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     try:
         tree = ast.parse(source, filename=str(file_path))

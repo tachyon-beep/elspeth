@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -55,3 +56,44 @@ def test_scanner_flags_non_compliant_class(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "to_audit_dict" in result.stdout
     assert "Mimic" in result.stdout
+
+
+def test_scanner_flags_async_function_def(tmp_path: Path) -> None:
+    # ``async def to_audit_dict`` without inheriting AuditEvidenceBase must be flagged.
+    bad = tmp_path / "async_bad.py"
+    bad.write_text("class AsyncMimic(RuntimeError):\n    async def to_audit_dict(self): return {}\n")
+    allowlist_dir = tmp_path / "allowlist"
+    allowlist_dir.mkdir()
+    result = _run(["check", "--root", str(tmp_path), "--allowlist", str(allowlist_dir)])
+    assert result.returncode != 0
+    assert "to_audit_dict" in result.stdout
+    assert "AsyncMimic" in result.stdout
+
+
+def test_scanner_flags_lambda_assignment(tmp_path: Path) -> None:
+    # ``to_audit_dict = lambda self: {}`` without inheriting AuditEvidenceBase must be flagged.
+    bad = tmp_path / "lambda_bad.py"
+    bad.write_text("class LambdaMimic(RuntimeError):\n    to_audit_dict = lambda self: {}\n")
+    allowlist_dir = tmp_path / "allowlist"
+    allowlist_dir.mkdir()
+    result = _run(["check", "--root", str(tmp_path), "--allowlist", str(allowlist_dir)])
+    assert result.returncode != 0
+    assert "to_audit_dict" in result.stdout
+    assert "LambdaMimic" in result.stdout
+
+
+def test_scanner_read_error_exits_nonzero(tmp_path: Path) -> None:
+    # A file that cannot be read (chmod 000) must produce a non-zero exit with
+    # "Fatal:" in stderr — not an unhandled traceback.
+    unreadable = tmp_path / "unreadable.py"
+    unreadable.write_text("class Fine: pass\n")
+    os.chmod(unreadable, 0o000)
+    allowlist_dir = tmp_path / "allowlist"
+    allowlist_dir.mkdir()
+    try:
+        result = _run(["check", "--root", str(tmp_path), "--allowlist", str(allowlist_dir)])
+        assert result.returncode != 0
+        assert "Fatal:" in result.stderr
+    finally:
+        # Restore permissions so tmp_path cleanup succeeds.
+        os.chmod(unreadable, 0o644)
