@@ -114,6 +114,30 @@ jobs:
             --allowlist config/cicd/enforce_audit_evidence_nominal
 
   # ===========================================================================
+  # Stage 2a: Tier-1 Decoration Enforcement
+  # ===========================================================================
+  enforce-tier-1-decoration:
+    name: Enforce Tier-1 Decoration
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Run tier-1 decoration enforcement
+        run: |
+          python scripts/cicd/enforce_tier_1_decoration.py check \
+            --file src/elspeth/contracts/errors.py \
+            --allowlist config/cicd/enforce_tier_1_decoration
+
+  # ===========================================================================
   # Stage 2b: Contract Enforcement (Settings→Runtime alignment)
   # ===========================================================================
   contract-enforcement:
@@ -150,7 +174,7 @@ jobs:
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    needs: [lint, enforce-tier-model, enforce-audit-evidence-nominal, contract-enforcement]
+    needs: [lint, enforce-tier-model, enforce-audit-evidence-nominal, enforce-tier-1-decoration, contract-enforcement]
     strategy:
       fail-fast: false
       matrix:
@@ -250,7 +274,7 @@ jobs:
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest
-    needs: [lint, enforce-tier-model, enforce-audit-evidence-nominal, contract-enforcement, test]
+    needs: [lint, enforce-tier-model, enforce-audit-evidence-nominal, enforce-tier-1-decoration, contract-enforcement, test]
     if: always()
     steps:
       - name: Check all jobs passed
@@ -265,6 +289,10 @@ jobs:
           fi
           if [[ "${{ needs.enforce-audit-evidence-nominal.result }}" != "success" ]]; then
             echo "Audit evidence nominal enforcement job failed"
+            exit 1
+          fi
+          if [[ "${{ needs.enforce-tier-1-decoration.result }}" != "success" ]]; then
+            echo "Tier-1 decoration enforcement job failed"
             exit 1
           fi
           if [[ "${{ needs.contract-enforcement.result }}" != "success" ]]; then
