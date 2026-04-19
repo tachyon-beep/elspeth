@@ -5,7 +5,10 @@ Tier-1 Decoration Enforcement Tool
 AST-based static analysis that detects any exception class in errors.py whose
 name ends in ``Error`` or ``Violation`` and has neither a ``@tier_1_error``
 decorator (with the mandatory ``reason=`` kwarg) nor a ``# TIER-2:`` comment
-with a non-empty justification immediately preceding the class definition.
+with a non-empty justification above the class statement. Blank lines and
+decorator lines between the comment and the ``class`` keyword are tolerated;
+multi-line TIER-2 comments are not — the ``# TIER-2:`` line must be the last
+comment line above the class, modulo any intervening blank or decorator lines.
 
 This closes the symmetric failure mode of the decoration-IS-registration
 pattern (ADR-010 §Decision 2): forgetting to decorate a new Tier-1 exception
