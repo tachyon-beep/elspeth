@@ -170,6 +170,35 @@ _REGISTRY: list[DeclarationContract] = []
 _FROZEN: bool = False
 
 
+# -----------------------------------------------------------------------------
+# EXPECTED_CONTRACTS manifest (ADR-010 §Decision 3, issue elspeth-b03c6112c0 / C2)
+# -----------------------------------------------------------------------------
+#
+# Every declaration contract registered at orchestrator bootstrap MUST be
+# listed here. The bootstrap check (``prepare_for_run()``) asserts set
+# *equality* between the registered names and this manifest — not merely
+# non-empty — so that a conditional/forgotten module import that silently
+# skips a contract registration fails loudly instead of being recorded as
+# "compliant" in the audit trail.
+#
+# Adding or removing a contract requires updating this manifest in the SAME
+# commit that adds/removes the registration call site. ``scripts/cicd/
+# enforce_contract_manifest.py`` scans the source tree and fails CI if the
+# manifest drifts from the registration call sites.
+#
+# CLOSED SET — do not extend without adding the matching
+# ``register_declaration_contract(...)`` call site in the same commit.
+EXPECTED_CONTRACTS: frozenset[str] = frozenset(
+    {
+        # PassThroughDeclarationContract
+        #   Defined:     src/elspeth/engine/executors/pass_through.py
+        #   Registered:  src/elspeth/engine/executors/pass_through.py (module-import side-effect)
+        #   ADR:         ADR-007 / ADR-008 / ADR-010
+        "passes_through_input",
+    }
+)
+
+
 def register_declaration_contract(contract: DeclarationContract) -> None:
     """Register a contract. Validates protocol shape and uniqueness.
 

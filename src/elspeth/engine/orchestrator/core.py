@@ -61,6 +61,7 @@ from elspeth.contracts import (
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.declaration_contracts import (
+    EXPECTED_CONTRACTS,
     declaration_registry_is_frozen,
     freeze_declaration_registry,
     registered_declaration_contracts,
@@ -176,15 +177,18 @@ def prepare_for_run() -> None:
     prevent).
 
     Raises:
-        RuntimeError: no declaration contracts are registered. Indicates an
-            import-order bug — ``elspeth.engine.executors.pass_through`` was
-            not imported before this point.
+        RuntimeError: the set of registered contract names does not exactly
+            equal ``EXPECTED_CONTRACTS``. The message names every missing and
+            every extra contract so the failure is self-diagnosing. Indicates
+            either an import-order bug (contract module not imported) or
+            manifest drift (contract registered without a manifest entry).
     """
     # Short-circuit if the registry is already frozen — bootstrap already ran.
     # Idempotency is required because Orchestrator.run() can be called multiple
-    # times in a single process (e.g. test suites). The non-empty assertion only
-    # needs to fire ONCE, on the first call; subsequent calls trust that the
-    # previous freeze was performed after a successful assertion.
+    # times in a single process (e.g. test suites). The manifest-equality
+    # assertion only needs to fire ONCE, on the first call; subsequent calls
+    # trust that the previous freeze was performed after a successful
+    # assertion.
     #
     # The ``_clear_registry_for_tests()`` helper resets ``_FROZEN = False``, so
     # test isolation that clears and repopulates the registry will still trigger
@@ -192,18 +196,41 @@ def prepare_for_run() -> None:
     if declaration_registry_is_frozen():
         return
 
-    # ADR-010 §Decision 3: assert non-empty BEFORE freezing (fail-open vs
-    # fail-closed — the assertion must fire while registration is still
-    # possible in principle, even though we never add contracts here).
+    # ADR-010 §Decision 3 + issue elspeth-b03c6112c0 (C2):
+    # Assert SET EQUALITY between registered contract names and the
+    # ``EXPECTED_CONTRACTS`` manifest BEFORE freezing. A bare non-empty check
+    # (``if not contracts``) would pass even when a specific contract's
+    # registration module was conditionally skipped — the registry would
+    # still contain other contracts, satisfying truthiness, while the
+    # conditionally-skipped contract's runtime VAL was silently disabled.
+    # The audit trail would then record plugin behaviour as "compliant"
+    # (no violation raised) when in truth the contract never ran. Set
+    # equality against a declared manifest closes this vector.
     contracts = registered_declaration_contracts()
-    if not contracts:
+    registered_names = frozenset(c.name for c in contracts)
+    if registered_names != EXPECTED_CONTRACTS:
+        missing = EXPECTED_CONTRACTS - registered_names
+        extra = registered_names - EXPECTED_CONTRACTS
         raise RuntimeError(
-            "no declaration contracts registered at orchestrator bootstrap. "
-            "This indicates an import-order bug — "
-            "elspeth.engine.executors.pass_through must be imported before "
-            "prepare_for_run() is called so PassThroughDeclarationContract "
-            "lands in the registry. A silent runtime VAL disable is exactly "
-            "the failure mode ADR-010 was designed to prevent."
+            "Declaration contract registry mismatch at orchestrator bootstrap.\n"
+            f"  Expected (manifest):  {sorted(EXPECTED_CONTRACTS)!r}\n"
+            f"  Registered:           {sorted(registered_names)!r}\n"
+            f"  Missing (not registered but in manifest): {sorted(missing)!r}\n"
+            f"  Extra   (registered but not in manifest): {sorted(extra)!r}\n"
+            "\n"
+            "If a name is missing: the contract's module-level "
+            "register_declaration_contract(...) call did not fire. Check for a "
+            "conditional import that skipped it, or an import-order bug where "
+            "the module was not imported before prepare_for_run(). The manifest "
+            "lives at src/elspeth/contracts/declaration_contracts.py "
+            "(EXPECTED_CONTRACTS).\n"
+            "If a name is extra: a contract was registered without being added "
+            "to EXPECTED_CONTRACTS. Update the manifest in the same commit as "
+            "the registration. scripts/cicd/enforce_contract_manifest.py is "
+            "the CI backstop that should have caught this.\n"
+            "\n"
+            "A silent runtime VAL disable is exactly the failure mode ADR-010 "
+            "was designed to prevent."
         )
     freeze_declaration_registry()
     freeze_tier_registry()

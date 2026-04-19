@@ -14,6 +14,14 @@ from __future__ import annotations
 
 import pytest
 
+# Module-level import so ``_isolate_both_registries`` snapshots a
+# fully-populated registry even when this file is the *only* one pytest
+# collects (``pytest test_orchestrator_registry_bootstrap.py::test_x`` in
+# isolation). Without this, the first test's ``importlib.reload(pt_mod)``
+# triggers a duplicate-registration error because the initial import and the
+# reload both fire the module-level side-effect against a fresh registry.
+import elspeth.engine.executors.pass_through  # noqa: F401  — registers PassThroughDeclarationContract
+
 
 @pytest.fixture()
 def _isolate_both_registries(monkeypatch):
@@ -59,21 +67,158 @@ def _isolate_both_registries(monkeypatch):
 
 def test_bootstrap_asserts_registry_non_empty(_isolate_both_registries) -> None:
     """If no contracts are registered at bootstrap, prepare_for_run() must raise
-    RuntimeError with a clear message about the import-order bug.
+    RuntimeError naming every contract missing from the manifest.
 
     This is the core safety guarantee of ADR-010 §Decision 3: a silently empty
     registry disables all runtime VAL checks. prepare_for_run() must make that
-    failure visible immediately.
+    failure visible immediately with an explicit missing-contract diff.
     """
-    from elspeth.contracts.declaration_contracts import _clear_registry_for_tests
+    from elspeth.contracts.declaration_contracts import (
+        EXPECTED_CONTRACTS,
+        _clear_registry_for_tests,
+    )
     from elspeth.engine.orchestrator import prepare_for_run
 
     # Clear the registry WITHOUT re-importing pass_through.py — simulates an
     # import-order bug where the module-level side-effect never fired.
     _clear_registry_for_tests()
 
-    with pytest.raises(RuntimeError, match="no declaration contracts registered"):
+    with pytest.raises(RuntimeError) as exc_info:
         prepare_for_run()
+
+    message = str(exc_info.value)
+    assert "declaration contract registry mismatch" in message.lower()
+    # Every expected contract must be explicitly named in the diff.
+    for expected_name in EXPECTED_CONTRACTS:
+        assert repr(expected_name) in message or expected_name in message, (
+            f"Error message must name missing contract {expected_name!r}; got: {message}"
+        )
+
+
+def test_bootstrap_fails_when_specific_contract_conditionally_skipped(_isolate_both_registries) -> None:
+    """Simulates the C2 failure mode: a *subset* of expected contracts is
+    registered (e.g. a conditional import silently skipped PassThroughDeclarationContract).
+
+    The registry is non-empty — the old ``if not contracts`` check would have
+    passed. The new set-equality check must raise with ``missing:`` naming
+    ``passes_through_input`` explicitly.
+
+    This is the acceptance criterion from elspeth-b03c6112c0 ("ConditionalRegistration
+    test path — wrapping a contract's registration in an `if` that skips fails
+    bootstrap loudly").
+    """
+    from typing import TypedDict
+
+    from elspeth.contracts.declaration_contracts import (
+        _clear_registry_for_tests,
+        register_declaration_contract,
+    )
+    from elspeth.engine.orchestrator import prepare_for_run
+
+    class _DummyPayload(TypedDict):
+        reason: str
+
+    class _UnexpectedContract:
+        name = "unexpected_for_c2_test"
+        payload_schema: type = _DummyPayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        def runtime_check(self, inputs: object, outputs: object) -> None:
+            pass
+
+        @classmethod
+        def negative_example(cls):  # type: ignore[override]
+            raise NotImplementedError
+
+    # Clear registry, then register ONLY an unexpected contract — pass_through
+    # is missing. The registry is non-empty, so a bare truthiness check would
+    # pass. The manifest-equality check must catch this.
+    _clear_registry_for_tests()
+    register_declaration_contract(_UnexpectedContract())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        prepare_for_run()
+
+    message = str(exc_info.value)
+    # The canonical PassThroughDeclarationContract name must appear under "missing".
+    assert "passes_through_input" in message, f"Expected error to name missing contract 'passes_through_input'; got: {message}"
+    assert "missing" in message.lower()
+
+
+def test_bootstrap_fails_when_extra_contract_registered(_isolate_both_registries) -> None:
+    """If a contract outside the manifest is registered, bootstrap must raise.
+
+    Set-equality — not subset — is the safety guarantee. An extra registration
+    indicates the manifest is out of date; CI should have caught it. Bootstrap
+    is the last line of defence.
+    """
+    import importlib
+    from typing import TypedDict
+
+    from elspeth.contracts.declaration_contracts import (
+        _clear_registry_for_tests,
+        register_declaration_contract,
+    )
+    from elspeth.engine.orchestrator import prepare_for_run
+
+    class _DummyPayload(TypedDict):
+        reason: str
+
+    class _UnexpectedContract:
+        name = "extra_not_in_manifest"
+        payload_schema: type = _DummyPayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        def runtime_check(self, inputs: object, outputs: object) -> None:
+            pass
+
+        @classmethod
+        def negative_example(cls):  # type: ignore[override]
+            raise NotImplementedError
+
+    # Clear + re-register PassThrough so manifest is satisfied, then add an
+    # unexpected extra contract.
+    _clear_registry_for_tests()
+    import elspeth.engine.executors.pass_through as pt_mod
+
+    importlib.reload(pt_mod)
+    register_declaration_contract(_UnexpectedContract())
+
+    with pytest.raises(RuntimeError) as exc_info:
+        prepare_for_run()
+
+    message = str(exc_info.value)
+    assert "extra_not_in_manifest" in message, f"Expected error to name extra contract 'extra_not_in_manifest'; got: {message}"
+    assert "extra" in message.lower()
+
+
+def test_bootstrap_passes_when_registry_exactly_matches_manifest(_isolate_both_registries) -> None:
+    """The happy path: registry == EXPECTED_CONTRACTS → no exception, registries freeze.
+
+    Verifies the set-equality check permits the nominal case. Uses the
+    importlib.reload pattern to re-trigger pass_through.py's module-level
+    registration side-effect after _clear_registry_for_tests().
+    """
+    import importlib
+
+    from elspeth.contracts.declaration_contracts import (
+        _clear_registry_for_tests,
+        declaration_registry_is_frozen,
+    )
+    from elspeth.engine.orchestrator import prepare_for_run
+
+    _clear_registry_for_tests()
+    import elspeth.engine.executors.pass_through as pt_mod
+
+    importlib.reload(pt_mod)
+
+    # Must not raise.
+    prepare_for_run()
+    assert declaration_registry_is_frozen()
 
 
 def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> None:

@@ -81,3 +81,11 @@ repos:
         types: [python]
         pass_filenames: false
         files: ^src/elspeth/web/.*\.py$
+
+      - id: enforce-contract-manifest
+        name: Enforce Declaration Contract Manifest
+        entry: .venv/bin/python scripts/cicd/enforce_contract_manifest.py check --allowlist config/cicd/enforce_contract_manifest
+        language: system
+        types: [python]
+        pass_filenames: false
+        files: ^(src/elspeth/|scripts/cicd/enforce_contract_manifest\.py|config/cicd/enforce_contract_manifest/)
