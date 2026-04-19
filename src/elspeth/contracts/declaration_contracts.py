@@ -107,6 +107,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
             "plugin": self.plugin,
             "node_id": self.node_id,
             "run_id": self.run_id,
+            "row_id": self.row_id,
             "token_id": self.token_id,
             "payload": scrub_payload_for_audit(self.payload),
             "message": str(self),

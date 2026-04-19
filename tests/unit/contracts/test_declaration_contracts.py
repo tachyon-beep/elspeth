@@ -225,6 +225,43 @@ def test_negative_example_fires_the_violation() -> None:
         c.runtime_check(inputs, outputs)
 
 
+def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
+    """Regression test: all identity fields must surface to the audit trail
+    (attributability invariant per reviewer B16)."""
+    v = DeclarationContractViolation(
+        contract_name="c",
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"k": "v"},
+        message="m",
+    )
+    dump = v.to_audit_dict()
+    expected_keys = {
+        "exception_type",
+        "contract_name",
+        "plugin",
+        "node_id",
+        "run_id",
+        "row_id",
+        "token_id",
+        "payload",
+        "message",
+    }
+    assert set(dump.keys()) == expected_keys
+    assert dump["row_id"] == "rw"
+
+
+def test_fake_contract_satisfies_declaration_contract_protocol() -> None:
+    """@runtime_checkable verification — _FakeContract satisfies the Protocol."""
+    from elspeth.contracts.declaration_contracts import DeclarationContract
+
+    c = _FakeContract()
+    assert isinstance(c, DeclarationContract)
+
+
 def test_clear_registry_without_pytest_env_raises(monkeypatch) -> None:
     """_clear_registry_for_tests is pytest-gated; must not be callable in
     production."""
