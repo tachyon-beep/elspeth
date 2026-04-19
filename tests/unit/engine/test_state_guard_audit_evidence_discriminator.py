@@ -53,6 +53,7 @@ def test_non_plugin_audit_evidence_populates_context() -> None:
     with pytest.raises(_NonPluginEvidence), _make_guard(execution):
         raise _NonPluginEvidence("widened")
 
+    execution.complete_node_state.assert_called_once()
     err = captured["err"]
     assert err is not None and err.context is not None
     assert err.context["kind"] == "other"
@@ -68,9 +69,15 @@ def test_duck_typed_exception_does_NOT_populate_context() -> None:
 
     execution = _make_execution()
     captured: dict[str, ExecutionError | None] = {"err": None}
-    execution.complete_node_state.side_effect = lambda *_, error=None, **__: captured.update(err=error)
+
+    def _capture(*_, error: ExecutionError | None = None, **__) -> None:
+        captured["err"] = error
+
+    execution.complete_node_state.side_effect = _capture
     with pytest.raises(_Mimic), _make_guard(execution):
         raise _Mimic("mimic")
+
+    execution.complete_node_state.assert_called_once()
     err = captured["err"]
     assert err is not None and err.context is None
 
@@ -78,8 +85,14 @@ def test_duck_typed_exception_does_NOT_populate_context() -> None:
 def test_plain_runtime_error_leaves_context_none() -> None:
     execution = _make_execution()
     captured: dict[str, ExecutionError | None] = {"err": None}
-    execution.complete_node_state.side_effect = lambda *_, error=None, **__: captured.update(err=error)
+
+    def _capture(*_, error: ExecutionError | None = None, **__) -> None:
+        captured["err"] = error
+
+    execution.complete_node_state.side_effect = _capture
     with pytest.raises(RuntimeError), _make_guard(execution):
         raise RuntimeError("plain")
+
+    execution.complete_node_state.assert_called_once()
     err = captured["err"]
     assert err is not None and err.context is None
