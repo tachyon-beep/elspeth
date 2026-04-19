@@ -753,14 +753,15 @@ class RowProcessor:
                     # the OrchestrationInvariantError with its own message.
                     pass
             else:
-                # TRANSFORM mode: batch-homogeneous intersection.
-                # The intersection of all buffered input contracts (ADR-007 table
-                # line 53) cannot be expressed via a single token's contract
-                # fields — routing through the dispatcher would silently use one
-                # token's field set rather than the true intersection, producing
-                # a different (and potentially incorrect) check. The direct call
-                # to verify_pass_through is intentionally kept here to preserve
-                # exact intersection semantics. Phase 2B will revisit this path.
+                # TRANSFORM mode: direct verify_pass_through call (dispatcher bypass).
+                # ADR-009 §Clause 2 defines batch-homogeneous semantics: the effective
+                # input_fields is the intersection of every buffered token's contract.
+                # RuntimeCheckInputs carries no override_input_fields field, so routing
+                # through the dispatcher would silently use one token's field set instead
+                # of the true batch intersection — producing an incorrect check. Phase 2B
+                # will extend RuntimeCheckInputs with override_input_fields to close this
+                # gap; tracked in filigree obs elspeth-obs-f7773241ad (to be promoted into
+                # the Track 2 Phase 2B epic in Task 13).
                 input_fields = frozenset.intersection(*per_input_field_sets)
                 # Triggering token is None for timeout flushes — use the first
                 # buffered token's lineage as the exception's identifying row.
