@@ -285,3 +285,13 @@ allow_hits:
   reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
   safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass
   expires: null
+- key: contracts/declaration_contracts.py:R1:_snapshot_registry_for_tests:fp=b0f50c4204aadcc2
+  owner: architecture
+  reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
+  safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass
+  expires: null
+- key: contracts/declaration_contracts.py:R1:_restore_registry_snapshot_for_tests:fp=0e3a124967daaec7
+  owner: architecture
+  reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
+  safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass
+  expires: null

@@ -156,10 +156,10 @@ class PassThroughDeclarationContract:
         return cast(bool, plugin.passes_through_input)
 
     def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
-        # Preserve the single-token Tier-1 pre-assertions currently in
-        # transform.py::_cross_check_pass_through (reviewer B2). These were
-        # ACCIDENTALLY dropped in the v0 plan; v1 reinstates them here so the
-        # dispatcher can route through this contract without losing the guard.
+        # Tier-1 pre-assertions (reviewer B2): input contract must exist and
+        # node_id must be set. These guards were previously in the now-deleted
+        # TransformExecutor._cross_check_pass_through; they now live here so
+        # the dispatcher path (ADR-010 §Decision 3) enforces the same invariants.
         input_contract = inputs.input_row.contract
         if input_contract is None:
             raise FrameworkBugError(

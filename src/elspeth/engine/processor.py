@@ -36,6 +36,10 @@ if TYPE_CHECKING:
     from elspeth.telemetry import TelemetryManager
 
 from elspeth.contracts import BatchTransformProtocol, TransformProtocol
+from elspeth.contracts.declaration_contracts import (
+    RuntimeCheckInputs,
+    RuntimeCheckOutputs,
+)
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import (
     AuditIntegrityError,
@@ -58,6 +62,7 @@ from elspeth.engine.executors import (
     GateExecutor,
     TransformExecutor,
 )
+from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
 from elspeth.engine.executors.pass_through import verify_pass_through
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
@@ -725,18 +730,22 @@ class RowProcessor:
         try:
             if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
                 # 1:1 pairing — routing enforces len(emitted) == len(buffered).
-                # Cross-check each pair with THAT input token's field set.
+                # Dispatch each pair through the declaration-contract registry
+                # (ADR-010 §Decision 3) so that all registered contracts that
+                # apply to this transform are evaluated per-pair.
                 if len(emitted) == len(fctx.buffered_tokens):
-                    for token, emitted_row, input_fields in zip(fctx.buffered_tokens, emitted, per_input_field_sets, strict=True):
-                        verify_pass_through(
-                            input_fields=input_fields,
-                            emitted_rows=[emitted_row],
-                            static_contract=static_contract,
-                            transform_name=fctx.transform.name,
-                            transform_node_id=transform_node_id_str,
-                            run_id=self._run_id,
-                            row_id=token.row_id,
-                            token_id=token.token_id,
+                    for token, emitted_row in zip(fctx.buffered_tokens, emitted, strict=True):
+                        run_runtime_checks(
+                            inputs=RuntimeCheckInputs(
+                                plugin=fctx.transform,
+                                node_id=transform_node_id_str,
+                                run_id=self._run_id,
+                                row_id=token.row_id,
+                                token_id=token.token_id,
+                                input_row=token.row_data,
+                                static_contract=static_contract,
+                            ),
+                            outputs=RuntimeCheckOutputs(emitted_rows=(emitted_row,)),
                         )
                 else:
                     # Count mismatch is ``_route_passthrough_results``'s
@@ -745,6 +754,13 @@ class RowProcessor:
                     pass
             else:
                 # TRANSFORM mode: batch-homogeneous intersection.
+                # The intersection of all buffered input contracts (ADR-007 table
+                # line 53) cannot be expressed via a single token's contract
+                # fields — routing through the dispatcher would silently use one
+                # token's field set rather than the true intersection, producing
+                # a different (and potentially incorrect) check. The direct call
+                # to verify_pass_through is intentionally kept here to preserve
+                # exact intersection semantics. Phase 2B will revisit this path.
                 input_fields = frozenset.intersection(*per_input_field_sets)
                 # Triggering token is None for timeout flushes — use the first
                 # buffered token's lineage as the exception's identifying row.

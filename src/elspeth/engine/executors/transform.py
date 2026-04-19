@@ -10,13 +10,16 @@ from elspeth.contracts import (
     TokenInfo,
     TransformProtocol,
 )
+from elspeth.contracts.declaration_contracts import (
+    RuntimeCheckInputs,
+    RuntimeCheckOutputs,
+)
 from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingMode,
 )
 from elspeth.contracts.errors import (
     TIER_1_ERRORS,
-    FrameworkBugError,
     OrchestrationInvariantError,
     PluginContractViolation,
 )
@@ -25,7 +28,7 @@ from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
-from elspeth.engine.executors.pass_through import verify_pass_through
+from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
@@ -133,56 +136,6 @@ class TransformExecutor:
             mixin.connect_output(output=adapter, max_pending=max_pending)
 
         return self._batch_adapters[node_id]
-
-    def _cross_check_pass_through(
-        self,
-        transform: TransformProtocol,
-        token: TokenInfo,
-        ctx: PluginContext,
-        result: TransformResult,
-    ) -> None:
-        """Runtime cross-check for ``passes_through_input=True`` transforms.
-
-        Thin wrapper around :func:`verify_pass_through` that applies the
-        single-token boundary assertions (input contract must exist, node_id
-        must be set) and then delegates. Both this executor's path and the
-        processor's batch-flush path (``_cross_check_flush_output``) share
-        ``verify_pass_through`` as the semantic check (ADR-009 §Clause 2).
-        """
-        input_contract = token.row_data.contract
-        if input_contract is None:
-            raise FrameworkBugError(
-                f"Transform {transform.name!r} has passes_through_input=True but input row has no contract. Framework invariant violated."
-            )
-        input_fields = frozenset(fc.normalized_name for fc in input_contract.fields)
-
-        if result.row is not None:
-            emitted_rows = [result.row]
-        elif result.rows is not None:
-            emitted_rows = list(result.rows)
-        else:
-            emitted_rows = []
-
-        static_contract: frozenset[str] = (
-            transform._output_schema_config.get_effective_guaranteed_fields()
-            if transform._output_schema_config is not None
-            else frozenset()
-        )
-
-        transform_node_id = transform.node_id
-        if transform_node_id is None:
-            raise OrchestrationInvariantError(f"Transform {transform.name!r} has no node_id set at cross-check time.")
-
-        verify_pass_through(
-            input_fields=input_fields,
-            emitted_rows=emitted_rows,
-            static_contract=static_contract,
-            transform_name=transform.name,
-            transform_node_id=transform_node_id,
-            run_id=ctx.run_id,
-            row_id=token.row_id,
-            token_id=token.token_id,
-        )
 
     def execute_transform(
         self,
@@ -400,16 +353,38 @@ class TransformExecutor:
             # If any of the following steps raise before guard.complete() is
             # called, the guard auto-completes the state as FAILED in __exit__.
 
-            # Pass-through contract cross-check (ADR-008).
-            # When a transform declares passes_through_input=True, verify that
-            # every emitted row's contract is a superset of the input row's
-            # field set. A mis-annotation is a framework contract violation,
-            # not a row-level data error — PassThroughContractViolation is
-            # registered in TIER_1_ERRORS, so the enclosing NodeStateGuard
-            # catches it via __exit__ (structured context is threaded into
-            # ExecutionError.context via to_audit_dict()).
-            if transform.passes_through_input and result.status == "success":
-                self._cross_check_pass_through(transform, token, ctx, result)
+            # Declaration-contract runtime dispatch (ADR-010 §Decision 3).
+            # Iterates the registry; PassThroughDeclarationContract handles the
+            # passes_through_input case (applies_to returns True iff the flag is
+            # set). All contracts whose applies_to returns False are skipped.
+            # The guard condition mirrors the old passes_through_input check so
+            # the dispatch only fires on successful results where at least the
+            # pass-through contract is relevant — other registered contracts that
+            # apply unconditionally can add their own applies_to logic.
+            if result.status == "success":
+                static_contract: frozenset[str] = (
+                    transform._output_schema_config.get_effective_guaranteed_fields()
+                    if transform._output_schema_config is not None
+                    else frozenset()
+                )
+                if result.row is not None:
+                    emitted_rows: tuple[Any, ...] = (result.row,)
+                elif result.rows is not None:
+                    emitted_rows = tuple(result.rows)
+                else:
+                    emitted_rows = ()
+                run_runtime_checks(
+                    inputs=RuntimeCheckInputs(
+                        plugin=transform,
+                        node_id=transform.node_id or "",
+                        run_id=ctx.run_id,
+                        row_id=token.row_id,
+                        token_id=token.token_id,
+                        input_row=token.row_data,
+                        static_contract=static_contract,
+                    ),
+                    outputs=RuntimeCheckOutputs(emitted_rows=emitted_rows),
+                )
 
             # Populate audit fields
             # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.

@@ -232,3 +232,31 @@ def _clear_registry_for_tests() -> None:
         )
     _REGISTRY.clear()
     _FROZEN = False
+
+
+def _snapshot_registry_for_tests() -> tuple[list[DeclarationContract], bool]:
+    """Test-only: return a snapshot of (registry_copy, frozen_flag).
+
+    Pair with ``_restore_registry_snapshot_for_tests`` to save/restore across
+    test boundaries. Gated on ``pytest`` being imported OR ``ELSPETH_TESTING=1``
+    env var. Production callers raise."""
+    if "pytest" not in sys.modules and os.environ.get("ELSPETH_TESTING") != "1":
+        raise RuntimeError("_snapshot_registry_for_tests called outside a pytest process. This helper must never run in production.")
+    return list(_REGISTRY), _FROZEN
+
+
+def _restore_registry_snapshot_for_tests(
+    snapshot: tuple[list[DeclarationContract], bool],
+) -> None:
+    """Test-only: restore the registry and freeze flag from a snapshot.
+
+    Gated on ``pytest`` being imported OR ``ELSPETH_TESTING=1`` env var."""
+    global _FROZEN
+    if "pytest" not in sys.modules and os.environ.get("ELSPETH_TESTING") != "1":
+        raise RuntimeError(
+            "_restore_registry_snapshot_for_tests called outside a pytest process. This helper must never run in production."
+        )
+    registry_copy, frozen_flag = snapshot
+    _REGISTRY.clear()
+    _REGISTRY.extend(registry_copy)
+    _FROZEN = frozen_flag
