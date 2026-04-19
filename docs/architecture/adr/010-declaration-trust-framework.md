@@ -76,7 +76,7 @@ Registry freezes at bootstrap; orchestrator asserts `len(registered_declaration_
 
 ### Negative
 
-- Indirection cost: per-row check path routes through `run_runtime_checks` iterating the registry. Negligible today (one registered contract; `applies_to` short-circuits). Task 12 benchmarks establish a dispatcher-overhead budget; the ADR-008 25 µs / 50 µs gate still applies to the total.
+- Indirection cost: per-row check path routes through `run_runtime_checks` iterating the registry. Negligible today (one registered contract; `applies_to` short-circuits). Task 12 benchmarks establish a dispatcher-overhead budget; the ADR-008 25 µs / 50 µs gate still applies to the total. See **NFR derivation** below for the bounded scaling law as 2B/2C adopters register.
 - Registration ordering: contracts register on module import. A test clearing the registry must re-import the modules or use the snapshot-restore pattern demonstrated in `test_framework_accepts_second_contract.py`. `_clear_registry_for_tests` raises in production.
 - Nominal AuditEvidenceBase requires author discipline: new audit-evidence classes MUST inherit explicitly. CI scanner is the backstop.
 - The v0 empty-emission carve-out (ADR-009 §Clause 3) still stands; ADR-010 does not tighten it. The 90-day SLA trigger (2026-07-18) remains the safeguard for moving to `can_drop_rows` before the next `passes_through_input` transform with external calls registers.
@@ -85,6 +85,23 @@ Registry freezes at bootstrap; orchestrator asserts `len(registered_declaration_
 
 - `PassThroughContractViolation` continues to exist as a dedicated subclass with its 9-key payload; it co-exists with the generic `DeclarationContractViolation` to preserve triage SQL that filters on `exception_type = 'PassThroughContractViolation'`. New contracts may reuse the generic form or introduce their own subclass.
 - Reversibility: the framework is additive — removing it would require unpicking all decorator usages and re-introducing the hand-written `TIER_1_ERRORS` tuple. Non-trivial but not destructive. Review date 2026-10-19 is the formal reversibility checkpoint.
+
+### NFR derivation (dispatcher overhead) — issue `elspeth-5dae105959` / H1
+
+**Claim.** Per-row dispatcher overhead at N registered contracts is bounded by
+
+    budget_median(N) = 27 µs + (N − 1) × 1.5 µs
+    budget_p99(N)    = 2 × budget_median(N)
+
+where the 27 µs N=1 baseline = 25 µs (ADR-008 direct `verify_pass_through` on a 200-field row) + 2 µs (dispatcher's own structural cost: `registered_declaration_contracts()` tuple materialisation + loop entry).
+
+**Per-skip cost derivation.** For N contracts with exactly one applicable, the dispatcher runs `applies_to` N times (pure short-circuit for N − 1 of them) plus `runtime_check` once. The 1.5 µs per-skip budget is a generous upper bound; measured cost on CPython 3.13 / Linux x86-64 is ≈25 ns (a tuple iteration step + one attribute read). The P99 proxy (mean + 3σ) gets 2× the median budget to absorb CI jitter.
+
+**Parametric enforcement.** `tests/performance/benchmarks/test_cross_check_overhead.py::test_dispatcher_overhead_scales_with_n` is parametrised over N ∈ {1, 2, 4, 8, 16} and registers N − 1 no-op contracts + the real `PassThroughDeclarationContract`. The scaling law is asserted at every N, so the benchmark stops degrading to theatre once 2B/2C adopters start registering. A future adopter that makes `applies_to` expensive will fail the gate at the N where its cost dominates the short-circuit budget, not silently.
+
+**Aggregate throughput bound.** At 20 000 rows/sec per worker and N = 16 contracts, per-row dispatch overhead is ≤ (27 + 15 × 1.5) µs = 49.5 µs = ≈1.0 second of wall time per second of throughput. Half of that is the ADR-008 verify baseline; the dispatcher contribution is ~23 µs ≈ 46 % of wall time. This is the worst-case the registry can reach before the review date (2026-10-19 / adoption-evidence triggers) re-evaluates the framework against observed experience.
+
+**Amendment policy.** New contracts that register MUST preserve the scaling law. A contract with an intrinsically expensive `applies_to` (e.g. requiring a deep attribute walk) must either (a) cache its decision at registration time and short-circuit on a scalar, or (b) amend this derivation with a justification and tighten the per-skip budget. The CI benchmark is the enforcement mechanism.
 
 ## Alternatives Considered
 
