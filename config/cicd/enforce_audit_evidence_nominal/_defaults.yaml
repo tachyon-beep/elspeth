@@ -1,0 +1,8 @@
+version: 1
+defaults:
+  # fail_on_stale is false because the scanner is invoked with a --root that
+  # may not cover all allowlisted files (e.g., when tests scan a tmp_path).
+  # Stale entries are reported as informational output but do not fail CI.
+  # Violations and expired entries still fail.
+  fail_on_stale: false
+  fail_on_expired: true
