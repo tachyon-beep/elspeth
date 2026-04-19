@@ -1,0 +1,61 @@
+"""Secret-scrubbing for DeclarationContractViolation payloads (ADR-010 §Decision 3).
+
+The Landscape audit trail is a legal record. Arbitrary Mapping[str, Any] payloads
+(allowed by the DeclarationContractViolation signature) could carry API keys,
+connection strings, or OAuth tokens from plugin ``config.options``. This helper
+redacts values matching known secret patterns BEFORE the payload is handed to
+``to_audit_dict``.
+
+Coverage is best-effort: new secret formats need new patterns here. This is
+the last line of defence, not the first — contract authors SHOULD structure
+payloads so they never carry secrets (see per-contract TypedDict payload_schema).
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from typing import Any, cast
+
+_REDACTED = "<redacted-secret>"
+
+# Heuristic patterns. Order matters — longer / more specific first.
+_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
+    re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI / generic "sk-" key
+    re.compile(r"xox[abpr]-[A-Za-z0-9-]{10,}"),  # Slack token
+    re.compile(r"ghp_[A-Za-z0-9]{36,}"),  # GitHub PAT
+    re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"),  # JWT
+    re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),  # PEM
+)
+
+_SECRET_KEY_NAMES: frozenset[str] = frozenset({"api_key", "apikey", "secret", "token", "password", "passwd", "authorization"})
+
+
+def scrub_payload_for_audit(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a deep-copied, secret-redacted version of ``payload``.
+
+    - Key names matching ``_SECRET_KEY_NAMES`` (case-insensitive) are redacted
+      regardless of value.
+    - String values matching any pattern in ``_PATTERNS`` are replaced entirely.
+    - Nested mappings and sequences are walked recursively.
+    """
+    # _scrub_value on a Mapping always returns a dict comprehension.
+    # cast() tells mypy the return type without adding a runtime isinstance check.
+    return cast(dict[str, Any], _scrub_value(payload, parent_key=None))
+
+
+def _scrub_value(value: Any, *, parent_key: str | None) -> Any:
+    if isinstance(value, Mapping):
+        return {k: _scrub_value(v, parent_key=k) for k, v in value.items()}
+    if isinstance(value, str):
+        if parent_key is not None and parent_key.lower() in _SECRET_KEY_NAMES:
+            return _REDACTED
+        for pattern in _PATTERNS:
+            if pattern.search(value):
+                # Replace the whole string — partial redaction leaks structure.
+                return _REDACTED
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_scrub_value(item, parent_key=None) for item in value]
+    return value
