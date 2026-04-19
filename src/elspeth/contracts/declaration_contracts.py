@@ -54,14 +54,31 @@ class RuntimeCheckInputs:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeCheckOutputs:
-    """Emitted-rows bundle. ``emitted_rows`` is frozen to a tuple in
-    ``__post_init__`` per the deep_freeze contract (CLAUDE.md §Frozen
-    Dataclass Immutability)."""
+    """Emitted-rows bundle. ``emitted_rows`` is normalized to a deep-frozen
+    ``tuple`` in ``__post_init__``. Inputs must be ``list`` or ``tuple`` —
+    arbitrary ``Sequence`` subtypes (including lazy wrappers) crash loudly
+    rather than silently bypass the freeze guard. See CLAUDE.md §Frozen
+    Dataclass Immutability + §Offensive Programming.
+    """
 
-    emitted_rows: Sequence[Any]
+    emitted_rows: tuple[Any, ...]
 
     def __post_init__(self) -> None:
-        freeze_fields(self, "emitted_rows")
+        # Cast to ``object`` so mypy does not pre-narrow via the declared field
+        # type (tuple[Any, ...]) and flag the ``isinstance(value, list)`` branch
+        # as unreachable. At runtime callers may pass any sequence subtype; the
+        # guard catches and rejects non-list/non-tuple inputs offensively.
+        value: object = self.emitted_rows
+        if isinstance(value, list):
+            object.__setattr__(
+                self,
+                "emitted_rows",
+                tuple(deep_freeze(item) for item in value),
+            )
+        elif isinstance(value, tuple):
+            freeze_fields(self, "emitted_rows")
+        else:
+            raise TypeError(f"RuntimeCheckOutputs.emitted_rows must be list or tuple, got {type(value).__name__!r}")
 
 
 class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):

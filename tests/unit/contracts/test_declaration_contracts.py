@@ -217,6 +217,26 @@ def test_emitted_rows_is_frozen_tuple() -> None:
     assert isinstance(outputs.emitted_rows, tuple)  # freeze guard converts list→tuple
 
 
+def test_emitted_rows_non_list_non_tuple_raises() -> None:
+    """Offensive guard: arbitrary Sequence subtypes must not silently bypass
+    the freeze guard. Lazy wrappers and iterators are the motivating case."""
+
+    class _LazySeq:
+        """Minimal Sequence subtype that would deceive static typing."""
+
+        def __init__(self, items):
+            self._items = items
+
+        def __len__(self):
+            return len(self._items)
+
+        def __getitem__(self, i):
+            return self._items[i]
+
+    with pytest.raises(TypeError, match="must be list or tuple"):
+        RuntimeCheckOutputs(emitted_rows=_LazySeq([1, 2, 3]))  # type: ignore[arg-type]
+
+
 def test_negative_example_fires_the_violation() -> None:
     """This is the invariant every 2B/2C contract must satisfy."""
     c = _FakeContract()

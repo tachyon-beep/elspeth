@@ -270,6 +270,16 @@ allow_hits:
   reason: Contract registration trust boundary — isinstance(payload_schema, type) validates the caller-supplied payload_schema attribute is a proper type (TypedDict subclass); offensive invariant check that crashes immediately on wrong type
   safety: Raises TypeError immediately; no silent coercion or data loss
   expires: null
+- key: contracts/declaration_contracts.py:R5:RuntimeCheckOutputs:__post_init__:fp=96343cc6a616f2f2
+  owner: architecture
+  reason: Trusted-type dispatch for freeze-guard normalization — isinstance(value, list) and isinstance(value, tuple) determine how to deep-freeze emitted_rows; both branches are correctness paths, not defensive coercion; non-list/non-tuple raises TypeError immediately (offensive guard per CLAUDE.md §Offensive Programming)
+  safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
+  expires: null
+- key: contracts/declaration_contracts.py:R5:RuntimeCheckOutputs:__post_init__:fp=aeae4aa59255b9cd
+  owner: architecture
+  reason: Trusted-type dispatch for freeze-guard normalization — isinstance(value, list) and isinstance(value, tuple) determine how to deep-freeze emitted_rows; both branches are correctness paths, not defensive coercion; non-list/non-tuple raises TypeError immediately (offensive guard per CLAUDE.md §Offensive Programming)
+  safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
+  expires: null
 - key: contracts/declaration_contracts.py:R1:_clear_registry_for_tests:fp=23d0d948cadb86ef
   owner: architecture
   reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
