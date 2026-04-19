@@ -17,14 +17,12 @@ from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.errors import PassThroughContractViolation, PluginContractViolation
 
 
-@pytest.mark.xfail(reason="Task 4 migrates inheritance — will pass after Task 4")
 def test_plugin_contract_violation_is_audit_evidence() -> None:
     # PluginContractViolation inherits AuditEvidenceBase (Task 4 migration).
     err = PluginContractViolation("hello")
     assert isinstance(err, AuditEvidenceBase)
 
 
-@pytest.mark.xfail(reason="Task 4 migrates inheritance — will pass after Task 4")
 def test_pass_through_violation_is_audit_evidence() -> None:
     err = PassThroughContractViolation(
         transform="x",

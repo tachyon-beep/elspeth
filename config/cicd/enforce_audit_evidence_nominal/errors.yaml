@@ -1,28 +1,17 @@
-# Pre-Task-4 transitional allowlist.
+# Permanent allowlist for classes that legitimately override to_audit_dict
+# without directly inheriting AuditEvidenceBase in their own class statement.
 #
-# PluginContractViolation and PassThroughContractViolation define to_audit_dict
-# but do not yet inherit AuditEvidenceBase.  Task 4 of the ADR-010 Declaration-
-# Trust Framework plan will migrate them to inherit AuditEvidenceBase.  These
-# entries MUST be removed in the same commit that lands the Task 4 migration.
-#
-# The expires date is set to 2026-06-01 to ensure the transitional period does
-# not silently outlast the migration window.  If Task 4 has not landed by then,
-# CI will fail and force a decision.
+# The AEN1 scanner checks only direct base classes (AST-level analysis cannot
+# resolve transitive inheritance reliably). See scanner docstring §Transitive-
+# inheritance design note for the rationale.
 allow_classes:
-- key: contracts/errors.py:AEN1:PluginContractViolation
-  owner: architecture
-  reason: Pre-Task-4 transitional — PluginContractViolation defines to_audit_dict
-    to contribute structured context to ExecutionError.context.  Task 4 of the
-    ADR-010 Declaration-Trust Framework plan will add AuditEvidenceBase to its
-    inheritance chain.  Remove this entry when Task 4 lands.
-  task: ADR-010 Task 4 (Track 2 Phase 2A)
-  expires: '2026-06-01'
 - key: contracts/errors.py:AEN1:PassThroughContractViolation
   owner: architecture
-  reason: Pre-Task-4 transitional — PassThroughContractViolation inherits
-    PluginContractViolation and overrides to_audit_dict with structured fields.
-    Task 4 of the ADR-010 Declaration-Trust Framework plan will migrate the full
-    PluginContractViolation hierarchy to inherit AuditEvidenceBase.  Remove this
-    entry when Task 4 lands.
-  task: ADR-010 Task 4 (Track 2 Phase 2A)
-  expires: '2026-06-01'
+  reason: >-
+    Permanent exception — PassThroughContractViolation overrides to_audit_dict
+    with structured fields, and its base class (PluginContractViolation) inherits
+    AuditEvidenceBase directly.  The scanner cannot follow transitive inheritance
+    from AST; the inheritance chain is correct at runtime (issubclass confirmed by
+    test_pass_through_violation_is_audit_evidence).  This is a legitimate override
+    in a known-good inheritance chain, not an accidental duck-type match.
+  task: ADR-010 Task 4 (permanent — not a transitional entry)

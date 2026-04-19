@@ -9,13 +9,25 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
 
+from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
+
+# Re-export FrameworkBugError which now lives in tier_registry for the
+# circular-import break (Task 3 Step 3 rationale).  Apply @tier_1_error here
+# so the decoration happens in errors.py (the canonical Tier-1 declaration
+# site) without a circular import.  The re-exported name is identical to the
+# class object in tier_registry — isinstance/except identity is preserved.
+from elspeth.contracts.tier_registry import FrameworkBugError as _FrameworkBugError
+from elspeth.contracts.tier_registry import tier_1_error
+
+FrameworkBugError = tier_1_error(reason="ADR-008: framework internal inconsistency — engine bug")(_FrameworkBugError)
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
     from elspeth.contracts.coalesce_metadata import CoalesceMetadata
 
 
+# TIER-2: Frozen audit DTO (not a raiseable exception) — records structured error payloads to the Landscape audit trail.
 @dataclass(frozen=True, slots=True)
 class ExecutionError:
     """Frozen dataclass for execution error payloads.
@@ -611,6 +623,7 @@ class MaxRetriesExceeded(Exception):
         super().__init__(f"Max retries ({attempts}) exceeded: {last_error}")
 
 
+# TIER-2: Control-flow signal for async batch polling — not an error condition; tells the engine to schedule a retry check.
 class BatchPendingError(Exception):
     """Raised when batch is submitted but not yet complete.
 
@@ -678,6 +691,7 @@ class BatchPendingError(Exception):
         super().__init__(f"Batch {batch_id} is {status}, check after {check_after_seconds}s")
 
 
+# TIER-2: Control-flow signal for interrupted runs (SIGINT/SIGTERM) — run is resumable; not a system corruption or framework bug.
 class GracefulShutdownError(Exception):
     """Raised when a pipeline run is interrupted by a shutdown signal.
 
@@ -711,6 +725,7 @@ class GracefulShutdownError(Exception):
         )
 
 
+@tier_1_error(reason="ADR-008: audit trail corruption — permanent OPEN state")
 class AuditIntegrityError(Exception):
     """Raised when audit database operations fail unexpectedly.
 
@@ -731,6 +746,7 @@ class AuditIntegrityError(Exception):
     pass
 
 
+# TIER-2: Config-elected enforcement failure (union collision policy = fail). Not a system corruption; pipeline author chose fail-fast on merge conflicts.
 class CoalesceCollisionError(Exception):
     """Raised when union_collision_policy=fail and a field collision occurs.
 
@@ -751,6 +767,7 @@ class CoalesceCollisionError(Exception):
         self.metadata = metadata
 
 
+@tier_1_error(reason="ADR-008: orchestration invariant broken — executor bug")
 class OrchestrationInvariantError(Exception):
     """Raised when orchestration invariants are violated.
 
@@ -770,6 +787,7 @@ class OrchestrationInvariantError(Exception):
     pass
 
 
+# TIER-2: Plugin retry signal — transient operational failure eligible for RetryManager retry, not a system corruption or framework bug.
 class PluginRetryableError(Exception):
     """Base for plugin exceptions eligible for engine retry.
 
@@ -788,26 +806,8 @@ class PluginRetryableError(Exception):
         self.status_code = status_code
 
 
-class FrameworkBugError(Exception):
-    """Raised when the framework encounters an internal inconsistency.
-
-    This indicates a bug in ELSPETH itself, not user error or external failure.
-    Unlike OrchestrationInvariantError (specific to orchestration flow), this
-    is a general-purpose exception for any framework-level bug.
-
-    Examples of conditions that trigger this:
-    - Double-completing an operation (already completed, trying to complete again)
-    - Missing required context (record_call with neither state_id nor operation_id)
-    - Completing a non-existent operation
-
-    Recovery: These errors indicate bugs in framework code that must be fixed.
-    They should never occur in correct operation.
-    """
-
-    pass
-
-
-class PluginContractViolation(RuntimeError):
+# TIER-2: Plugin contract violation — plugin bug (row-level failure). Recording FAILED state is accurate; not system corruption. Base class excluded from TIER_1_ERRORS (ADR-008).
+class PluginContractViolation(AuditEvidenceBase, RuntimeError):
     """Raised when a plugin violates its contract with the framework.
 
     This indicates a bug in a plugin (Source, Transform, Gate, Sink) that must
@@ -837,6 +837,7 @@ class PluginContractViolation(RuntimeError):
         return {"exception_type": type(self).__name__, "message": str(self)}
 
 
+@tier_1_error(reason="ADR-008: pass-through annotation lie corrupts batch audit fields")
 class PassThroughContractViolation(PluginContractViolation):
     """Raised by TransformExecutor when a passes_through_input=True transform
     drops input fields from its emitted row(s).
@@ -907,13 +908,14 @@ class PassThroughContractViolation(PluginContractViolation):
 
 
 # =============================================================================
-# Tier 1 Guard Tuple — Single Source of Truth
+# Tier 1 Guard Tuple — Live View (ADR-010 §Decision 2)
 # =============================================================================
-# These exception types indicate system corruption, framework bugs,
-# orchestration invariant violations, or framework-contract violations that
-# must survive on_error routing. They must NEVER be caught by broad
-# `except Exception` handlers — doing so either swallows evidence of
-# corruption or pollutes the audit trail with misleading FAILED states.
+# TIER_1_ERRORS is materialized from the tier_registry on each attribute
+# access. This is a MODULE __getattr__ (PEP 562) — NOT a from-import
+# re-export. The v0 plan used `from tier_registry import TIER_1_ERRORS` which
+# captured a snapshot at errors.py import time; late registrations never
+# reached callers doing `from elspeth.contracts.errors import TIER_1_ERRORS`.
+# The live view closes reviewer finding B8.
 #
 # Usage: `except TIER_1_ERRORS: raise` before any `except Exception:` block.
 #
@@ -929,12 +931,26 @@ class PassThroughContractViolation(PluginContractViolation):
 # absorbed by on_error routing.
 # =============================================================================
 
-TIER_1_ERRORS: tuple[type[Exception], ...] = (
-    AuditIntegrityError,
-    FrameworkBugError,
-    OrchestrationInvariantError,
-    PassThroughContractViolation,
-)
+
+if TYPE_CHECKING:
+    # Declare the type of TIER_1_ERRORS for mypy / static tools.
+    # At runtime the name is resolved via __getattr__ (PEP 562) below;
+    # at type-check time this declaration wins, giving callers the right type.
+    TIER_1_ERRORS: tuple[type[Exception], ...]
+
+
+def __getattr__(name: str) -> tuple[type[Exception], ...]:
+    if name == "TIER_1_ERRORS":
+        from elspeth.contracts.tier_registry import TIER_1_ERRORS as _TR
+
+        # Materialise a fresh tuple on every access so callers can use it in
+        # ``except`` clauses (which require a tuple, not a custom view) while
+        # still seeing any registrations that occurred after import time.
+        # This is distinct from the _Tier1ErrorsView live-view object in
+        # tier_registry (which supports membership tests and iteration but is
+        # NOT a tuple).
+        return tuple(_TR)  # type: ignore[arg-type]  # _Tier1ErrorsView yields BaseException subclasses; Exception is a subtype
+    raise AttributeError(name)
 
 
 # =============================================================================
@@ -950,6 +966,7 @@ TIER_1_ERRORS: tuple[type[Exception], ...] = (
 # =============================================================================
 
 
+# TIER-2: Tier-3 data validation base — external data error resulting in row quarantine, not system corruption.
 class ContractViolation(Exception):
     """Base exception for schema contract violations.
 
@@ -992,6 +1009,7 @@ class ContractViolation(Exception):
         }
 
 
+# TIER-2: Tier-3 data validation — required field absent in external data; results in row quarantine.
 class MissingFieldViolation(ContractViolation):
     """Raised when a required field is missing from the data.
 
@@ -1008,6 +1026,7 @@ class MissingFieldViolation(ContractViolation):
         return f"Required field '{self.original_name}' ({self.normalized_name}) is missing"
 
 
+# TIER-2: Tier-3 data validation — external data type mismatch; results in row quarantine.
 class TypeMismatchViolation(ContractViolation):
     """Raised when a field value has the wrong type.
 
@@ -1083,6 +1102,7 @@ class TypeMismatchViolation(ContractViolation):
         return base
 
 
+# TIER-2: Tier-3 data validation — unexpected field in FIXED schema mode; results in row quarantine.
 class ExtraFieldViolation(ContractViolation):
     """Raised when an unexpected field is present in FIXED schema mode.
 
@@ -1100,6 +1120,7 @@ class ExtraFieldViolation(ContractViolation):
         return f"Extra field '{self.original_name}' ({self.normalized_name}) not allowed in FIXED mode"
 
 
+# TIER-2: Configuration error — fork/join schema type conflict (pipeline design issue), not an external data or system error.
 class ContractMergeError(ValueError):
     """Raised when schema contracts cannot be merged due to type conflicts.
 
@@ -1190,6 +1211,7 @@ def violations_to_error_reason(violations: list[ContractViolation]) -> dict[str,
 # =============================================================================
 
 
+# TIER-2: Pipeline dependency failure signal — upstream dependency did not complete; pipeline cannot proceed, but this is not a framework/audit corruption.
 class DependencyFailedError(Exception):
     """A pipeline dependency failed to complete successfully."""
 
@@ -1206,6 +1228,7 @@ class DependencyFailedError(Exception):
         super().__init__(f"Dependency '{dependency_name}' failed (run_id={run_id}): {reason}")
 
 
+# TIER-2: Commencement gate failure signal — config-driven pre-flight check rejected the run; not a framework bug or audit corruption.
 class CommencementGateFailedError(Exception):
     """A commencement gate evaluated to falsy or raised an error."""
 
@@ -1230,6 +1253,7 @@ class CommencementGateFailedError(Exception):
         super().__init__(f"Commencement gate '{gate_name}' failed: {reason} (condition: {condition})")
 
 
+# TIER-2: Retrieval readiness signal — collection unavailable at run time; operational failure, not audit corruption or framework bug.
 class RetrievalNotReadyError(Exception):
     """A retrieval provider's collection is empty or unreachable."""
 
@@ -1243,6 +1267,7 @@ class RetrievalNotReadyError(Exception):
         super().__init__(f"Collection {collection!r} not ready: {reason}")
 
 
+# TIER-2: Sink duplicate-write rejection — on_duplicate='error' policy enforcement; not a framework bug or audit corruption.
 class DuplicateDocumentError(Exception):
     """Sink rejected a write because document IDs already exist in the collection.
 
