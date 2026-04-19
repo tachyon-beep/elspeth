@@ -22,9 +22,10 @@ This is the bug-class the original v2 plan was reaching for but left implicit: "
 
 Add a per-row runtime cross-check to `TransformExecutor.execute_transform`:
 
-1. After `transform.process()` returns a successful `TransformResult`, if `transform.passes_through_input` is True, compute `input_fields = frozenset(input_row.contract.fields)` and `runtime_observed = frozenset(emitted_row.contract.fields)` for every emitted row.
-2. If `divergence_set = input_fields - runtime_observed` is non-empty, raise `PassThroughContractViolation` with the full set of audit fields (transform, node_id, run_id, row_id, token_id, static_contract, runtime_observed, divergence_set, message).
-3. Before raising, increment `pass_through_cross_check_violations_total{transform=...}` — a telemetry counter acquired at `TransformExecutor.__init__`. This is the operational signal SRE sees even when Landscape recording itself fails.
+1. After `transform.process()` returns a successful `TransformResult`, if `transform.passes_through_input` is True, compute `input_fields = frozenset(input_row.contract.fields)` for every emitted row.
+2. Compute `runtime_observed = frozenset(emitted_row.contract.fields) & frozenset(emitted_row.keys())` — the **intersection** of the emitted row's contract-set and its payload-set. `PipelineRow.__init__` accepts any `dict` and any `SchemaContract` as independent references and does not enforce `data.keys() ⊆ contract.fields`, so a field is "kept" at runtime iff the row simultaneously declares it in its contract AND carries it in its payload. Reading either side alone creates a one-sided blind spot: a buggy plugin can shrink the contract while keeping the payload (caught by the contract side), or shrink the payload while reusing the input contract (caught by the payload side). Using the intersection catches both vectors. The payload-side cost is `frozenset(emitted_row.keys())`, which reads the frozen `MappingProxyType` directly — no `deep_thaw` — so the NFR budget (median ≤ 25 µs / P99 ≤ 50 µs on a 200-field row) remains comfortable.
+3. If `divergence_set = input_fields - runtime_observed` is non-empty, raise `PassThroughContractViolation` with the full set of audit fields (transform, node_id, run_id, row_id, token_id, static_contract, runtime_observed, divergence_set, message).
+4. Before raising, increment `pass_through_cross_check_violations_total{transform=...}` — a telemetry counter acquired at `TransformExecutor.__init__`. This is the operational signal SRE sees even when Landscape recording itself fails.
 
 ### TIER_1 registration is load-bearing
 
@@ -45,6 +46,7 @@ The cross-check crosses trust tiers. Each tier is explicit per CLAUDE.md's Three
 | `transform.passes_through_input` (class attribute) | System code (outside tier model) | Read without defensive guards; missing/wrong type is a framework bug → `FrameworkBugError` |
 | `input_row.contract.fields` | Tier 2 (elevated trust) | Expect types correct. `contract is None` → `FrameworkBugError` (framework invariant violation) |
 | `emitted_row.contract.fields` | Tier 2 (elevated trust) | Same rule. `contract is None` → `FrameworkBugError` |
+| `emitted_row.keys()` (payload-set) | Tier 2 (elevated trust) | Keys come from the frozen `MappingProxyType` wrapper that `PipelineRow.__init__` creates via `deep_freeze`. No thaw, no coercion — the key-set is the authoritative runtime payload shape. |
 | Computed `divergence_set: frozenset[str]` | Tier 2 at computation, Tier 1 at event boundary | Deep-frozen into sorted lists in `to_audit_dict()` for canonical JSON serialization |
 | Landscape event payload (9 fields) | Tier 1 (full trust) | Canonicalizable; crash on any anomaly during serialization |
 

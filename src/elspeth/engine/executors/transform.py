@@ -148,12 +148,17 @@ class TransformExecutor:
     ) -> None:
         """Runtime cross-check for ``passes_through_input=True`` transforms (ADR-008).
 
-        Asserts that every emitted row's contract field set is a superset of
-        the input row's contract field set. A mis-annotation is evidence
-        tampering — the static validator was told the transform emits a
-        superset; runtime observed otherwise. ``PassThroughContractViolation``
-        is registered in ``TIER_1_ERRORS`` so ``on_error`` routing cannot
-        absorb it.
+        Asserts that every emitted row carries every input field in both its
+        contract and its payload. Runtime observation is the intersection of
+        the emitted row's contract-set and its payload-set — a field is
+        "kept" iff the row simultaneously declares it and carries it.
+        ``PipelineRow.__init__`` does not couple ``data.keys()`` to
+        ``contract.fields`` (both are independent references), so reading
+        either alone leaves a one-sided blind spot: a buggy plugin can either
+        shrink the contract while keeping the payload (caught by the contract
+        side) or shrink the payload while reusing the input contract (caught
+        by the payload side). ``PassThroughContractViolation`` is registered
+        in ``TIER_1_ERRORS`` so ``on_error`` routing cannot absorb it.
 
         Tier 2/Tier 1 boundary: ``input_row.contract`` / ``emitted_row.contract``
         are Tier 2 pipeline data (type-trusted). ``None`` here is a framework
@@ -193,7 +198,13 @@ class TransformExecutor:
         for emitted_row in emitted_rows:
             if emitted_row.contract is None:
                 raise FrameworkBugError(f"Transform {transform.name!r} emitted row with no contract. Framework invariant violated.")
-            runtime_observed = frozenset(fc.normalized_name for fc in emitted_row.contract.fields)
+            # Runtime observation is the intersection: a field must appear in
+            # both the contract (type-level claim) AND the payload (actual
+            # data) to count as "kept". PipelineRow.keys() reads the frozen
+            # MappingProxyType directly — O(n), no deep_thaw, NFR-safe.
+            runtime_contract_fields = frozenset(fc.normalized_name for fc in emitted_row.contract.fields)
+            runtime_payload_fields = frozenset(emitted_row.keys())
+            runtime_observed = runtime_contract_fields & runtime_payload_fields
             divergence_set = input_fields - runtime_observed
             if divergence_set:
                 # Fire telemetry counter BEFORE raising so the metric captures

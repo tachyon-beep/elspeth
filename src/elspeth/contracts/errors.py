@@ -855,7 +855,11 @@ class PassThroughContractViolation(PluginContractViolation):
         row_id: Source row identifier.
         token_id: DAG token identifier (post-fork/join lineage).
         static_contract: Fields the static validator computed for output.
-        runtime_observed: Fields actually present in the emitted row's contract.
+        runtime_observed: Fields the emitted row actually exposes at runtime —
+            the intersection of ``emitted_row.contract.fields`` and
+            ``emitted_row.keys()``. ``PipelineRow`` treats contract and
+            payload as independent references, so a field is only "kept"
+            if it appears in both.
         divergence_set: ``input_fields - runtime_observed`` (the dropped fields).
     """
 

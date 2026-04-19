@@ -4977,6 +4977,51 @@ class TestPassThroughCrossCheck:
         assert violation.token_id == "tok_7"
         assert violation.runtime_observed == frozenset({"value"})
 
+    def test_cross_check_raises_when_payload_drops_key_but_contract_unchanged(self) -> None:
+        """Emitted row reuses input contract but drops a payload key → violation.
+
+        Regression for the P1 gap where the cross-check read both sides from
+        ``.contract.fields`` only. ``PipelineRow.__init__`` does not tie
+        ``data.keys()`` to ``contract.fields``, so a buggy
+        ``passes_through_input=True`` plugin that returns
+        ``PipelineRow(reduced_dict, row.contract)`` had identical contract-sets
+        on both sides — ``divergence_set`` stayed empty, the TIER_1 safeguard
+        never fired, and the thin payload reached Landscape via
+        ``result.row.to_dict()``.
+
+        Runtime observation is the intersection of contract-set and payload-set:
+        a field is "kept" iff the row both declares it in its contract and
+        carries it in its data. Here contract={value, extra} but payload={value},
+        so runtime_observed={value} and the dropped ``extra`` is the divergence.
+        """
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        input_contract = _make_passthrough_contract()
+        transform = _make_transform(passes_through_input=True, node_id="node_evil")
+        transform.process.return_value = TransformResult.success(
+            PipelineRow({"value": "v"}, input_contract),
+            success_reason={"action": "passthrough"},
+        )
+        token = _make_token(
+            {"value": "v", "extra": "e"},
+            contract=input_contract,
+            row_id="row_9",
+            token_id="tok_9",
+        )
+        ctx = make_context(run_id="run_xyz")
+
+        with pytest.raises(PassThroughContractViolation) as excinfo:
+            executor.execute_transform(transform, token, ctx)
+
+        violation = excinfo.value
+        assert violation.divergence_set == frozenset({"extra"})
+        assert violation.runtime_observed == frozenset({"value"})
+        assert violation.transform == "test_transform"
+        assert violation.transform_node_id == "node_evil"
+        assert violation.row_id == "row_9"
+        assert violation.token_id == "tok_9"
+
     def test_cross_check_is_tier_1_registered(self) -> None:
         """PassThroughContractViolation membership in TIER_1_ERRORS guards on_error bypass."""
         assert PassThroughContractViolation in TIER_1_ERRORS

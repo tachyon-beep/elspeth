@@ -36,9 +36,12 @@ def test_cross_check_p99_within_budget(benchmark: pytest.FixtureRequest) -> None
     """Median ≤ 25 µs and P99 ≤ 50 µs on a 200-field row.
 
     The benchmark isolates the field-set comparison hot path — constructing
-    two frozensets from contracts and computing their difference. This is
-    the per-row cost the cross-check adds on top of the transform's own
-    ``process()`` invocation.
+    three frozensets (input contract, output contract, output payload) and
+    computing the input minus the contract/payload intersection. This mirrors
+    the real executor logic: a field is "kept" iff the emitted row both
+    declares it in its contract and carries it in its payload. ``PipelineRow``
+    does not couple contract.fields to data.keys(), so the runtime observation
+    must consult both.
     """
     input_contract = _build_wide_contract(200)
     output_contract = _build_wide_contract(200)
@@ -48,7 +51,9 @@ def test_cross_check_p99_within_budget(benchmark: pytest.FixtureRequest) -> None
 
     def cross_check() -> frozenset[str]:
         input_fields = frozenset(fc.normalized_name for fc in input_row.contract.fields)
-        runtime_observed = frozenset(fc.normalized_name for fc in output_row.contract.fields)
+        runtime_contract_fields = frozenset(fc.normalized_name for fc in output_row.contract.fields)
+        runtime_payload_fields = frozenset(output_row.keys())
+        runtime_observed = runtime_contract_fields & runtime_payload_fields
         return input_fields - runtime_observed
 
     result = benchmark(cross_check)
@@ -73,22 +78,23 @@ def test_cross_check_p99_within_budget(benchmark: pytest.FixtureRequest) -> None
 
 @pytest.mark.performance
 def test_cross_check_raises_on_drop(benchmark: pytest.FixtureRequest) -> None:
-    """Sanity: the benchmarked path also correctly detects a dropped field."""
+    """Sanity: the benchmarked path also correctly detects a dropped field.
+
+    Exercises the payload-drop vector (contract reused, payload shrunk). This
+    is the attack surface the intersection catches when either side alone
+    would miss it.
+    """
     input_contract = _build_wide_contract(200)
-    # Output contract missing field_199.
-    output_contract = SchemaContract(
-        fields=tuple(
-            make_field(f"field_{i}", python_type=str, original_name=f"field_{i}", required=True, source="declared") for i in range(199)
-        ),
-        mode="FLEXIBLE",
-        locked=True,
-    )
+    # Output reuses the input contract (contract-set equality) but drops
+    # field_199 from the payload — the buggy-plugin vector.
     input_row = PipelineRow({f"field_{i}": f"v{i}" for i in range(200)}, input_contract)
-    output_row = PipelineRow({f"field_{i}": f"v{i}" for i in range(199)}, output_contract)
+    output_row = PipelineRow({f"field_{i}": f"v{i}" for i in range(199)}, input_contract)
 
     def cross_check() -> frozenset[str]:
         input_fields = frozenset(fc.normalized_name for fc in input_row.contract.fields)
-        runtime_observed = frozenset(fc.normalized_name for fc in output_row.contract.fields)
+        runtime_contract_fields = frozenset(fc.normalized_name for fc in output_row.contract.fields)
+        runtime_payload_fields = frozenset(output_row.keys())
+        runtime_observed = runtime_contract_fields & runtime_payload_fields
         divergence = input_fields - runtime_observed
         if divergence:
             # Raise path is exercised in the real executor; here we return it.
