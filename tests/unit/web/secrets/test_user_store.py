@@ -345,9 +345,7 @@ class TestUserSecretStore:
 
     # -- Eager fingerprint / write-time atomicity (A+B best-practice design) --
 
-    def test_set_secret_raises_fingerprint_missing_when_key_unset(
-        self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_set_secret_raises_fingerprint_missing_when_key_unset(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
         """set_secret eager-computes the fingerprint BEFORE encrypting+writing.
 
         When ELSPETH_FINGERPRINT_KEY is unset the write must fail with
@@ -390,9 +388,7 @@ class TestUserSecretStore:
             ).fetchall()
         assert rows == [], "Fingerprint pre-check must prevent any row from being written"
 
-    def test_set_secret_returns_fingerprint_on_success(
-        self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_set_secret_returns_fingerprint_on_success(self, store: UserSecretStore, monkeypatch: pytest.MonkeyPatch) -> None:
         """set_secret returns the computed fingerprint for audit correlation."""
         monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "eager-fp-key")
         fp = store.set_secret("RETURN_FP", value="val", user_id="u1", auth_provider_type="local")
@@ -404,9 +400,7 @@ class TestUserSecretStore:
         _, ref = store.get_secret("RETURN_FP", user_id="u1", auth_provider_type="local")
         assert ref.fingerprint == fp
 
-    def test_get_secret_raises_secret_decryption_error_on_rotation(
-        self, db_engine
-    ) -> None:
+    def test_get_secret_raises_secret_decryption_error_on_rotation(self, db_engine) -> None:
         """Decryption failure surfaces as SecretDecryptionError (typed).
 
         Complement to test_rotation_makes_existing_secret_unresolvable —

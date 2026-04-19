@@ -33,6 +33,25 @@ def _verify_plugin_manager_clean(monkeypatch: pytest.MonkeyPatch) -> Iterator[No
     yield
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _ensure_registry_populated() -> None:
+    """Fail loud if the registry is empty at harness start. Prevents the
+    silent-0-tests failure mode reviewer B9 flagged — a test that cleared
+    the registry without re-registering would silently skip everything."""
+    # Ensure the pass-through module is imported so PassThroughDeclarationContract
+    # registers itself.
+    import elspeth.engine.executors.pass_through  # noqa: F401
+    from elspeth.contracts.declaration_contracts import registered_declaration_contracts
+
+    contracts = registered_declaration_contracts()
+    if not contracts:
+        raise AssertionError(
+            "Invariant harness started with an empty declaration registry — "
+            "silent coverage loss vector. Ensure pass_through.py is imported "
+            "during test bootstrap."
+        )
+
+
 _SCALAR_STRATEGIES = st.one_of(
     st.integers(min_value=-1000, max_value=1000),
     st.text(min_size=0, max_size=20),

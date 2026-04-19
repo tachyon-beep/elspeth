@@ -147,3 +147,15 @@ def test_harness_catches_deliberate_misannotation(monkeypatch: pytest.MonkeyPatc
         f"Live assertion message must identify the offending plugin; got {message!r}"
     )
     assert "dropped" in message.lower(), f"Live assertion message must explain the failure mode ('dropped fields'); got {message!r}"
+
+
+def test_harness_iterates_registered_declaration_contracts() -> None:
+    """ADR-010 §Decision 3: the invariant harness is registry-driven."""
+    from elspeth.contracts.declaration_contracts import registered_declaration_contracts
+    from tests.invariants.test_pass_through_invariants import (
+        _iter_contracts_for_invariant_harness,
+    )
+
+    registered = {c.name for c in registered_declaration_contracts()}
+    harnessed = {c.name for c in _iter_contracts_for_invariant_harness()}
+    assert harnessed == registered, f"Harness-to-registry drift: harnessed={harnessed}, registered={registered}"

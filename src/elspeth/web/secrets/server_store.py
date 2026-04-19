@@ -81,9 +81,7 @@ class ServerSecretStore:
         # aligns with user_store.get_secret which fails fast on the same
         # deployment issue.
         if not _fingerprint_key_available():
-            raise FingerprintKeyMissingError(
-                f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set"
-            )
+            raise FingerprintKeyMissingError(f"Secret {name!r} is not resolvable — ELSPETH_FINGERPRINT_KEY is not set")
         if _is_reserved(name):
             raise SecretNotFoundError(name)
         if name not in self._allowlist:

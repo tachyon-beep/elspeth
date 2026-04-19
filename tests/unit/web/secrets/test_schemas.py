@@ -116,10 +116,7 @@ class TestSecretStrictnessViaJson:
             CreateSecretResponse.model_validate_json(payload)
 
     def test_inventory_rejects_value_field_in_json(self) -> None:
-        payload = (
-            '{"name": "n", "scope": "user", "available": true, '
-            '"source_kind": "env", "value": "super-secret"}'
-        )
+        payload = '{"name": "n", "scope": "user", "available": true, "source_kind": "env", "value": "super-secret"}'
         with pytest.raises(ValidationError, match="extra"):
             SecretInventoryResponse.model_validate_json(payload)
 

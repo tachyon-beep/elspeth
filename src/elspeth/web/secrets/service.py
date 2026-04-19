@@ -186,16 +186,12 @@ class WebSecretService:
         while this method surfaces per-condition typed signals the HTTP
         layer needs to give an API consumer something to act on.
         """
-        if self._user_store.has_secret_record(
-            name, user_id=user_id, auth_provider_type=auth_provider_type
-        ):
+        if self._user_store.has_secret_record(name, user_id=user_id, auth_provider_type=auth_provider_type):
             # Exercises the full get_secret path so both
             # FingerprintKeyMissingError and SecretDecryptionError can
             # surface.  The plaintext is immediately discarded — this
             # method is security-equivalent to has_ref (no value leak).
-            self._user_store.get_secret(
-                name, user_id=user_id, auth_provider_type=auth_provider_type
-            )
+            self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
             return True
         # No user-scope row — check server scope.  A server-scope row
         # with fingerprint key unset will raise FingerprintKeyMissingError
@@ -209,9 +205,7 @@ class WebSecretService:
 
     # -- REST API helpers (not part of WebSecretResolver) --------------------
 
-    def set_user_secret(
-        self, user_id: str, name: str, value: str, *, auth_provider_type: str
-    ) -> CreateSecretResult:
+    def set_user_secret(self, user_id: str, name: str, value: str, *, auth_provider_type: str) -> CreateSecretResult:
         """Create or update a user-scoped secret.
 
         Returns a ``CreateSecretResult`` describing the persisted state.
@@ -227,9 +221,7 @@ class WebSecretService:
             Propagated from the store when ``ELSPETH_FINGERPRINT_KEY`` is
             unset.  No row is written.  HTTP handlers map to 503.
         """
-        fingerprint = self._user_store.set_secret(
-            name, value=value, user_id=user_id, auth_provider_type=auth_provider_type
-        )
+        fingerprint = self._user_store.set_secret(name, value=value, user_id=user_id, auth_provider_type=auth_provider_type)
         return CreateSecretResult(
             name=name,
             scope="user",

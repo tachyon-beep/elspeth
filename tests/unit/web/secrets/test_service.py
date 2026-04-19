@@ -183,9 +183,7 @@ class TestCrud:
         assert len(result.fingerprint) == 64
         assert all(c in "0123456789abcdef" for c in result.fingerprint)
 
-    def test_set_user_secret_raises_fingerprint_missing(
-        self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_set_user_secret_raises_fingerprint_missing(self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch) -> None:
         """set_user_secret propagates FingerprintKeyMissingError from the store.
 
         HTTP handlers map this to 503 so API consumers see deployment
@@ -209,29 +207,16 @@ class TestCheckUserRefResolvable:
     is the adapter that provides that separate contract.
     """
 
-    def test_returns_true_for_resolvable_user_secret(
-        self, service: WebSecretService, user_store: UserSecretStore
-    ) -> None:
+    def test_returns_true_for_resolvable_user_secret(self, service: WebSecretService, user_store: UserSecretStore) -> None:
         user_store.set_secret("RESOLVABLE", value="v", user_id="u1", auth_provider_type="local")
-        assert (
-            service.check_user_ref_resolvable("u1", "RESOLVABLE", auth_provider_type="local")
-            is True
-        )
+        assert service.check_user_ref_resolvable("u1", "RESOLVABLE", auth_provider_type="local") is True
 
     def test_returns_false_for_absent_ref(self, service: WebSecretService) -> None:
-        assert (
-            service.check_user_ref_resolvable("u1", "ABSENT", auth_provider_type="local")
-            is False
-        )
+        assert service.check_user_ref_resolvable("u1", "ABSENT", auth_provider_type="local") is False
 
-    def test_returns_true_for_resolvable_server_secret(
-        self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_true_for_resolvable_server_secret(self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TEST_KEY", "env-value")
-        assert (
-            service.check_user_ref_resolvable("u1", "TEST_KEY", auth_provider_type="local")
-            is True
-        )
+        assert service.check_user_ref_resolvable("u1", "TEST_KEY", auth_provider_type="local") is True
 
     def test_raises_fingerprint_missing_for_user_scope(
         self,
@@ -245,9 +230,7 @@ class TestCheckUserRefResolvable:
         with pytest.raises(FingerprintKeyMissingError):
             service.check_user_ref_resolvable("u1", "FP_USR", auth_provider_type="local")
 
-    def test_raises_fingerprint_missing_for_server_scope(
-        self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_raises_fingerprint_missing_for_server_scope(self, service: WebSecretService, monkeypatch: pytest.MonkeyPatch) -> None:
         """Server-scope path also surfaces FingerprintKeyMissingError."""
         monkeypatch.setenv("TEST_KEY", "val")
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
@@ -265,9 +248,7 @@ class TestCheckUserRefResolvable:
         rotated_service = WebSecretService(user_store=rotated, server_store=ServerSecretStore(()))
 
         with pytest.raises(SecretDecryptionError):
-            rotated_service.check_user_ref_resolvable(
-                "u1", "ROT", auth_provider_type="local"
-            )
+            rotated_service.check_user_ref_resolvable("u1", "ROT", auth_provider_type="local")
 
     def test_resolve_still_returns_none_for_absent_row(self, service: WebSecretService) -> None:
         """Contract preserved: resolve() still returns None for genuinely missing refs.

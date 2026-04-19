@@ -31,10 +31,19 @@ from typing import Any, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 
+from elspeth.contracts.declaration_contracts import (
+    DeclarationContract,
+    registered_declaration_contracts,
+)
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
 from tests.invariants.conftest import probe_row
+
+
+def _iter_contracts_for_invariant_harness() -> list[DeclarationContract]:
+    """Contracts the harness exercises. One-to-one with the registry today."""
+    return list(registered_declaration_contracts())
 
 
 class _UnprobeableTransform(Exception):
