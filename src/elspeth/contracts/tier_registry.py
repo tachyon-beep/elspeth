@@ -137,10 +137,12 @@ def freeze_tier_registry() -> None:
 class _Tier1ErrorsView:
     """Live view of the Tier-1 error registry.
 
-    Implements the ``in`` operator and ``count`` so callers can test membership
-    the same way they would with a tuple — but always reflects the current
-    registry state rather than a snapshot. Importable by name (``from
-    tier_registry import TIER_1_ERRORS``) while remaining live.
+    Live view over ``_REGISTRY``. Unlike a snapshot tuple, membership tests
+    (``__contains__``), iteration, and ``count`` always see the current registry
+    contents. Not a drop-in tuple replacement: ``len()``, indexing, and use in
+    ``except`` clauses are intentionally unsupported — use the ``errors.TIER_1_ERRORS``
+    module attribute (PEP 562 re-export added in Task 4) when tuple semantics
+    are required.
     """
 
     def __contains__(self, item: object) -> bool:
@@ -148,6 +150,13 @@ class _Tier1ErrorsView:
 
     def __iter__(self) -> Iterator[type[BaseException]]:
         return iter(list(_REGISTRY))
+
+    def __len__(self) -> int:
+        return len(_REGISTRY)
+
+    def __repr__(self) -> str:
+        names = [cls.__name__ for cls in _REGISTRY]
+        return f"TIER_1_ERRORS({names})"
 
     def count(self, item: object) -> int:
         return _REGISTRY.count(item)  # type: ignore[arg-type]  # list[type[BaseException]].count(object) is safe

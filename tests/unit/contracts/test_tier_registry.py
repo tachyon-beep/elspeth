@@ -142,6 +142,49 @@ def test_tests_prefix_only_allowed_under_pytest() -> None:
         assert required in _ALLOWED_MODULE_PREFIXES
 
 
+def test_double_registration_with_conflicting_reason_raises() -> None:
+    """Same class registered twice with different reasons must fail loudly."""
+    from elspeth.contracts.tier_registry import _register_with_module_prefix
+
+    class _Dup(Exception):
+        pass
+
+    _register_with_module_prefix(
+        cls=_Dup,
+        reason="first registration",
+        caller_module="elspeth.contracts.test_fixture",
+    )
+    with pytest.raises(ValueError, match="already registered"):
+        _register_with_module_prefix(
+            cls=_Dup,
+            reason="second registration with different reason",
+            caller_module="elspeth.contracts.test_fixture",
+        )
+
+
+def test_tier_1_errors_view_supports_len() -> None:
+    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
+
+    before = len(TIER_1_ERRORS)
+
+    @tier_1_error(reason="len test")
+    class _Counted(Exception):
+        pass
+
+    assert len(TIER_1_ERRORS) == before + 1
+
+
+def test_tier_1_errors_view_repr_shows_names() -> None:
+    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
+
+    @tier_1_error(reason="repr test")
+    class _Repr(Exception):
+        pass
+
+    assert "_Repr" in repr(TIER_1_ERRORS)
+    assert repr(TIER_1_ERRORS).startswith("TIER_1_ERRORS(")
+
+
 def test_tests_prefix_absent_when_pytest_not_loaded() -> None:
     """Smoke test: in a pytest-free subprocess, tests. is absent."""
     import subprocess
