@@ -40,13 +40,18 @@ from elspeth.core.templates import (
 # =============================================================================
 
 # Valid Python-style field names (for row.field).
-# Excludes "get" because extract_jinja2_fields intentionally skips row.get
-# (it's a mapping method, handled as row.get("key") call pattern instead).
+# Excludes the PipelineRow API names that extract_jinja2_fields deliberately
+# skips — "get" (mapping method handled as row.get("key") Call pattern),
+# "contract" (@property exposing the SchemaContract), and "to_dict"
+# (serialization method). Must mirror src/elspeth/core/templates.py
+# ``_PIPELINE_ROW_API_NAMES`` or the property domain will produce examples
+# Hypothesis then fails to round-trip through the extractor.
+_EXCLUDED_ROW_API_NAMES = frozenset({"get", "contract", "to_dict"})
 valid_field_names = st.text(
     min_size=1,
     max_size=20,
     alphabet=string.ascii_letters + "_",
-).filter(lambda s: s.isidentifier() and s != "get")
+).filter(lambda s: s.isidentifier() and s not in _EXCLUDED_ROW_API_NAMES)
 
 # Field names that can include dashes/special chars (for row["field"])
 bracket_field_names = st.text(
