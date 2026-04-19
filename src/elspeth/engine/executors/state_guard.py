@@ -14,16 +14,17 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Mapping
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ExecutionError, NodeStateOpen
+from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import (
     TIER_1_ERRORS,
     AuditIntegrityError,
     OrchestrationInvariantError,
-    PluginContractViolation,
 )
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 
@@ -153,15 +154,13 @@ class NodeStateGuard:
         # An exception occurred and the state was never completed.
         # Auto-complete as FAILED so the audit trail has a terminal record.
         #
-        # Populate ExecutionError.context with the exception's to_audit_dict()
-        # when it is a PluginContractViolation — ADR-008 requires structured
-        # context (e.g. divergence_set for PassThroughContractViolation) to
-        # reach the audit trail. This is a Tier-2/Tier-1 boundary type-check,
-        # not defensive programming: the isinstance dispatch is the
-        # discriminating predicate per CLAUDE.md's allowed use.
-        context: dict[str, Any] | None = None
-        if isinstance(exc_val, PluginContractViolation):
-            context = exc_val.to_audit_dict()
+        # ADR-010 §Decision 1: nominal AuditEvidenceBase check. Classes must
+        # explicitly inherit to contribute structured context; see ADR-010
+        # §Alternative 3 for the security rationale (accidental-match spoofing
+        # was the reason we did not use a structural Protocol here).
+        context: Mapping[str, Any] | None = None
+        if isinstance(exc_val, AuditEvidenceBase):
+            context = exc_val.to_audit_dict()  # type: ignore[unreachable]  # AuditEvidenceBase is not BaseException; mypy can't see multi-inheritance
 
         exc_error = ExecutionError(
             exception=str(exc_val),

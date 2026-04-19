@@ -231,8 +231,8 @@ allow_hits:
   reason: First-seen original name fallback - not all fields have explicit mapping in fallback dict
   safety: Falls back to normalized_name when original name unknown
   expires: '2026-05-12'
-- key: engine/executors/state_guard.py:R5:NodeStateGuard:__exit__:fp=c735e3dbe2cfd460
+- key: engine/executors/state_guard.py:R5:NodeStateGuard:__exit__:fp=4317dceb2faa6558
   owner: architecture
-  reason: ADR-008 Tier-2/Tier-1 boundary isinstance check — discriminates PluginContractViolation subclasses so NodeStateGuard can populate ExecutionError.context from to_audit_dict(). This is the discriminating type-check at an exception-handling trust boundary, not defensive programming (CLAUDE.md permits isinstance at trust boundaries). The exception propagates regardless; only the structured audit context is conditionally added.
-  safety: The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug; broken to_audit_dict() surfaces via the existing (TypeError, AttributeError, KeyError, NameError) re-raise path.
+  reason: 'ADR-010 Decision 1 nominal isinstance check -- discriminates AuditEvidenceBase subclasses so NodeStateGuard can populate ExecutionError.context from to_audit_dict(). Nominal inheritance (not structural Protocol) is deliberate: see ADR-010 Alternative 3 for the accidental-match spoofing rationale. The exception always propagates; only structured audit context is conditionally added.'
+  safety: 'The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug; broken to_audit_dict() surfaces via the existing (TypeError, AttributeError, KeyError, NameError) re-raise path.'
   expires: null
