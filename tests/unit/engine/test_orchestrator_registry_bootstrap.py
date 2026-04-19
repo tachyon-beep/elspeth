@@ -24,7 +24,7 @@ import elspeth.engine.executors.pass_through  # noqa: F401  — registers PassTh
 
 
 @pytest.fixture()
-def _isolate_both_registries(monkeypatch):
+def _isolate_both_registries():
     """Save + restore declaration_contracts and tier_registry module state.
 
     Saves:
@@ -47,8 +47,6 @@ def _isolate_both_registries(monkeypatch):
     saved_tr_registry = list(tr._REGISTRY)
     saved_tr_reasons = dict(tr._REASONS)
     saved_tr_frozen = tr._FROZEN
-
-    monkeypatch.setenv("ELSPETH_TESTING", "1")
 
     yield
 

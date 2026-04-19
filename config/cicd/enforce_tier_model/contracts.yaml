@@ -265,33 +265,18 @@ allow_hits:
   reason: Decorator API boundary — isinstance(cls, type) and issubclass(cls, BaseException) validates that the decorated object is a BaseException subclass; this is an offensive invariant check, not defensive coercion
   safety: Raises TypeError immediately on non-exception class; no silent fallback
   expires: null
-- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=17aca63156c77bc4
+- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=daa215b68873396e
   owner: architecture
   reason: Contract registration trust boundary — isinstance(payload_schema, type) validates the caller-supplied payload_schema attribute is a proper type (TypedDict subclass); offensive invariant check that crashes immediately on wrong type
   safety: Raises TypeError immediately; no silent coercion or data loss
   expires: null
-- key: contracts/declaration_contracts.py:R5:RuntimeCheckOutputs:__post_init__:fp=96343cc6a616f2f2
+- key: contracts/declaration_contracts.py:R5:RuntimeCheckOutputs:__post_init__:fp=cc372184b7d9ac46
   owner: architecture
   reason: Trusted-type dispatch for freeze-guard normalization — isinstance(value, list) and isinstance(value, tuple) determine how to deep-freeze emitted_rows; both branches are correctness paths, not defensive coercion; non-list/non-tuple raises TypeError immediately (offensive guard per CLAUDE.md §Offensive Programming)
   safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:RuntimeCheckOutputs:__post_init__:fp=aeae4aa59255b9cd
+- key: contracts/declaration_contracts.py:R5:RuntimeCheckOutputs:__post_init__:fp=8c4505f25b601175
   owner: architecture
   reason: Trusted-type dispatch for freeze-guard normalization — isinstance(value, list) and isinstance(value, tuple) determine how to deep-freeze emitted_rows; both branches are correctness paths, not defensive coercion; non-list/non-tuple raises TypeError immediately (offensive guard per CLAUDE.md §Offensive Programming)
   safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
-  expires: null
-- key: contracts/declaration_contracts.py:R1:_clear_registry_for_tests:fp=3d84617f947d0e0b
-  owner: architecture
-  reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
-  safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass
-  expires: null
-- key: contracts/declaration_contracts.py:R1:_snapshot_registry_for_tests:fp=857409d3ab8868c0
-  owner: architecture
-  reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
-  safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass
-  expires: null
-- key: contracts/declaration_contracts.py:R1:_restore_registry_snapshot_for_tests:fp=054a346ac68db57e
-  owner: architecture
-  reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
-  safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass
   expires: null

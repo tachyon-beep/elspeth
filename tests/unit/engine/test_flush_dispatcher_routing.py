@@ -21,7 +21,6 @@ uses to express "use these fields, not the single input_row's contract."
 
 from __future__ import annotations
 
-import os
 from typing import Any, ClassVar, TypedDict
 from unittest.mock import Mock
 
@@ -198,7 +197,6 @@ def _isolate_registry():
     """Snapshot the registry so the test can register the counting contract
     without leaking into sibling tests and without losing
     PassThroughDeclarationContract's module-level self-registration."""
-    os.environ["ELSPETH_TESTING"] = "1"
     snapshot = _snapshot_registry_for_tests()
     _clear_registry_for_tests()
     _CountingContract.invocations = []

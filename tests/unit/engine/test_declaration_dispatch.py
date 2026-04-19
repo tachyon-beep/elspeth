@@ -3,7 +3,6 @@ exceptions (plugin-ownership posture per CLAUDE.md)."""
 
 from __future__ import annotations
 
-import os
 from typing import Any, TypedDict
 
 import pytest
@@ -129,7 +128,6 @@ def _outputs() -> RuntimeCheckOutputs:
 
 @pytest.fixture(autouse=True)
 def _isolate():
-    os.environ["ELSPETH_TESTING"] = "1"
     # Save the registry state (e.g. PassThroughDeclarationContract registered
     # via module-level side-effect) so it can be restored after the test.
     # Without this, clearing the registry in one worker would leave all

@@ -22,7 +22,6 @@ Registry freezes at end of orchestrator bootstrap (see Task 5b).
 
 from __future__ import annotations
 
-import os
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -259,20 +258,39 @@ def declaration_registry_is_frozen() -> bool:
     return _FROZEN
 
 
+def _require_pytest_process(helper_name: str) -> None:
+    """Single pytest-process gate for every test-only registry helper.
+
+    Enforces the ADR-010 §Decision 3 invariant that test-only mutation
+    helpers must never execute outside a pytest worker. The gate is
+    ``"pytest" in sys.modules`` — this is true under both the main pytest
+    runner and xdist subprocesses (which import pytest by design), and
+    false under any production interpreter. **It is the ONLY unlock
+    path.** An ``ELSPETH_TESTING=1`` env-var arm previously also
+    unlocked these helpers; issue elspeth-cc511e7234 (C3) removed it
+    because any process capable of setting an environment variable
+    (CI misconfiguration, parent-process env leakage, operator error,
+    attacker with env-write capability) could silently clear all
+    runtime VAL contracts in production. Declarative invariants that
+    can be disabled by an environment variable are not invariants.
+    """
+    if "pytest" not in sys.modules:
+        raise RuntimeError(
+            f"{helper_name} called outside a pytest process. This helper "
+            "must never run in production — doing so silently disables all "
+            "runtime VAL checks. No environment variable or other side-channel "
+            "unlock exists: the helper is pytest-gated by design."
+        )
+
+
 def _clear_registry_for_tests() -> None:
     """Test-only: wipe the registry AND reset the freeze flag.
 
-    Gated on ``pytest`` being imported OR ``ELSPETH_TESTING=1`` env var. A
-    production caller will raise ``RuntimeError`` — this helper must never
-    run in a live orchestrator process (reviewer B5/B9)."""
+    Gated on ``pytest`` being imported. A production caller raises
+    ``RuntimeError`` — this helper must never run in a live orchestrator
+    process (reviewer B5/B9, issue elspeth-cc511e7234)."""
     global _FROZEN
-    if "pytest" not in sys.modules and os.environ.get("ELSPETH_TESTING") != "1":
-        raise RuntimeError(
-            "_clear_registry_for_tests called outside a pytest process and "
-            "without ELSPETH_TESTING=1. Production code MUST NOT clear the "
-            "declaration-contract registry — doing so silently disables all "
-            "runtime VAL checks."
-        )
+    _require_pytest_process("_clear_registry_for_tests")
     _REGISTRY.clear()
     _FROZEN = False
 
@@ -281,10 +299,9 @@ def _snapshot_registry_for_tests() -> tuple[list[DeclarationContract], bool]:
     """Test-only: return a snapshot of (registry_copy, frozen_flag).
 
     Pair with ``_restore_registry_snapshot_for_tests`` to save/restore across
-    test boundaries. Gated on ``pytest`` being imported OR ``ELSPETH_TESTING=1``
-    env var. Production callers raise."""
-    if "pytest" not in sys.modules and os.environ.get("ELSPETH_TESTING") != "1":
-        raise RuntimeError("_snapshot_registry_for_tests called outside a pytest process. This helper must never run in production.")
+    test boundaries. Gated on ``pytest`` being imported. Production callers
+    raise (issue elspeth-cc511e7234)."""
+    _require_pytest_process("_snapshot_registry_for_tests")
     return list(_REGISTRY), _FROZEN
 
 
@@ -293,12 +310,10 @@ def _restore_registry_snapshot_for_tests(
 ) -> None:
     """Test-only: restore the registry and freeze flag from a snapshot.
 
-    Gated on ``pytest`` being imported OR ``ELSPETH_TESTING=1`` env var."""
+    Gated on ``pytest`` being imported. Production callers raise (issue
+    elspeth-cc511e7234)."""
     global _FROZEN
-    if "pytest" not in sys.modules and os.environ.get("ELSPETH_TESTING") != "1":
-        raise RuntimeError(
-            "_restore_registry_snapshot_for_tests called outside a pytest process. This helper must never run in production."
-        )
+    _require_pytest_process("_restore_registry_snapshot_for_tests")
     registry_copy, frozen_flag = snapshot
     _REGISTRY.clear()
     _REGISTRY.extend(registry_copy)

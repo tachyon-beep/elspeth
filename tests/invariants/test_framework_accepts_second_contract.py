@@ -12,7 +12,6 @@ side-effects never leak into sibling invariant tests.
 
 from __future__ import annotations
 
-import os
 from typing import Any, TypedDict
 
 import pytest
@@ -159,7 +158,6 @@ def proof_contract_registered() -> Any:
     before adding the proof contract. On teardown the snapshot is restored so
     subsequent tests in the suite see the original registry state.
     """
-    os.environ["ELSPETH_TESTING"] = "1"
     snapshot = _snapshot_registry_for_tests()
     # Wipe + unfreeze so we can register fresh contracts without hitting the
     # frozen-registry guard.

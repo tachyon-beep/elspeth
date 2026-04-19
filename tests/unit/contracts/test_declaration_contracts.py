@@ -67,16 +67,23 @@ class _FakePlugin:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_registry(monkeypatch):
+def _isolate_registry():
     """Each declaration-contracts test starts with an empty registry and has
     the frozen flag reset to ``False``. After the test, the full prior state
     (registry contents + frozen flag) is restored so subsequent tests in the
     same worker process are not affected.
 
-    The teardown must also handle the edge case where
-    ``test_clear_registry_without_pytest_env_raises`` removes ``pytest`` from
-    ``sys.modules`` and ``ELSPETH_TESTING`` from env before returning — so we
-    open the env guard again explicitly before calling ``_clear_registry_for_tests``.
+    Setup/teardown bypass ``_clear_registry_for_tests`` and write directly to
+    ``dc._REGISTRY`` / ``dc._FROZEN``. Two reasons:
+    (1) issue elspeth-cc511e7234 (C3) removed the ``ELSPETH_TESTING=1`` unlock
+        from the helper; the only unlock is ``"pytest" in sys.modules``.
+    (2) Some tests deliberately pop ``pytest`` from ``sys.modules`` (to
+        prove production gating works). After such a test's body returns,
+        pytest's ``monkeypatch`` teardown restores ``sys.modules``, but its
+        teardown ordering relative to this fixture is not a guarantee we
+        should rely on. Writing module attributes directly is unconditional,
+        pytest-state-independent, and matches what the helper does internally
+        anyway.
     """
     import elspeth.contracts.declaration_contracts as dc
 
@@ -84,26 +91,15 @@ def _isolate_registry(monkeypatch):
     saved_registry = list(dc._REGISTRY)
     saved_frozen = dc._FROZEN
 
-    monkeypatch.setenv("ELSPETH_TESTING", "1")
-    _clear_registry_for_tests()
+    # Setup: clear by direct attribute mutation (bypasses the pytest gate).
+    dc._REGISTRY.clear()
+    dc._FROZEN = False
     yield
 
-    # Teardown: force the env guard open directly in case the test patched it.
-    import os as _os
-
-    _saved = _os.environ.get("ELSPETH_TESTING")
-    _os.environ["ELSPETH_TESTING"] = "1"
-    try:
-        # Clear whatever the test left behind (handles the frozen-registry case).
-        _clear_registry_for_tests()
-        # Restore the pre-test state.
-        dc._REGISTRY.extend(saved_registry)
-        dc._FROZEN = saved_frozen
-    finally:
-        if _saved is None:
-            _os.environ.pop("ELSPETH_TESTING", None)
-        else:
-            _os.environ["ELSPETH_TESTING"] = _saved
+    # Teardown: restore pre-test state by direct mutation.
+    dc._REGISTRY.clear()
+    dc._REGISTRY.extend(saved_registry)
+    dc._FROZEN = saved_frozen
 
 
 def test_register_adds_to_registry() -> None:
@@ -306,8 +302,53 @@ def test_clear_registry_without_pytest_env_raises(monkeypatch) -> None:
     production."""
     import sys
 
-    # Simulate non-test process: remove pytest from sys.modules AND clear env var.
+    # Simulate non-test process: remove pytest from sys.modules. After the C3
+    # fix (issue elspeth-cc511e7234) the ELSPETH_TESTING env var is no longer
+    # an unlock path, so clearing it is no longer needed — but we drop it
+    # anyway so the test is unambiguous about what it is verifying.
     monkeypatch.delitem(sys.modules, "pytest", raising=False)
     monkeypatch.delenv("ELSPETH_TESTING", raising=False)
     with pytest.raises(RuntimeError, match="pytest"):
         _clear_registry_for_tests()
+
+
+def test_env_var_alone_does_not_unlock_clear_registry(monkeypatch) -> None:
+    """ADR-010 / issue elspeth-cc511e7234 (C3): ``ELSPETH_TESTING=1`` MUST NOT
+    be an independent unlock path for ``_clear_registry_for_tests``.
+
+    Pre-fix semantics were ``pytest in sys.modules OR env_var == "1"``, which
+    exposed a production bypass: any parent process leaking ``ELSPETH_TESTING=1``
+    into its child's environment could clear the runtime VAL registry in prod.
+    Post-fix semantics are ``pytest in sys.modules`` alone; the env var is inert.
+    """
+    import sys
+
+    monkeypatch.delitem(sys.modules, "pytest", raising=False)
+    monkeypatch.setenv("ELSPETH_TESTING", "1")
+    with pytest.raises(RuntimeError, match="pytest"):
+        _clear_registry_for_tests()
+
+
+def test_env_var_alone_does_not_unlock_snapshot_registry(monkeypatch) -> None:
+    """Symmetric to the _clear assertion: snapshot must also be pytest-gated only."""
+    import sys
+
+    from elspeth.contracts.declaration_contracts import _snapshot_registry_for_tests
+
+    monkeypatch.delitem(sys.modules, "pytest", raising=False)
+    monkeypatch.setenv("ELSPETH_TESTING", "1")
+    with pytest.raises(RuntimeError, match="pytest"):
+        _snapshot_registry_for_tests()
+
+
+def test_env_var_alone_does_not_unlock_restore_registry(monkeypatch) -> None:
+    """Symmetric to the _clear assertion: restore must also be pytest-gated only."""
+    import sys
+
+    from elspeth.contracts.declaration_contracts import _restore_registry_snapshot_for_tests
+
+    monkeypatch.delitem(sys.modules, "pytest", raising=False)
+    monkeypatch.setenv("ELSPETH_TESTING", "1")
+    with pytest.raises(RuntimeError, match="pytest"):
+        # Argument shape is irrelevant: the gate fires before any work.
+        _restore_registry_snapshot_for_tests(([], False))
