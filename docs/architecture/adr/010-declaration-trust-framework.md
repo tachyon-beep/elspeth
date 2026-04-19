@@ -6,7 +6,7 @@
 **Supersedes:** (partial, clause-level) — see "Supersession map" below
 **Tags:** framework, declaration-contract, audit-evidence, tier-1, registry, audit-integrity
 **Review date:** 2026-10-19 (six months from acceptance; ADR-010 §Consequences must be re-evaluated against observed 2B/2C experience by that date)
-**Filigree epic:** <Track-2 epic ID filled in during Task 13; hard SLA 2026-07-18>
+**Filigree epic:** `elspeth-a3ac5d88c6` (Track 2 — Declaration-trust framework Phase 2B/2C; hard SLA 2026-07-18)
 
 ## Supersession map
 
@@ -111,4 +111,4 @@ Considered seriously in review. Rejected because: (a) the nominal `AuditEvidence
 - Predecessor ADRs: 007 (pass-through propagation), 008 (runtime cross-check), 009 (pathway fusion)
 - Successor ADRs (Phase 2B/2C): each declaration gets its own ADR per §Supersession map ADR-008 reference
 - CLAUDE.md §Three-Tier Trust Model, §Plugin Ownership, §Frozen Dataclass Immutability, §Defensive Programming Forbidden
-- Track 2 filigree epic: <ID filled in during Task 13>; ADR-009 §Clause 3 SLA hard trigger 2026-07-18
+- Track 2 filigree epic: `elspeth-a3ac5d88c6`; ADR-009 §Clause 3 SLA hard trigger 2026-07-18
