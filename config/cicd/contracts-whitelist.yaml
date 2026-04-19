@@ -110,6 +110,14 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/base.py:BaseSource.get_config_model:config"
   - "src/elspeth/plugins/transforms/llm/transform.py:LLMTransform.get_config_model:config"
 
+  # probe_config classmethod (ADR-009 §Clause 4) — returns the exact shape
+  # the constructor accepts (dict[str, Any]). A TypedDict would require
+  # duplicating every plugin's config schema; the base contract is the
+  # constructor's signature, which is already whitelisted above.
+  - "src/elspeth/plugins/infrastructure/base.py:BaseTransform.probe_config:return"
+  - "src/elspeth/plugins/transforms/passthrough.py:PassThrough.probe_config:return"
+  - "src/elspeth/plugins/transforms/batch_replicate.py:BatchReplicate.probe_config:return"
+
   # Plugin implementations - config input
   - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.__init__:config"
   - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.write:rows (list)"

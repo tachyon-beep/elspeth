@@ -38,7 +38,7 @@ class PassThrough(BaseTransform):
 
     name = "passthrough"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:1ca899e645b52fd4"
+    source_file_hash: str | None = "sha256:11981db75817bec8"
     config_model = PassThroughConfig
 
     # ADR-007: PassThrough emits a deep copy of the input row unchanged, so every
@@ -51,6 +51,11 @@ class PassThrough(BaseTransform):
 
         self._schema_config = cfg.schema_config
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 §Clause 4 invariant harness."""
+        return {"schema": {"mode": "observed"}}
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Return row unchanged (deep copy to prevent mutation).

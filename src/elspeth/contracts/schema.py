@@ -620,6 +620,28 @@ class SchemaConfig:
         return self.fields is not None
 
     @property
+    def participates_in_propagation(self) -> bool:
+        """Whether this schema participates in ADR-007 pass-through propagation.
+
+        True iff the schema has guarantees to contribute to the intersection
+        that a downstream pass-through transform computes. False iff the
+        schema abstains entirely.
+
+        Canonical participation predicate per ADR-009 §Clause 1. Both the
+        runtime DAG walker and the composer preview walker must consult this
+        property rather than using the underlying ``declares_guaranteed_fields``
+        or ``has_effective_guarantees`` directly, so future changes to
+        participation semantics (e.g., Track 2's ``can_drop_rows`` declaration)
+        land on this property alone.
+
+        Uses ``has_effective_guarantees`` (explicit declarations OR typed
+        fields). Fixed-mode schemas with typed required fields implicitly
+        guarantee those fields even without an explicit ``guaranteed_fields``
+        declaration; skipping them would under-propagate.
+        """
+        return self.has_effective_guarantees
+
+    @property
     def allows_extra_fields(self) -> bool:
         """Whether extra fields beyond schema are allowed."""
         return self.is_observed or self.mode == "flexible"

@@ -38,8 +38,11 @@ if TYPE_CHECKING:
 from elspeth.contracts import BatchTransformProtocol, TransformProtocol
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    FrameworkBugError,
     MaxRetriesExceeded,
     OrchestrationInvariantError,
+    PassThroughContractViolation,
     PluginRetryableError,
     TransformErrorCategory,
     TransformErrorReason,
@@ -55,6 +58,7 @@ from elspeth.engine.executors import (
     GateExecutor,
     TransformExecutor,
 )
+from elspeth.engine.executors.pass_through import verify_pass_through
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
@@ -649,6 +653,168 @@ class RowProcessor:
 
         return tuple(results)
 
+    def _cross_check_flush_output(
+        self,
+        fctx: _FlushContext,
+        result: TransformResult,
+    ) -> None:
+        """Runtime cross-check for ``passes_through_input`` at flush time.
+
+        ADR-009 §Clause 2 — this closes the gap ADR-008 left open. The batch
+        aggregation flush path previously trusted the static annotation; a
+        mis-annotated batch-aware transform (e.g., ``BatchReplicate``) could
+        silently drop fields from emitted rows without any audit record.
+
+        Semantic decisions (ADR-009 §§2.3, 2.4):
+
+        - **PASSTHROUGH mode (1:1).** Each output token pairs with exactly one
+          input token. The cross-check walks pairs and uses that specific
+          input token's contract fields as ``input_fields``. A heterogeneous
+          batch is not a hazard — each pair is checked independently.
+        - **TRANSFORM mode (N:M, batch-homogeneous).** Every output row is
+          checked against the intersection of all buffered input contracts
+          (ADR-007 table line 53). This is the weakest shared guarantee — a
+          transform claiming ``passes_through_input=True`` must preserve what
+          every input contributed.
+
+        Called BEFORE ``_emit_transform_completed`` and the routing methods
+        (§2.5): a failed cross-check must not follow a COMPLETED or
+        CONSUMED_IN_BATCH terminal-state emission on any token, which would
+        violate CLAUDE.md's "every row reaches exactly one terminal state"
+        invariant.
+
+        Raises:
+            FrameworkBugError: A buffered token has no input contract.
+            PassThroughContractViolation: Any emitted row drops a field.
+                ``_record_flush_violation`` writes per-token FAILED audit
+                entries before re-raising.
+        """
+        if not fctx.transform.passes_through_input:
+            return
+
+        # _FlushContext.__post_init__ guarantees buffered_tokens is non-empty;
+        # no defensive emptiness guard (CLAUDE.md: defensive programming
+        # forbidden for internal paths).
+        for i, token in enumerate(fctx.buffered_tokens):
+            if token.row_data.contract is None:
+                raise FrameworkBugError(
+                    f"Pass-through batch flush: buffered token {i} "
+                    f"(token_id={token.token_id!r}) has no contract "
+                    f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
+                    "Framework invariant violated."
+                )
+
+        per_input_field_sets = [frozenset(fc.normalized_name for fc in token.row_data.contract.fields) for token in fctx.buffered_tokens]
+
+        # Gather emitted rows uniformly across both output modes.
+        if result.is_multi_row:
+            emitted: list[PipelineRow] = list(result.rows) if result.rows is not None else []
+        elif result.row is not None:
+            emitted = [result.row]
+        else:
+            emitted = []
+
+        static_contract: frozenset[str] = (
+            fctx.transform._output_schema_config.get_effective_guaranteed_fields()
+            if fctx.transform._output_schema_config is not None
+            else frozenset()
+        )
+
+        transform_node_id_str = str(fctx.node_id)
+
+        try:
+            if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
+                # 1:1 pairing — routing enforces len(emitted) == len(buffered).
+                # Cross-check each pair with THAT input token's field set.
+                if len(emitted) == len(fctx.buffered_tokens):
+                    for token, emitted_row, input_fields in zip(fctx.buffered_tokens, emitted, per_input_field_sets, strict=True):
+                        verify_pass_through(
+                            input_fields=input_fields,
+                            emitted_rows=[emitted_row],
+                            static_contract=static_contract,
+                            transform_name=fctx.transform.name,
+                            transform_node_id=transform_node_id_str,
+                            run_id=self._run_id,
+                            row_id=token.row_id,
+                            token_id=token.token_id,
+                        )
+                else:
+                    # Count mismatch is ``_route_passthrough_results``'s
+                    # concern; pass through unchecked so routing can surface
+                    # the OrchestrationInvariantError with its own message.
+                    pass
+            else:
+                # TRANSFORM mode: batch-homogeneous intersection.
+                input_fields = frozenset.intersection(*per_input_field_sets)
+                # Triggering token is None for timeout flushes — use the first
+                # buffered token's lineage as the exception's identifying row.
+                identity_token = fctx.triggering_token or fctx.buffered_tokens[0]
+                verify_pass_through(
+                    input_fields=input_fields,
+                    emitted_rows=emitted,
+                    static_contract=static_contract,
+                    transform_name=fctx.transform.name,
+                    transform_node_id=transform_node_id_str,
+                    run_id=self._run_id,
+                    row_id=identity_token.row_id,
+                    token_id=identity_token.token_id,
+                )
+        except PassThroughContractViolation as violation:
+            self._record_flush_violation(fctx, violation)
+            raise
+
+    def _record_flush_violation(
+        self,
+        fctx: _FlushContext,
+        violation: PassThroughContractViolation,
+    ) -> None:
+        """Record FAILED audit entries for every buffered token (ADR-009 §Clause 2).
+
+        The violation is semantically batch-level but the audit trail must
+        capture per-token evidence: triage queries of the form ``WHERE
+        exception_type = 'PassThroughContractViolation'`` expect every
+        affected token to return a row. ``per_token_audit_payload`` is rebuilt
+        inside the loop so ``$.context.token_id`` reflects the row's own
+        token, not the triggering token's (an auditor must be able to ask
+        "which tokens were affected?" and get accurate answers).
+
+        If ``record_token_outcome`` raises mid-loop, the audit trail is
+        incomplete. Rather than silently swallow the failure and re-raise the
+        original violation, crash loudly with ``AuditIntegrityError`` so the
+        operator learns about the audit-write failure. The primary violation
+        is preserved via ``__context__`` (Python automatically sets it
+        because this is inside ``except``).
+        """
+        violation_summary = f"PassThroughContractViolation:{fctx.transform.name}:{sorted(violation.divergence_set)}"
+        error_hash = hashlib.sha256(violation_summary.encode()).hexdigest()[:16]
+        base_audit = violation.to_audit_dict()
+
+        for token in fctx.buffered_tokens:
+            per_token_audit_payload: dict[str, object] = {
+                **base_audit,
+                "token_id": token.token_id,
+                "row_id": token.row_id,
+                "triggering_token_id": (fctx.triggering_token.token_id if fctx.triggering_token is not None else None),
+            }
+            try:
+                self._data_flow.record_token_outcome(
+                    ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                    context=per_token_audit_payload,
+                )
+            except Exception as record_failure:
+                raise AuditIntegrityError(
+                    f"Failed to record PassThroughContractViolation FAILED outcome "
+                    f"for token {token.token_id!r} in batch flush "
+                    f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
+                    f"Audit trail is INCOMPLETE — FAILED records may exist for some "
+                    f"buffered tokens but not others. "
+                    f"Recorder failure: {type(record_failure).__name__}: {record_failure}. "
+                    f"Original violation: {violation!s}"
+                ) from record_failure
+            self._emit_token_completed(token, RowOutcome.FAILED)
+
     def _route_passthrough_results(
         self,
         fctx: _FlushContext,
@@ -898,6 +1064,12 @@ class RowProcessor:
         if result.status != "success":
             return self._handle_flush_error(fctx), []
 
+        # ADR-009 §Clause 2: runtime cross-check for passes_through_input
+        # transforms on the batch-aware flush path. MUST run BEFORE
+        # _emit_transform_completed so a failed cross-check does not follow
+        # a COMPLETED terminal-state emission on any token.
+        self._cross_check_flush_output(fctx, result)
+
         # Emit TransformCompleted telemetry for all buffered tokens
         for token in buffered_tokens:
             self._emit_transform_completed(token=token, transform=transform, transform_result=result)
@@ -1001,6 +1173,12 @@ class RowProcessor:
 
             if result.status != "success":
                 return self._handle_flush_error(fctx), child_items
+
+            # ADR-009 §Clause 2: runtime cross-check for passes_through_input
+            # transforms on the batch-aware flush path. MUST run BEFORE
+            # _emit_transform_completed so a failed cross-check does not
+            # follow a COMPLETED terminal-state emission on any token.
+            self._cross_check_flush_output(fctx, result)
 
             # Emit TransformCompleted telemetry for all buffered tokens
             for token in buffered_tokens:

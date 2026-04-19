@@ -5,6 +5,15 @@
 **Deciders:** Architecture Critic (SME agent), Systems Thinker (SME agent), Python Code Reviewer (SME agent), Quality Engineer (SME agent), Claude (synthesis/lead)
 **Tags:** dag, schema-contract, plugin-base, composer, propagation, validation
 
+> **Amended by [ADR-009](009-pass-through-pathway-fusion.md) on 2026-04-19.**
+> ADR-009 supersedes §Decision 1's "unconditional contract on every row"
+> language with an empty-emission carve-out (Clause 3), closes the
+> duplicated-walker mitigation in §Negative Consequences #2 with shared
+> primitives (`compose_propagation` and `participates_in_propagation`, Clause
+> 1), and delivers the invariant harness named in §Neutral Consequences line
+> 83 (Clause 4). Track 2 will tighten Clause 3 via a new `can_drop_rows`
+> declaration within 90 days of Track 1 merge.
+
 ## Context
 
 `BaseTransform._build_output_schema_config` runs once at `__init__` using the transform's own YAML `schema_config`. Transforms are constructed before edges are wired, so `schema_config.guaranteed_fields` is the transform's *input* declaration from YAML — not the actual upstream predecessor's guarantees.

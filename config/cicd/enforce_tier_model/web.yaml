@@ -289,27 +289,27 @@ allow_hits:
   reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
   safety: Missing iat returns None; no fabrication
   expires: null
-- key: web/composer/state.py:R4:_check_schema_contracts:_effective_producer_guarantees:fp=959289a11ad060fa
+- key: web/composer/state.py:R4:_check_schema_contracts:_effective_producer_guarantees:fp=02bfb7f04165be79
   owner: web-composer
   reason: Composer preview probes plugin-computed output contracts for shape-changing transforms, but draft configs can fail during constructor setup for reasons outside schema parsing. The caught exception message is NOT surfaced to the UI — only type(exc).__name__ is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials, filesystem paths) via the preview response. ADR-007 adds fail-closed handling for known pass-through plugins; non-pass-through plugins retain the v2 fallback to raw guarantees.
   safety: The exception is converted into a medium-severity warning and preview falls back to raw declared schema guarantees (or frozenset() for known pass-through plugins, which then forces Stage 1 rejection) instead of crashing or fabricating a stronger contract
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=d5b6c2567f2dd450
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=38e1288ddbb67319
   owner: web-composer
   reason: Contract helper ValueError is intentionally converted into a blocking ValidationEntry on the consumer node instead of raising immediately
   safety: The pipeline remains invalid; no contract telemetry is fabricated for that consumer edge
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=165c7915c30e4586
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=3e3c83b826447923
   owner: web-composer
   reason: Producer contract parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The invalid producer blocks validation and suppresses downstream edge contracts instead of silently continuing
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=8e9f89ef497365a6
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=212dee1333e5c76c
   owner: web-composer
   reason: Sink contract parse failures are intentionally converted into blocking ValidationEntry results on the output
   safety: The pipeline remains invalid and the sink edge contract is skipped rather than fabricated
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=4a81d6b8f440ddd0
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=18c635d405dd4d92
   owner: web-composer
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer

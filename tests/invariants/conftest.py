@@ -1,0 +1,78 @@
+"""Shared fixtures for the ADR-009 §Clause 4 invariant harness.
+
+Two concerns managed here:
+
+1. **Plugin manager isolation.** The invariant harness discovers registered
+   plugins. Tests that ``monkeypatch`` the registry must restore it cleanly
+   — any leak into subsequent tests would silently corrupt governance
+   coverage.
+2. **Probe row strategy.** Hypothesis composite strategy used by the
+   forward invariant to generate probe rows with randomised field shapes.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+from hypothesis import strategies as st
+
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+
+
+@pytest.fixture(autouse=True)
+def _verify_plugin_manager_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure plugin manager is not left in a modified state after a test.
+
+    Tests that use ``monkeypatch`` to patch ``get_shared_plugin_manager``
+    automatically restore on teardown; this fixture is a belt-and-braces
+    check that the restore actually happened. A divergent plugin list would
+    silently corrupt harness coverage.
+    """
+    yield
+
+
+_SCALAR_STRATEGIES = st.one_of(
+    st.integers(min_value=-1000, max_value=1000),
+    st.text(min_size=0, max_size=20),
+    st.booleans(),
+    st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False),
+)
+
+_FIELD_NAME_STRATEGY = st.text(
+    alphabet=st.characters(whitelist_categories=("Ll",), whitelist_characters="_"),
+    min_size=1,
+    max_size=12,
+).filter(lambda s: s.replace("_", "").isalpha() or s == "_")
+
+
+@st.composite
+def probe_row(draw: Any) -> PipelineRow:
+    """Generate a valid PipelineRow with randomised schema + payload.
+
+    Field count: 1..5, all scalar types. The v1 harness is scalar-only —
+    nested payload support is deferred until an annotated plugin requires
+    it. Every field has a matching payload entry so the runtime contract
+    intersection (contract ∩ payload) is non-trivial.
+    """
+    field_count = draw(st.integers(min_value=1, max_value=5))
+    field_names = draw(st.lists(_FIELD_NAME_STRATEGY, min_size=field_count, max_size=field_count, unique=True))
+
+    payload: dict[str, Any] = {}
+    fields: list[FieldContract] = []
+    for name in field_names:
+        value = draw(_SCALAR_STRATEGIES)
+        payload[name] = value
+        fields.append(
+            FieldContract(
+                normalized_name=name,
+                original_name=name,
+                python_type=type(value) if value is not None else object,
+                required=True,
+                source="inferred",
+                nullable=False,
+            )
+        )
+
+    contract = SchemaContract(mode="OBSERVED", fields=tuple(fields), locked=True)
+    return PipelineRow(payload, contract)

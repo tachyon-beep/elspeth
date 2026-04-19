@@ -146,7 +146,7 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag/graph.py:R6:ExecutionGraph:warn_divert_coalesce_interactions:fp=e982ed7c21b41888
+- key: core/dag/graph.py:R6:ExecutionGraph:warn_divert_coalesce_interactions:fp=afbf704f03025e99
   owner: architecture
   reason: Silent except in schema lookup — DIVERT edge may target non-existent node (forward reference or optional path)
   safety: Continues to next coalesce point; warning about potential data loss is best-effort

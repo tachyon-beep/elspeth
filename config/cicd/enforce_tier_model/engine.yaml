@@ -136,7 +136,7 @@ allow_hits:
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=75bd87a71127ae51
+- key: engine/processor.py:R1:RowProcessor:_notify_coalesce_of_lost_branch:fp=f679a2d97d069561
   owner: architecture
   reason: dict.get() correct - not all branch names have coalesce point mapping
   safety: Crashes on type mismatch - no silent fallback

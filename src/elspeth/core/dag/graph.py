@@ -25,6 +25,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.enums import NodeType
 from elspeth.contracts.errors import FrameworkBugError
+from elspeth.contracts.guarantee_propagation import compose_propagation
 from elspeth.contracts.schema import FIELD_TYPE_MAP, SchemaConfig, get_raw_node_required_fields, get_raw_schema_config
 from elspeth.contracts.types import (
     AggregationName,
@@ -1885,11 +1886,11 @@ class ExecutionGraph:
         and re-walking. Public callers go through ``get_effective_guaranteed_fields``
         which allocates a fresh per-call cache.
 
-        For pass-through transforms, intersects the effective guarantees of
-        participating predecessors (those that declared guarantees — the
-        abstain-vs-empty semantics in ``_predecessor_declares_guarantees``
-        match ``_validate_sink_required_fields``) and unions with this node's
-        own declared fields.
+        For pass-through transforms, delegates the aggregation step to
+        ``compose_propagation`` (ADR-009 §Clause 1). Predecessor
+        participation is checked via ``SchemaConfig.participates_in_propagation``
+        — the canonical predicate that both this walker and the composer's
+        preview walker consult.
 
         Raises ``FrameworkBugError`` if a pass-through transform has no
         predecessors — per the NodeInfo guard, pass-through nodes are
@@ -1910,39 +1911,26 @@ class ExecutionGraph:
                 raise FrameworkBugError(
                     f"Pass-through transform {node_id!r} has no predecessors. Builder must wire transforms with at least one upstream edge."
                 )
-            participating = [
-                self._walk_effective_guaranteed_fields(pred_id, cache)
+            pred_guarantees: list[frozenset[str] | None] = [
+                self._walk_effective_guaranteed_fields(pred_id, cache) if self._predecessor_participates(pred_id) else None
                 for pred_id in predecessors
-                if self._predecessor_declares_guarantees(pred_id)
             ]
-            if not participating:
-                inherited: frozenset[str] = frozenset()
-            else:
-                inherited = participating[0]
-                for guarantees in participating[1:]:
-                    inherited = inherited & guarantees
-            result = inherited | own
+            result = compose_propagation(own, pred_guarantees)
         else:
             result = own
 
         cache[node_id] = result
         return result
 
-    def _predecessor_declares_guarantees(self, node_id: str) -> bool:
-        """Determine whether a predecessor participates in pass-through intersection.
+    def _predecessor_participates(self, node_id: str) -> bool:
+        """Whether a predecessor participates in pass-through intersection.
 
-        Uses ``has_effective_guarantees`` (explicit declarations OR typed
-        fields), not the narrower ``declares_guaranteed_fields``. This
-        matches the semantics of ``get_effective_guaranteed_fields()`` on
-        SchemaConfig: fixed-mode schemas with typed fields implicitly
-        guarantee those fields even without explicit ``guaranteed_fields``.
-
-        A predecessor with ``has_effective_guarantees=False`` is truly
-        abstaining — no explicit declaration AND no typed fields — and is
-        skipped. A predecessor with typed fields but no explicit declaration
-        participates with its derived guarantee set. A predecessor with
-        ``guaranteed_fields=()`` (explicit empty) participates and collapses
-        the intersection to empty.
+        Delegates to ``SchemaConfig.participates_in_propagation`` (ADR-009
+        §Clause 1). A schema-less predecessor is treated as abstaining — the
+        None case is distinct from "declared empty guarantees," since the
+        None-vs-empty-tuple semantic on ``guaranteed_fields`` is preserved at
+        the SchemaConfig layer and reaches this predicate via
+        ``has_effective_guarantees``.
         """
         schema = self.get_node_info(node_id).output_schema_config
-        return schema is not None and schema.has_effective_guarantees
+        return schema is not None and schema.participates_in_propagation

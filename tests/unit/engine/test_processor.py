@@ -184,6 +184,10 @@ def _make_mock_transform(
     transform.on_success = on_success
     transform.is_batch_aware = is_batch_aware
     transform.creates_tokens = creates_tokens
+    # ADR-009 §Clause 2: cross-check is gated on this flag. Default False
+    # matches BaseTransform's default; tests opting into pass-through coverage
+    # set it explicitly after construction.
+    transform.passes_through_input = False
     if result is not None:
         transform.process.return_value = result
     return transform

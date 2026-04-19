@@ -16,6 +16,7 @@ from pathlib import PurePosixPath
 from typing import Any, Literal, NamedTuple, Self, TypedDict
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.contracts.guarantee_propagation import compose_propagation
 from elspeth.contracts.schema import (
     get_raw_node_required_fields,
     get_raw_producer_guaranteed_fields,
@@ -726,22 +727,30 @@ def _check_schema_contracts(
         base = output_schema_config.get_effective_guaranteed_fields()
         if is_pass_through_instance:
             inherited = _intersect_predecessor_guarantees(producer_node)
-            return inherited | base
+            # ADR-009 §Clause 1: share the aggregation rule with graph.py.
+            # Composer's producer-graph is single-upstream at this level
+            # (coalesce absorbs fan-in via pre-computed output), so we pass a
+            # one-element predecessor_guarantees list to compose_propagation.
+            return compose_propagation(base, [inherited])
         return base
 
     def _intersect_predecessor_guarantees(node: NodeSpec) -> frozenset[str]:
         """Mirror the runtime propagation walk in the composer's producer graph.
 
-        INTENTIONAL DUPLICATION of ``_walk_effective_guaranteed_fields`` in
-        ``graph.py``. Do NOT deduplicate by importing from
-        ``elspeth.core.dag.graph`` — ``state.py`` is L3 (web), ``graph.py`` is
-        L1 (core). Importing graph.py from L3 is permitted, but coupling the
-        composer's preview semantics to the runtime's validation semantics via
-        a shared helper is what ADR-007 deliberately avoids — the two paths
-        evolve in lockstep under the integration test #36.
+        Per ADR-009 §Clause 1, the aggregation rule (``compose_propagation``)
+        and the participation predicate (``SchemaConfig.participates_in_propagation``)
+        are shared with ``graph.py::_walk_effective_guaranteed_fields``. The
+        traversal logic remains separate — the composer walks a
+        producer-graph (L3, single-upstream via ``_walk_to_real_producer``)
+        while graph.py walks the runtime DAG (L1, multi-predecessor). The
+        two views legitimately differ; unifying traversal would pollute
+        layers without eliminating duplication.
 
-        Predecessors that abstain (``declares_guaranteed_fields`` False) are
-        skipped. If no predecessor participates, returns ``frozenset()``.
+        The single-upstream call at this level always consults
+        ``_effective_producer_guarantees`` on the walked-to real producer —
+        abstention semantics are absorbed at that boundary (a fully-observed
+        source with no declarations returns ``frozenset()`` which
+        ``compose_propagation`` then treats as explicit-empty at the caller).
         """
         upstream = _walk_to_real_producer(
             node.input,

@@ -229,6 +229,26 @@ class BaseTransform(ABC):
         self._on_start_called: bool = False
         self._output_schema_config: SchemaConfig | None = None
 
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Return a minimal config dict sufficient to instantiate this transform
+        for invariant probing (ADR-009 §Clause 4).
+
+        Transforms annotated with ``passes_through_input=True`` MUST override
+        this method. The default raises ``NotImplementedError`` so that a
+        transform that later gains the annotation is caught immediately by
+        the skip-rate budget test, not silently excluded from governance.
+
+        The returned dict is passed directly to ``cls(config=...)``. It must
+        not require external services, network calls, or credentials — the
+        invariant harness runs in CI and probes transforms in isolation.
+        """
+        raise NotImplementedError(
+            f"{cls.__name__}.probe_config() is not implemented. "
+            "Transforms with passes_through_input=True must declare how to "
+            "instantiate in isolation. Implement probe_config() or remove the annotation."
+        )
+
     @staticmethod
     def _create_schemas(
         schema_config: Any,

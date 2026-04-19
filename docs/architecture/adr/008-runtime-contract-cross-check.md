@@ -5,6 +5,16 @@
 **Deciders:** Architecture Critic (SME agent), Systems Thinker (SME agent), Python Code Reviewer (SME agent), Quality Engineer (SME agent), Claude (synthesis/lead)
 **Tags:** engine, executor, schema-contract, tier-1, audit-integrity, validation
 
+> **Amended by [ADR-009](009-pass-through-pathway-fusion.md) on 2026-04-19.**
+> ADR-009 extends §Decision scope from "after `transform.process()` returns"
+> to also cover the batch aggregation flush path in
+> `processor._process_batch_aggregation_node` and `handle_timeout_flush`
+> (Clause 2). The "cross-check applies per-row in executor" claim in
+> ADR-007 table line 53 is correct after ADR-009 lands. The shared
+> `verify_pass_through` function in `engine/executors/pass_through.py`
+> replaces the method-scoped implementation in `TransformExecutor`; both
+> call sites now import the same primitive.
+
 ## Context
 
 ADR-007 establishes opt-in propagation declared via `BaseTransform.passes_through_input`. Static DAG analysis now trusts that declaration — the validator walks through annotated transforms and propagates predecessor guarantees downstream, mirroring runtime behaviour.

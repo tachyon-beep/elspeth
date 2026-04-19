@@ -94,7 +94,7 @@ class BatchReplicate(BaseTransform):
 
     name = "batch_replicate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:a948411377303fa4"
+    source_file_hash: str | None = "sha256:9b74ca77456e3324"
     config_model = BatchReplicateConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
@@ -102,6 +102,17 @@ class BatchReplicate(BaseTransform):
     # so every emitted token is an unconditional superset of input fields. Static
     # validator may propagate predecessor guarantees through this transform.
     passes_through_input = True
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 §Clause 4 invariant harness."""
+        return {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+            "default_copies": 1,
+            "max_copies": 10,
+            "include_copy_index": True,
+        }
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

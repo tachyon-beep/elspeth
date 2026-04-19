@@ -3,7 +3,6 @@
 import time
 from typing import TYPE_CHECKING, Any, cast
 
-from opentelemetry import metrics
 from pydantic import ValidationError
 
 from elspeth.contracts import (
@@ -19,7 +18,6 @@ from elspeth.contracts.errors import (
     TIER_1_ERRORS,
     FrameworkBugError,
     OrchestrationInvariantError,
-    PassThroughContractViolation,
     PluginContractViolation,
 )
 from elspeth.contracts.plugin_context import PluginContext
@@ -27,6 +25,7 @@ from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
+from elspeth.engine.executors.pass_through import verify_pass_through
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
@@ -92,14 +91,10 @@ class TransformExecutor:
         # mixin-based transform, owned by the executor (not monkey-patched
         # onto the transform instance).
         self._batch_adapters: dict[str, "SharedBatchAdapter"] = {}  # noqa: UP037 — forward ref, no __future__ annotations
-        # OpenTelemetry counter for pass-through cross-check violations (ADR-008).
-        # Cardinality bounded by annotated-transform set (short, known at startup).
-        # Incremented before the PassThroughContractViolation is raised so the
-        # metric captures the event independently of downstream serialization.
-        self._pass_through_violations_counter = metrics.get_meter(__name__).create_counter(
-            "pass_through_cross_check_violations_total",
-            description="Count of passes_through_input=True transforms that dropped input fields at runtime",
-        )
+        # OpenTelemetry counter for pass-through cross-check violations now lives
+        # at module scope in engine.executors.pass_through (ADR-009 §Clause 2).
+        # Both this executor and the processor's batch-flush cross-check share
+        # the same instrument without needing constructor plumbing.
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for a mixin-based transform.
@@ -146,30 +141,13 @@ class TransformExecutor:
         ctx: PluginContext,
         result: TransformResult,
     ) -> None:
-        """Runtime cross-check for ``passes_through_input=True`` transforms (ADR-008).
+        """Runtime cross-check for ``passes_through_input=True`` transforms.
 
-        Asserts that every emitted row carries every input field in both its
-        contract and its payload. Runtime observation is the intersection of
-        the emitted row's contract-set and its payload-set — a field is
-        "kept" iff the row simultaneously declares it and carries it.
-        ``PipelineRow.__init__`` does not couple ``data.keys()`` to
-        ``contract.fields`` (both are independent references), so reading
-        either alone leaves a one-sided blind spot: a buggy plugin can either
-        shrink the contract while keeping the payload (caught by the contract
-        side) or shrink the payload while reusing the input contract (caught
-        by the payload side). ``PassThroughContractViolation`` is registered
-        in ``TIER_1_ERRORS`` so ``on_error`` routing cannot absorb it.
-
-        Tier 2/Tier 1 boundary: ``input_row.contract`` / ``emitted_row.contract``
-        are Tier 2 pipeline data (type-trusted). ``None`` here is a framework
-        invariant violation and raises ``FrameworkBugError`` (Tier 1). Silent
-        skip would let a violation produce no audit event — evidence
-        destruction.
-
-        Called only when ``transform.passes_through_input`` and
-        ``result.status == "success"`` (checked by the caller). Skipped when
-        the transform emitted zero rows (filter semantics are compatible with
-        pass-through annotation: emitting nothing drops nothing).
+        Thin wrapper around :func:`verify_pass_through` that applies the
+        single-token boundary assertions (input contract must exist, node_id
+        must be set) and then delegates. Both this executor's path and the
+        processor's batch-flush path (``_cross_check_flush_output``) share
+        ``verify_pass_through`` as the semantic check (ADR-009 §Clause 2).
         """
         input_contract = token.row_data.contract
         if input_contract is None:
@@ -183,7 +161,7 @@ class TransformExecutor:
         elif result.rows is not None:
             emitted_rows = list(result.rows)
         else:
-            return
+            emitted_rows = []
 
         static_contract: frozenset[str] = (
             transform._output_schema_config.get_effective_guaranteed_fields()
@@ -195,36 +173,16 @@ class TransformExecutor:
         if transform_node_id is None:
             raise OrchestrationInvariantError(f"Transform {transform.name!r} has no node_id set at cross-check time.")
 
-        for emitted_row in emitted_rows:
-            if emitted_row.contract is None:
-                raise FrameworkBugError(f"Transform {transform.name!r} emitted row with no contract. Framework invariant violated.")
-            # Runtime observation is the intersection: a field must appear in
-            # both the contract (type-level claim) AND the payload (actual
-            # data) to count as "kept". PipelineRow.keys() reads the frozen
-            # MappingProxyType directly — O(n), no deep_thaw, NFR-safe.
-            runtime_contract_fields = frozenset(fc.normalized_name for fc in emitted_row.contract.fields)
-            runtime_payload_fields = frozenset(emitted_row.keys())
-            runtime_observed = runtime_contract_fields & runtime_payload_fields
-            divergence_set = input_fields - runtime_observed
-            if divergence_set:
-                # Fire telemetry counter BEFORE raising so the metric captures
-                # the event independently of downstream serialization outcome.
-                self._pass_through_violations_counter.add(1, {"transform": transform.name})
-                raise PassThroughContractViolation(
-                    transform=transform.name,
-                    transform_node_id=transform_node_id,
-                    run_id=ctx.run_id,
-                    row_id=token.row_id,
-                    token_id=token.token_id,
-                    static_contract=static_contract,
-                    runtime_observed=runtime_observed,
-                    divergence_set=frozenset(divergence_set),
-                    message=(
-                        f"Transform {transform.name!r} (node {transform_node_id!r}) "
-                        f"declared passes_through_input=True but dropped fields "
-                        f"{sorted(divergence_set)!r} from row {token.row_id!r}."
-                    ),
-                )
+        verify_pass_through(
+            input_fields=input_fields,
+            emitted_rows=emitted_rows,
+            static_contract=static_contract,
+            transform_name=transform.name,
+            transform_node_id=transform_node_id,
+            run_id=ctx.run_id,
+            row_id=token.row_id,
+            token_id=token.token_id,
+        )
 
     def execute_transform(
         self,
