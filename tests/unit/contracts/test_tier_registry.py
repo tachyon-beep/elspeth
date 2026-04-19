@@ -7,12 +7,22 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _reset_registry():
-    """Each test gets a clean registry. Uses the module-private reset helper."""
+    """Each test gets a clean registry. Uses the module-private reset helper.
+
+    The fixture always resets ``_FROZEN = False`` before yielding so that
+    tier_registry unit tests can register errors and exercise the decorator
+    regardless of whether a prior test (e.g. an orchestrator test that calls
+    ``prepare_for_run()``) froze the registry. After the test completes, the
+    full pre-test state — including the original freeze flag — is restored.
+    """
     from elspeth.contracts import tier_registry
 
     before_registry = list(tier_registry._REGISTRY)
     before_reasons = dict(tier_registry._REASONS)
     before_frozen = tier_registry._FROZEN
+    # Force-unfreeze so the test body can register errors without hitting
+    # the post-bootstrap guard. Teardown restores the original flag.
+    tier_registry._FROZEN = False
     yield
     tier_registry._REGISTRY[:] = before_registry
     tier_registry._REASONS.clear()

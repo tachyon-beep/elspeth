@@ -280,7 +280,7 @@ allow_hits:
   reason: Trusted-type dispatch for freeze-guard normalization — isinstance(value, list) and isinstance(value, tuple) determine how to deep-freeze emitted_rows; both branches are correctness paths, not defensive coercion; non-list/non-tuple raises TypeError immediately (offensive guard per CLAUDE.md §Offensive Programming)
   safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R1:_clear_registry_for_tests:fp=23d0d948cadb86ef
+- key: contracts/declaration_contracts.py:R1:_clear_registry_for_tests:fp=e03d3d88bf857c69
   owner: architecture
   reason: os.environ.get() is the correct API for checking env var existence — the guard reads ELSPETH_TESTING to detect test context; missing key returns None which fails the equality check, correctly triggering RuntimeError
   safety: RuntimeError raised immediately if neither pytest is imported nor ELSPETH_TESTING=1 is set — no silent bypass

@@ -149,6 +149,67 @@ if TYPE_CHECKING:
 slog = structlog.get_logger(__name__)
 
 
+def prepare_for_run() -> None:
+    """Assert framework invariants and freeze both registries at bootstrap.
+
+    This is the canonical bootstrap entry point (ADR-010 §Decision 3). It must
+    be called AFTER all plugin modules have been imported (so module-level
+    side-effects like ``register_declaration_contract`` have fired) and BEFORE
+    any DAG node begins execution.
+
+    The normal import chain guarantees this ordering in production:
+    - ``orchestrator/core.py`` imports ``processor.py`` at module level.
+    - ``processor.py`` imports ``verify_pass_through`` from ``pass_through.py``.
+    - ``pass_through.py`` registers ``PassThroughDeclarationContract`` as a
+      module-level side-effect.
+
+    If the declaration registry is empty at this point, the import chain is
+    broken — this is an import-order bug, not a runtime configuration error.
+    Crashing here prevents the framework from running silently without any
+    runtime VAL checks active (the exact failure mode ADR-010 was designed to
+    prevent).
+
+    Raises:
+        RuntimeError: no declaration contracts are registered. Indicates an
+            import-order bug — ``elspeth.engine.executors.pass_through`` was
+            not imported before this point.
+    """
+    from elspeth.contracts.declaration_contracts import (
+        declaration_registry_is_frozen,
+        freeze_declaration_registry,
+        registered_declaration_contracts,
+    )
+    from elspeth.contracts.tier_registry import freeze_tier_registry
+
+    # Short-circuit if the registry is already frozen — bootstrap already ran.
+    # Idempotency is required because Orchestrator.run() can be called multiple
+    # times in a single process (e.g. test suites). The non-empty assertion only
+    # needs to fire ONCE, on the first call; subsequent calls trust that the
+    # previous freeze was performed after a successful assertion.
+    #
+    # The ``_clear_registry_for_tests()`` helper resets ``_FROZEN = False``, so
+    # test isolation that clears and repopulates the registry will still trigger
+    # the assertion on the next call.
+    if declaration_registry_is_frozen():
+        return
+
+    # ADR-010 §Decision 3: assert non-empty BEFORE freezing (fail-open vs
+    # fail-closed — the assertion must fire while registration is still
+    # possible in principle, even though we never add contracts here).
+    contracts = registered_declaration_contracts()
+    if not contracts:
+        raise RuntimeError(
+            "no declaration contracts registered at orchestrator bootstrap. "
+            "This indicates an import-order bug — "
+            "elspeth.engine.executors.pass_through must be imported before "
+            "prepare_for_run() is called so PassThroughDeclarationContract "
+            "lands in the registry. A silent runtime VAL disable is exactly "
+            "the failure mode ADR-010 was designed to prevent."
+        )
+    freeze_declaration_registry()
+    freeze_tier_registry()
+
+
 class Orchestrator:
     """Orchestrates full pipeline runs.
 
@@ -1199,6 +1260,14 @@ class Orchestrator:
             raise OrchestrationInvariantError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
         if payload_store is None:
             raise OrchestrationInvariantError("PayloadStore is required for audit compliance.")
+
+        # ADR-010 §Decision 3: assert registry non-empty and freeze both
+        # registries before any row is processed. prepare_for_run() is
+        # idempotent when the registry is already frozen (short-circuits on
+        # repeat calls from multi-run test suites). The non-empty assertion
+        # only fires on the first call per process lifetime; subsequent calls
+        # trust the earlier freeze was performed after a passing assertion.
+        prepare_for_run()
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
         self._reset_checkpoint_sequence()

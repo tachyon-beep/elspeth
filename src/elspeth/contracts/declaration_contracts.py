@@ -205,6 +205,17 @@ def freeze_declaration_registry() -> None:
     _FROZEN = True
 
 
+def declaration_registry_is_frozen() -> bool:
+    """Return whether the registry has been sealed by bootstrap.
+
+    Used by ``prepare_for_run()`` to skip the non-empty assertion and
+    re-freeze on subsequent calls when the registry is already sealed (e.g.
+    when ``Orchestrator.run()`` is invoked more than once in a single
+    process with the same registry state).
+    """
+    return _FROZEN
+
+
 def _clear_registry_for_tests() -> None:
     """Test-only: wipe the registry AND reset the freeze flag.
 

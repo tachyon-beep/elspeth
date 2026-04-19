@@ -68,18 +68,37 @@ class _FakePlugin:
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(monkeypatch):
+    """Each declaration-contracts test starts with an empty registry and has
+    the frozen flag reset to ``False``. After the test, the full prior state
+    (registry contents + frozen flag) is restored so subsequent tests in the
+    same worker process are not affected.
+
+    The teardown must also handle the edge case where
+    ``test_clear_registry_without_pytest_env_raises`` removes ``pytest`` from
+    ``sys.modules`` and ``ELSPETH_TESTING`` from env before returning — so we
+    open the env guard again explicitly before calling ``_clear_registry_for_tests``.
+    """
+    import elspeth.contracts.declaration_contracts as dc
+
+    # Snapshot current state before the test touches anything.
+    saved_registry = list(dc._REGISTRY)
+    saved_frozen = dc._FROZEN
+
     monkeypatch.setenv("ELSPETH_TESTING", "1")
     _clear_registry_for_tests()
     yield
-    # Teardown: force the env guard open directly in case the test patched it
-    # out (e.g. test_clear_registry_without_pytest_env_raises removes both
-    # pytest from sys.modules and ELSPETH_TESTING from env before returning).
+
+    # Teardown: force the env guard open directly in case the test patched it.
     import os as _os
 
     _saved = _os.environ.get("ELSPETH_TESTING")
     _os.environ["ELSPETH_TESTING"] = "1"
     try:
+        # Clear whatever the test left behind (handles the frozen-registry case).
         _clear_registry_for_tests()
+        # Restore the pre-test state.
+        dc._REGISTRY.extend(saved_registry)
+        dc._FROZEN = saved_frozen
     finally:
         if _saved is None:
             _os.environ.pop("ELSPETH_TESTING", None)
