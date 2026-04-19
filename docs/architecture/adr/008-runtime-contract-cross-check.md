@@ -15,6 +15,10 @@
 > replaces the method-scoped implementation in `TransformExecutor`; both
 > call sites now import the same primitive.
 
+> **Amended by ADR-010 (Declaration-trust framework, 2026-04-19).**
+> Normative in this ADR: §Explicit scope boundary (each new declaration still requires its own ADR).
+> Superseded: the direct-call executor integration pattern — replaced by ADR-010 §Decision 3's `run_runtime_checks` dispatcher. Cross-check scope "per-row in executor" remains correct; the mechanism is now registry-driven.
+
 ## Context
 
 ADR-007 establishes opt-in propagation declared via `BaseTransform.passes_through_input`. Static DAG analysis now trusts that declaration — the validator walks through annotated transforms and propagates predecessor guarantees downstream, mirroring runtime behaviour.

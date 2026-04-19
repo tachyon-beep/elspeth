@@ -7,6 +7,10 @@
 
 ---
 
+> **Amended by ADR-010 (Declaration-trust framework, 2026-04-19).**
+> Normative in this ADR: all four Clauses for `passes_through_input`.
+> Extended: §Clause 4 invariant-harness design now covers ALL registered contracts via the ADR-010 `negative_example` requirement, not only `passes_through_input`.
+
 ## Context
 
 ADR-007 (pass-through contract propagation) and ADR-008 (runtime contract cross-check) shipped as a partial landing. Two limitations were documented at landing time and are now closed:

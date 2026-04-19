@@ -14,6 +14,12 @@
 > 83 (Clause 4). Track 2 will tighten Clause 3 via a new `can_drop_rows`
 > declaration within 90 days of Track 1 merge.
 
+> **Amended by ADR-010 (Declaration-trust framework, 2026-04-19).**
+> Normative in this ADR: Decisions 1–3 for `passes_through_input` specifically.
+> Superseded: §Negative Consequences #2 (resolved earlier by ADR-009 §Clause 1);
+> §Neutral Consequences line 83 (invariant-test placeholder) — now concrete in ADR-009 §Clause 4 and ADR-010 `test_contract_negative_examples_fire.py`.
+> New declarations do NOT copy this ADR's pattern — adopt the ADR-010 framework and register a contract.
+
 ## Context
 
 `BaseTransform._build_output_schema_config` runs once at `__init__` using the transform's own YAML `schema_config`. Transforms are constructed before edges are wired, so `schema_config.guaranteed_fields` is the transform's *input* declaration from YAML — not the actual upstream predecessor's guarantees.
