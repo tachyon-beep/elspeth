@@ -18,6 +18,7 @@ re-export it from ``errors.py``; this module cannot import ``errors`` (circular)
 from __future__ import annotations
 
 import inspect
+import sys
 from collections.abc import Iterator
 from typing import TypeVar
 
@@ -52,7 +53,7 @@ _ALLOWED_MODULE_PREFIXES: tuple[str, ...] = (
     "elspeth.contracts.",
     "elspeth.engine.",
     "elspeth.core.",
-    "tests.",
+    *(("tests.",) if "pytest" in sys.modules else ()),
 )
 
 _ExcT = TypeVar("_ExcT", bound=BaseException)

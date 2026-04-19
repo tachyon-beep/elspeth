@@ -119,3 +119,46 @@ def test_registration_after_freeze_raises() -> None:
         @tier_1_error(reason="too late")
         class _Late(Exception):
             pass
+
+
+def test_tests_prefix_only_allowed_under_pytest() -> None:
+    """The tests. prefix is gated on pytest being loaded (spec reviewer fix).
+
+    We can't actually unimport pytest mid-test, so we assert the condition
+    under which tests. is present (pytest in sys.modules) and the
+    conditional construction pattern is correct.
+    """
+    import sys
+
+    from elspeth.contracts.tier_registry import _ALLOWED_MODULE_PREFIXES
+
+    # When pytest runs, pytest is in sys.modules; tests. must be present.
+    assert "pytest" in sys.modules
+    assert "tests." in _ALLOWED_MODULE_PREFIXES
+
+    # Production-mode check: the three non-test prefixes must always be
+    # present (they're unconditional).
+    for required in ("elspeth.contracts.", "elspeth.engine.", "elspeth.core."):
+        assert required in _ALLOWED_MODULE_PREFIXES
+
+
+def test_tests_prefix_absent_when_pytest_not_loaded() -> None:
+    """Smoke test: in a pytest-free subprocess, tests. is absent."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "assert 'pytest' not in sys.modules\n"
+            "from elspeth.contracts.tier_registry import _ALLOWED_MODULE_PREFIXES\n"
+            "assert 'tests.' not in _ALLOWED_MODULE_PREFIXES, f'tests. leaked into production: {_ALLOWED_MODULE_PREFIXES}'\n"
+            "print('OK')\n",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    assert "OK" in result.stdout
