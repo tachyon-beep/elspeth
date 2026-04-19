@@ -38,6 +38,7 @@ class MockTransformWithSchemaConfig:
     on_error: str | None = None
     on_success: str | None = "output"
     declared_output_fields: frozenset[str] = frozenset()
+    passes_through_input: bool = False
 
     def __init__(self) -> None:
         # Computed schema config with guaranteed and audit fields
@@ -59,6 +60,7 @@ class MockTransformWithoutSchemaConfig:
     on_error: str | None = None
     on_success: str | None = "output"
     declared_output_fields: frozenset[str] = frozenset()
+    passes_through_input: bool = False
     _output_schema_config: SchemaConfig | None = None
 
 
@@ -428,6 +430,7 @@ class MockAggregationTransform:
     on_error: str | None = None
     on_success: str | None = "output"
     declared_output_fields: frozenset[str] = frozenset()
+    passes_through_input: bool = False
 
     def __init__(self) -> None:
         self._output_schema_config = SchemaConfig(
@@ -944,6 +947,7 @@ class _ConfigurableTransform:
     on_error: str | None = None
     on_success: str | None = "output"
     declared_output_fields: frozenset[str] = frozenset()
+    passes_through_input: bool = False
 
     def __init__(self, name: str, guaranteed_fields: tuple[str, ...] | None) -> None:
         self.name = name

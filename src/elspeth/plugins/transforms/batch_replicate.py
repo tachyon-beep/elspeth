@@ -94,9 +94,14 @@ class BatchReplicate(BaseTransform):
 
     name = "batch_replicate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:c25559b694fee5dc"
+    source_file_hash: str | None = "sha256:a948411377303fa4"
     config_model = BatchReplicateConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
+
+    # ADR-007: BatchReplicate deep-copies every input row before adding copy_index,
+    # so every emitted token is an unconditional superset of input fields. Static
+    # validator may propagate predecessor guarantees through this transform.
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

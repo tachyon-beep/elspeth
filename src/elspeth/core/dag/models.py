@@ -141,6 +141,13 @@ class NodeInfo:
     # fields a sink requires. Empty frozenset for all non-sink nodes.
     declared_required_fields: frozenset[str] = field(default_factory=frozenset)
 
+    # Pass-through contract flag (ADR-007). Populated only for TRANSFORM nodes
+    # by the builder from TransformProtocol.passes_through_input. When True,
+    # the validator walk propagates predecessor guarantees through this node
+    # when computing effective guaranteed fields. Always False for non-TRANSFORM
+    # nodes; non-False value on any non-TRANSFORM node raises GraphValidationError.
+    passes_through_input: bool = False
+
     def __post_init__(self) -> None:
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
@@ -154,6 +161,19 @@ class NodeInfo:
                 f"NodeInfo.declared_required_fields is only meaningful for SINK nodes; "
                 f"node {self.node_id!r} has type {self.node_type.name} "
                 f"with declared_required_fields={sorted(self.declared_required_fields)!r}.",
+                component_id=self.node_id,
+                component_type=self.node_type.name.lower(),
+            )
+        # Offensive programming: passes_through_input is for nodes that execute
+        # a TransformProtocol plugin — TRANSFORM and AGGREGATION. Aggregations
+        # (including BatchReplicate wired under `aggregations:` in YAML) execute
+        # transform-class plugins and share the propagation semantics per
+        # ADR-007. Setting it on source/coalesce/sink/gate indicates a builder
+        # bug or misrouted attribute assignment; surface at construction.
+        if self.passes_through_input and self.node_type not in (NodeType.TRANSFORM, NodeType.AGGREGATION):
+            raise GraphValidationError(
+                f"NodeInfo.passes_through_input is only meaningful for TRANSFORM or "
+                f"AGGREGATION nodes; node {self.node_id!r} has type {self.node_type.name}.",
                 component_id=self.node_id,
                 component_type=self.node_type.name.lower(),
             )

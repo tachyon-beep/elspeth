@@ -75,6 +75,7 @@ dev = [
     "pytest-dotenv>=0.5,<1",  # Load .env for integration tests
     "pytest-timeout>=2.3,<3",  # Test timeouts for stress tests
     "pytest-xdist>=3.5,<4",  # Parallel test execution
+    "pytest-benchmark>=4.0,<5",  # Performance microbenchmarks for NFR gates (ADR-007/008)
     "hypothesis>=6.98,<7",  # Property-based testing
     "mypy>=1.19,<2",  # Static type checking
     "ruff==0.15.4",  # Linting and formatting
@@ -165,6 +166,7 @@ all = [
     "pytest-asyncio>=1.0,<2",
     "pytest-dotenv>=0.5,<1",
     "pytest-timeout>=2.3,<3",
+    "pytest-benchmark>=4.0,<5",
     "hypothesis>=6.98,<7",
     "mypy>=1.19,<2",
     "ruff==0.15.4",

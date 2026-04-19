@@ -19,7 +19,12 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import ExecutionError, NodeStateOpen
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import TIER_1_ERRORS, AuditIntegrityError, OrchestrationInvariantError
+from elspeth.contracts.errors import (
+    TIER_1_ERRORS,
+    AuditIntegrityError,
+    OrchestrationInvariantError,
+    PluginContractViolation,
+)
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 if TYPE_CHECKING:
@@ -147,10 +152,22 @@ class NodeStateGuard:
 
         # An exception occurred and the state was never completed.
         # Auto-complete as FAILED so the audit trail has a terminal record.
+        #
+        # Populate ExecutionError.context with the exception's to_audit_dict()
+        # when it is a PluginContractViolation — ADR-008 requires structured
+        # context (e.g. divergence_set for PassThroughContractViolation) to
+        # reach the audit trail. This is a Tier-2/Tier-1 boundary type-check,
+        # not defensive programming: the isinstance dispatch is the
+        # discriminating predicate per CLAUDE.md's allowed use.
+        context: dict[str, Any] | None = None
+        if isinstance(exc_val, PluginContractViolation):
+            context = exc_val.to_audit_dict()
+
         exc_error = ExecutionError(
             exception=str(exc_val),
             exception_type=exc_type.__name__,
             phase="executor_post_process",
+            context=context,
         )
         try:
             self._execution.complete_node_state(

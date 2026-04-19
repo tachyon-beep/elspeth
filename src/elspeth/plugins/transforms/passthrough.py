@@ -38,8 +38,12 @@ class PassThrough(BaseTransform):
 
     name = "passthrough"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:da68366cb9cbcdd1"
+    source_file_hash: str | None = "sha256:1ca899e645b52fd4"
     config_model = PassThroughConfig
+
+    # ADR-007: PassThrough emits a deep copy of the input row unchanged, so every
+    # input field is present on every emitted row. Canonical pass-through exemplar.
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)

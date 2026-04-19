@@ -271,6 +271,15 @@ class TransformProtocol(Protocol):
     # When False, success_multi() is only valid in passthrough aggregation mode.
     creates_tokens: bool
 
+    # Pass-through contract flag (ADR-007).
+    # When True, process() UNCONDITIONALLY emits rows containing every field
+    # present on the input row (plus declared_output_fields), regardless of
+    # row content or runtime state. Enables the DAG validator to propagate
+    # predecessor guarantees through this transform. Verified at runtime by
+    # TransformExecutor's cross-check; mis-annotation raises
+    # PassThroughContractViolation (TIER_1).
+    passes_through_input: bool
+
     # Field collision enforcement (centralized in TransformExecutor).
     # Transforms that add fields to the output row declare WHAT fields they add
     # at init time. The executor checks these against input keys BEFORE running
@@ -424,6 +433,13 @@ class BatchTransformProtocol(Protocol):
     # When True, process() may return TransformResult.success_multi(rows)
     # and new tokens will be created for each output row.
     creates_tokens: bool
+
+    # Pass-through contract flag (ADR-007).
+    # When True, process() UNCONDITIONALLY emits rows containing every field
+    # present on each input row. Enables DAG validator propagation; verified
+    # at runtime by TransformExecutor's cross-check (per-row in batch mode).
+    # Mis-annotation raises PassThroughContractViolation (TIER_1).
+    passes_through_input: bool
 
     # Error routing configuration
     # Injected by cli_helpers.py bridge from AggregationSettings/TransformSettings.

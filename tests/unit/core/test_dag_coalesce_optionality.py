@@ -828,17 +828,27 @@ class TestCoalesceSinkRequiredFieldValidation:
         graph.add_edge("gate", "sink", label="true", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink", label="false", mode=RoutingMode.MOVE)
 
-        # Patch the effective-guarantees API with a counter. The validator
-        # must call it exactly ONCE for the gate predecessor, regardless of
-        # how many parallel edges exist between gate and sink.
+        # Patch the private walk helper with a counter. The validator must
+        # call it exactly ONCE for the gate predecessor, regardless of how
+        # many parallel edges exist between gate and sink.
+        #
+        # ADR-007: the validator now threads a shared cache through the
+        # private _walk_effective_guaranteed_fields helper (rather than the
+        # public get_effective_guaranteed_fields API which allocates a fresh
+        # per-call cache). Patching the private helper covers both the
+        # deduplication test and the cache-sharing behavior.
         call_counts: dict[str, int] = {}
-        original = graph.get_effective_guaranteed_fields
+        original = ExecutionGraph._walk_effective_guaranteed_fields
 
-        def counting_wrapper(node_id: str) -> frozenset[str]:
+        def counting_walk(
+            self_inner: ExecutionGraph,
+            node_id: str,
+            cache: dict[str, frozenset[str]],
+        ) -> frozenset[str]:
             call_counts[node_id] = call_counts.get(node_id, 0) + 1
-            return original(node_id)
+            return original(self_inner, node_id, cache)
 
-        with patch.object(graph, "get_effective_guaranteed_fields", side_effect=counting_wrapper):
+        with patch.object(ExecutionGraph, "_walk_effective_guaranteed_fields", new=counting_walk):
             graph._validate_sink_required_fields()  # Should not raise
 
         assert call_counts.get("gate", 0) == 1, (
@@ -971,6 +981,7 @@ class _TransformWithTypedSchema:
     on_error: str | None = None
     on_success: str | None = "output"
     declared_output_fields: frozenset[str] = frozenset()
+    passes_through_input: bool = False
 
     def __init__(self, name: str, schema: SchemaConfig) -> None:
         self.name = name

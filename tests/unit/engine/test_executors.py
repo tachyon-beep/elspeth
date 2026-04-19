@@ -74,10 +74,12 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import (
+    TIER_1_ERRORS,
     AuditIntegrityError,
     ContractMergeError,
     FrameworkBugError,
     OrchestrationInvariantError,
+    PassThroughContractViolation,
     PluginContractViolation,
     TransformErrorReason,
 )
@@ -184,16 +186,31 @@ def _make_transform(
     node_id: str | None = "node_1",
     on_error: str | None = None,
     declared_output_fields: frozenset[str] | None = None,
+    passes_through_input: bool = False,
 ) -> MagicMock:
     """Create a mock transform (non-batch)."""
     # Use spec to avoid MagicMock auto-creating 'accept' attribute
-    t = MagicMock(spec=["name", "node_id", "on_error", "declared_output_fields", "input_schema", "_on_start_called", "process"])
+    t = MagicMock(
+        spec=[
+            "name",
+            "node_id",
+            "on_error",
+            "declared_output_fields",
+            "input_schema",
+            "_on_start_called",
+            "process",
+            "passes_through_input",
+            "_output_schema_config",
+        ]
+    )
     t.name = name
     t.node_id = node_id
     t.on_error = on_error
     t.declared_output_fields = declared_output_fields or frozenset()
     t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
     t._on_start_called = True
+    t.passes_through_input = passes_through_input
+    t._output_schema_config = None
     return t
 
 
@@ -3802,6 +3819,73 @@ class TestNodeStateGuard:
         assert guard._completion_attempted is True
         assert guard._completed is False  # Never reached — the call raised
 
+    def test_plugin_contract_violation_populates_execution_error_context(self) -> None:
+        """ADR-008: PluginContractViolation.to_audit_dict() → ExecutionError.context."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        factory = _make_factory()
+        guard = NodeStateGuard(
+            factory.execution,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        violation = PassThroughContractViolation(
+            transform="t",
+            transform_node_id="n",
+            run_id="r",
+            row_id="row",
+            token_id="tok",
+            static_contract=frozenset({"a"}),
+            runtime_observed=frozenset(),
+            divergence_set=frozenset({"a"}),
+            message="dropped field 'a'",
+        )
+        with pytest.raises(PassThroughContractViolation), guard:
+            raise violation
+
+        # The recorded ExecutionError must carry the structured context.
+        # ExecutionError.__post_init__ deep-freezes context, so list values
+        # round-trip to tuples (Tier-1 immutability guarantee).
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
+        error = kwargs["error"]
+        assert error.context is not None
+        assert error.context["exception_type"] == "PassThroughContractViolation"
+        assert tuple(error.context["divergence_set"]) == ("a",)
+        assert tuple(error.context["static_contract"]) == ("a",)
+        assert tuple(error.context["runtime_observed"]) == ()
+        # And to_dict() emits it under 'context'.
+        d = error.to_dict()
+        assert tuple(d["context"]["divergence_set"]) == ("a",)
+        assert d["type"] == "PassThroughContractViolation"  # Legacy key preserved.
+
+    def test_non_plugin_contract_violation_leaves_context_none(self) -> None:
+        """Regular exceptions do NOT populate ExecutionError.context."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        factory = _make_factory()
+        guard = NodeStateGuard(
+            factory.execution,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(ValueError), guard:
+            raise ValueError("just a ValueError")
+
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
+        error = kwargs["error"]
+        # context remains None for non-PluginContractViolation exceptions.
+        assert error.context is None
+        d = error.to_dict()
+        assert "context" not in d  # Omitted entirely when None.
+
 
 # =============================================================================
 # Regression: B1 — TransformExecutor post-processing terminality
@@ -4490,6 +4574,8 @@ class TestTransformExecutorBatchPath:
         t._on_start_called = True
         t._pool_size = pool_size
         t._batch_wait_timeout = batch_wait_timeout
+        t.passes_through_input = False
+        t._output_schema_config = None
         return t
 
     # --- Mixin detection ---
@@ -4795,3 +4881,275 @@ def _is_framework_audit_handler(handler: object) -> bool:
 
     # Match: except TIER_1_ERRORS (fragile: won't match aliased imports like `as T1E`)
     return isinstance(handler.type, ast.Name) and handler.type.id == "TIER_1_ERRORS"
+
+
+# =============================================================================
+# TestPassThroughCrossCheck (ADR-008 runtime cross-check)
+# =============================================================================
+
+
+def _make_passthrough_contract() -> SchemaContract:
+    """Contract with input fields {value, extra}."""
+    return SchemaContract(
+        fields=(
+            make_field("value", python_type=str, original_name="value", required=True, source="declared"),
+            make_field("extra", python_type=str, original_name="extra", required=True, source="declared"),
+        ),
+        mode="FLEXIBLE",
+        locked=True,
+    )
+
+
+def _make_superset_contract() -> SchemaContract:
+    """Contract with input + added field {value, extra, copy_index}."""
+    return SchemaContract(
+        fields=(
+            make_field("value", python_type=str, original_name="value", required=True, source="declared"),
+            make_field("extra", python_type=str, original_name="extra", required=True, source="declared"),
+            make_field("copy_index", python_type=int, original_name="copy_index", required=True, source="declared"),
+        ),
+        mode="FLEXIBLE",
+        locked=True,
+    )
+
+
+def _make_dropping_contract() -> SchemaContract:
+    """Contract that drops 'extra' from input."""
+    return SchemaContract(
+        fields=(make_field("value", python_type=str, original_name="value", required=True, source="declared"),),
+        mode="FLEXIBLE",
+        locked=True,
+    )
+
+
+class TestPassThroughCrossCheck:
+    """Tests for TransformExecutor's pass-through runtime cross-check (ADR-008).
+
+    Verifies that when transform.passes_through_input=True, every emitted row
+    must contain all input fields. A violation raises PassThroughContractViolation
+    (TIER_1), which the NodeStateGuard records as FAILED with the structured
+    to_audit_dict() payload threaded into ExecutionError.context.
+    """
+
+    def test_cross_check_passes_when_output_superset_of_input(self) -> None:
+        """Happy path: emitted row contract ⊇ input contract → no exception."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        input_contract = _make_passthrough_contract()
+        output_contract = _make_superset_contract()
+        transform = _make_transform(passes_through_input=True)
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "v", "extra": "e", "copy_index": 0}, contract=output_contract),
+            success_reason={"action": "passthrough"},
+        )
+        token = _make_token({"value": "v", "extra": "e"}, contract=input_contract)
+        ctx = make_context()
+
+        # Should NOT raise.
+        result, _, _ = executor.execute_transform(transform, token, ctx)
+        assert result.status == "success"
+
+    def test_cross_check_raises_on_dropped_field(self) -> None:
+        """Emitted row missing a field present on input → PassThroughContractViolation."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        input_contract = _make_passthrough_contract()
+        dropping_contract = _make_dropping_contract()
+        transform = _make_transform(passes_through_input=True, node_id="node_42")
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "v"}, contract=dropping_contract),
+            success_reason={"action": "passthrough"},
+        )
+        token = _make_token({"value": "v", "extra": "e"}, contract=input_contract, row_id="row_7", token_id="tok_7")
+        ctx = make_context(run_id="run_abc")
+
+        with pytest.raises(PassThroughContractViolation) as excinfo:
+            executor.execute_transform(transform, token, ctx)
+
+        violation = excinfo.value
+        assert violation.divergence_set == frozenset({"extra"})
+        assert violation.transform == "test_transform"
+        assert violation.transform_node_id == "node_42"
+        assert violation.run_id == "run_abc"
+        assert violation.row_id == "row_7"
+        assert violation.token_id == "tok_7"
+        assert violation.runtime_observed == frozenset({"value"})
+
+    def test_cross_check_is_tier_1_registered(self) -> None:
+        """PassThroughContractViolation membership in TIER_1_ERRORS guards on_error bypass."""
+        assert PassThroughContractViolation in TIER_1_ERRORS
+        assert issubclass(PassThroughContractViolation, PluginContractViolation)
+
+    def test_cross_check_crashes_when_emitted_row_contract_is_none(self) -> None:
+        """Emitted row with contract=None is a framework invariant violation."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        input_contract = _make_passthrough_contract()
+        transform = _make_transform(passes_through_input=True)
+        # Emit a row whose contract is None — direct construction via PipelineRow.
+        transform.process.return_value = TransformResult.success(
+            PipelineRow({"value": "v"}, None),
+            success_reason={"action": "passthrough"},
+        )
+        token = _make_token(contract=input_contract)
+        ctx = make_context()
+
+        with pytest.raises(FrameworkBugError, match=r"emitted row with no contract"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_cross_check_crashes_when_input_row_contract_is_none(self) -> None:
+        """Input row with contract=None is a framework invariant violation."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        transform = _make_transform(passes_through_input=True)
+        # Process wouldn't normally get called since we crash on the input check,
+        # but wire it anyway for safety.
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "v"}, contract=_make_passthrough_contract()),
+            success_reason={"action": "passthrough"},
+        )
+        # Construct TokenInfo with an input row whose contract is None.
+        row_data = PipelineRow({"value": "v", "extra": "e"}, None)
+        token = TokenInfo(row_id="row_1", token_id="tok_1", row_data=row_data)
+        ctx = make_context()
+
+        with pytest.raises(FrameworkBugError, match=r"input row has no contract"):
+            executor.execute_transform(transform, token, ctx)
+
+    def test_cross_check_skipped_for_non_pass_through_transforms(self) -> None:
+        """passes_through_input=False → cross-check is bypassed even on field drops."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        input_contract = _make_passthrough_contract()
+        dropping_contract = _make_dropping_contract()
+        transform = _make_transform(passes_through_input=False)
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "v"}, contract=dropping_contract),
+            success_reason={"action": "mapped"},
+        )
+        token = _make_token(contract=input_contract)
+        ctx = make_context()
+
+        # Should NOT raise — the drop is legal for a non-pass-through transform.
+        result, _, _ = executor.execute_transform(transform, token, ctx)
+        assert result.status == "success"
+
+    def test_cross_check_handles_empty_emission(self) -> None:
+        """Transform returning no rows (filter semantics) is compatible with pass-through."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+
+        input_contract = _make_passthrough_contract()
+        transform = _make_transform(
+            passes_through_input=True,
+            on_error="discard",
+        )
+        # Transform returns error status — cross-check is skipped because
+        # it only applies to status=="success".
+        transform.process.return_value = TransformResult.error(
+            reason={"reason": "validation_failed"},
+        )
+        token = _make_token(contract=input_contract)
+        ctx = make_context()
+
+        # Cross-check is bypassed for non-success results.
+        result, _, error_sink = executor.execute_transform(transform, token, ctx)
+        assert result.status == "error"
+        assert error_sink == "discard"
+
+    def test_cross_check_violation_to_audit_dict_has_all_nine_keys(self) -> None:
+        """to_audit_dict returns the 9-key structured payload with sorted lists."""
+        import json
+
+        v = PassThroughContractViolation(
+            transform="t",
+            transform_node_id="n",
+            run_id="r",
+            row_id="row",
+            token_id="tok",
+            static_contract=frozenset({"a", "b"}),
+            runtime_observed=frozenset({"a"}),
+            divergence_set=frozenset({"b"}),
+            message="test",
+        )
+        payload = v.to_audit_dict()
+        assert set(payload.keys()) == {
+            "exception_type",
+            "message",
+            "transform",
+            "transform_node_id",
+            "run_id",
+            "row_id",
+            "token_id",
+            "static_contract",
+            "runtime_observed",
+            "divergence_set",
+        }
+        # Lists (not sets) for canonical JSON determinism.
+        assert payload["static_contract"] == ["a", "b"]
+        assert payload["runtime_observed"] == ["a"]
+        assert payload["divergence_set"] == ["b"]
+        # Round-trip serializes cleanly.
+        assert json.loads(json.dumps(payload)) == payload
+
+    def test_cross_check_increments_telemetry_counter_on_violation(self) -> None:
+        """Violation increments pass_through_cross_check_violations_total{transform=...}.
+
+        Builds its own InMemoryMetricReader rather than depending on the
+        shared ``in_memory_metric_reader`` fixture from
+        ``tests/unit/telemetry/conftest.py`` — that conftest is scoped to
+        telemetry tests. Inline build keeps the fixture exposure local.
+        """
+        from opentelemetry import metrics
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+        reader = InMemoryMetricReader()
+        provider = MeterProvider(metric_readers=[reader])
+        prior = metrics.get_meter_provider()
+        metrics.set_meter_provider(provider)
+        try:
+            factory = _make_factory()
+            # Build executor AFTER setting the global meter provider so the
+            # counter binds to the in-memory reader.
+            executor = TransformExecutor(
+                factory.execution,
+                _make_span_factory(),
+                _make_step_resolver(),
+                data_flow=factory.data_flow,
+            )
+
+            input_contract = _make_passthrough_contract()
+            dropping_contract = _make_dropping_contract()
+            transform = _make_transform(passes_through_input=True)
+            transform.process.return_value = TransformResult.success(
+                make_row({"value": "v"}, contract=dropping_contract),
+                success_reason={"action": "passthrough"},
+            )
+            token = _make_token(contract=input_contract)
+            ctx = make_context()
+
+            with pytest.raises(PassThroughContractViolation):
+                executor.execute_transform(transform, token, ctx)
+
+            metrics_data = reader.get_metrics_data()
+            found = False
+            for resource_metric in metrics_data.resource_metrics:
+                for scope_metric in resource_metric.scope_metrics:
+                    for metric in scope_metric.metrics:
+                        if metric.name == "pass_through_cross_check_violations_total":
+                            for point in metric.data.data_points:
+                                if dict(point.attributes).get("transform") == "test_transform":
+                                    assert point.value >= 1
+                                    found = True
+            assert found, (
+                "Expected pass_through_cross_check_violations_total counter to be incremented with transform=test_transform attribute."
+            )
+        finally:
+            metrics.set_meter_provider(prior)
+            reader.shutdown()

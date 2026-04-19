@@ -181,6 +181,17 @@ class BaseTransform(ABC):
     # Default: False (most transforms don't create new tokens)
     creates_tokens: bool = False
 
+    # Pass-through contract flag (ADR-007).
+    # True iff process() UNCONDITIONALLY emits rows containing every field
+    # present on the input row plus declared_output_fields, regardless of
+    # row content or runtime state. False if the transform may drop, rename,
+    # filter, or conditionally omit input fields. Conditional drops based on
+    # row content are forbidden under this annotation — they would pass static
+    # and Hypothesis tests and crash production via PassThroughContractViolation.
+    # Annotation is verified at runtime by TransformExecutor's pass-through
+    # cross-check; mis-annotation raises PassThroughContractViolation (TIER_1).
+    passes_through_input: bool = False
+
     # Field collision enforcement (centralized in TransformExecutor).
     # Transforms that add fields to the output row declare WHAT fields they add
     # at init time. The executor checks these against input keys BEFORE running

@@ -615,6 +615,24 @@ def _check_schema_contracts(
             return producer.plugin_name
         return node_by_id[producer.producer_id].node_type
 
+    def _known_pass_through_plugins() -> frozenset[str]:
+        """Lazily compute the set of pass-through plugin names from the live registry.
+
+        Re-derived per call rather than cached at module-load — a plugin
+        registered after composer module import (dynamic packs, test fixture
+        ordering) was previously invisible to the fail-closed path. Cardinality
+        is bounded by the annotated-transform set (short, known at startup).
+
+        Reads ``cls.passes_through_input`` directly — no ``getattr`` defensive
+        default. After the Phase A annotation, ``BaseTransform`` supplies the
+        field for every transform class; a missing attribute IS a framework
+        bug and must crash here loudly, not be silently coerced to ``False``.
+        """
+        from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+        transforms = get_shared_plugin_manager().get_transforms()
+        return frozenset(cls.name for cls in transforms if cls.passes_through_input)
+
     def _effective_producer_guarantees(producer: _ProducerEntry) -> frozenset[str]:
         """Return the producer guarantees Stage 1 should compare.
 
@@ -623,6 +641,15 @@ def _check_schema_contracts(
         this keeps composer preview aligned with runtime for shape-changing
         producers like field_mapper/json_explode without turning incomplete
         draft configs into hard Stage 1 errors.
+
+        Pass-through parity (ADR-007): for a transform whose plugin class is
+        annotated ``passes_through_input=True``, the composer preview must
+        mirror the runtime propagation — intersect the effective guarantees
+        of upstream producers with the transform's own declared output. If
+        the constructor probe fails for a *known* pass-through plugin, the
+        composer fails closed (returns ``frozenset()``) so Stage 1 rejects
+        the pipeline rather than silently serving a permissive preview that
+        would diverge from runtime rejection.
         """
         raw_guaranteed = get_raw_producer_guaranteed_fields(
             producer.plugin_name,
@@ -637,6 +664,8 @@ def _check_schema_contracts(
         if producer_node.node_type not in {"transform", "aggregation"} or producer_node.plugin is None:
             return raw_guaranteed
 
+        is_known_pass_through = producer_node.plugin in _known_pass_through_plugins()
+
         try:
             from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
 
@@ -644,10 +673,15 @@ def _check_schema_contracts(
                 producer_node.plugin,
                 deep_thaw(producer_node.options),
             )
+            is_pass_through_instance = transform.passes_through_input
+            output_schema_config = transform._output_schema_config
         except Exception as exc:
-            # Keep Stage 1 tolerant of partially configured draft nodes.
-            # Constructor-time errors must not crash preview/export endpoints.
-            # Fall back to the raw contract and surface one warning per node.
+            # Keep Stage 1 tolerant of partially configured draft nodes for
+            # non-pass-through transforms — constructor-time errors must not
+            # crash preview/export endpoints. For known pass-through plugins
+            # we fail closed instead, because returning the raw (more permissive)
+            # guarantees would let the composer accept pipelines the runtime
+            # would reject.
             #
             # REDACTED: ``str(exc)`` from plugin constructors can carry
             # plugin option values (API URLs, file paths, DSN fragments,
@@ -663,20 +697,61 @@ def _check_schema_contracts(
             # belongs in server logs, not the UI warning list.
             if producer.producer_id not in contract_probe_failed_producers:
                 contract_probe_failed_producers.add(producer.producer_id)
-                contract_warnings.append(
-                    _warn(
-                        f"node:{producer.producer_id}",
-                        f"Computed contract probe for node '{producer.producer_id}' failed during preview "
-                        f"({type(exc).__name__}); falling back to raw schema declarations.",
-                        "medium",
+                if is_known_pass_through:
+                    contract_warnings.append(
+                        _warn(
+                            f"node:{producer.producer_id}",
+                            f"Computed contract probe for node '{producer.producer_id}' failed during preview "
+                            f"({type(exc).__name__}); pipeline rejected "
+                            f"(pass-through transform requires successful probe to mirror runtime propagation).",
+                            "high",
+                        )
                     )
-                )
+                else:
+                    contract_warnings.append(
+                        _warn(
+                            f"node:{producer.producer_id}",
+                            f"Computed contract probe for node '{producer.producer_id}' failed during preview "
+                            f"({type(exc).__name__}); falling back to raw schema declarations.",
+                            "medium",
+                        )
+                    )
+            if is_known_pass_through:
+                return frozenset()
             return raw_guaranteed
 
-        output_schema_config = transform._output_schema_config
         if output_schema_config is None:
             return raw_guaranteed
-        return output_schema_config.get_effective_guaranteed_fields()
+
+        base = output_schema_config.get_effective_guaranteed_fields()
+        if is_pass_through_instance:
+            inherited = _intersect_predecessor_guarantees(producer_node)
+            return inherited | base
+        return base
+
+    def _intersect_predecessor_guarantees(node: NodeSpec) -> frozenset[str]:
+        """Mirror the runtime propagation walk in the composer's producer graph.
+
+        INTENTIONAL DUPLICATION of ``_walk_effective_guaranteed_fields`` in
+        ``graph.py``. Do NOT deduplicate by importing from
+        ``elspeth.core.dag.graph`` — ``state.py`` is L3 (web), ``graph.py`` is
+        L1 (core). Importing graph.py from L3 is permitted, but coupling the
+        composer's preview semantics to the runtime's validation semantics via
+        a shared helper is what ADR-007 deliberately avoids — the two paths
+        evolve in lockstep under the integration test #36.
+
+        Predecessors that abstain (``declares_guaranteed_fields`` False) are
+        skipped. If no predecessor participates, returns ``frozenset()``.
+        """
+        upstream = _walk_to_real_producer(
+            node.input,
+            producer_map=producer_map,
+            node_by_id=node_by_id,
+            warnings=contract_warnings,
+        )
+        if upstream is None:
+            return frozenset()
+        return _effective_producer_guarantees(upstream)
 
     def _format_fields(fields: frozenset[str]) -> str:
         return ", ".join(sorted(fields)) if fields else "(none)"

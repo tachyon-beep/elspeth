@@ -3,6 +3,7 @@
 import time
 from typing import TYPE_CHECKING, Any, cast
 
+from opentelemetry import metrics
 from pydantic import ValidationError
 
 from elspeth.contracts import (
@@ -14,7 +15,13 @@ from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingMode,
 )
-from elspeth.contracts.errors import TIER_1_ERRORS, OrchestrationInvariantError, PluginContractViolation
+from elspeth.contracts.errors import (
+    TIER_1_ERRORS,
+    FrameworkBugError,
+    OrchestrationInvariantError,
+    PassThroughContractViolation,
+    PluginContractViolation,
+)
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
@@ -85,6 +92,14 @@ class TransformExecutor:
         # mixin-based transform, owned by the executor (not monkey-patched
         # onto the transform instance).
         self._batch_adapters: dict[str, "SharedBatchAdapter"] = {}  # noqa: UP037 — forward ref, no __future__ annotations
+        # OpenTelemetry counter for pass-through cross-check violations (ADR-008).
+        # Cardinality bounded by annotated-transform set (short, known at startup).
+        # Incremented before the PassThroughContractViolation is raised so the
+        # metric captures the event independently of downstream serialization.
+        self._pass_through_violations_counter = metrics.get_meter(__name__).create_counter(
+            "pass_through_cross_check_violations_total",
+            description="Count of passes_through_input=True transforms that dropped input fields at runtime",
+        )
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for a mixin-based transform.
@@ -123,6 +138,82 @@ class TransformExecutor:
             mixin.connect_output(output=adapter, max_pending=max_pending)
 
         return self._batch_adapters[node_id]
+
+    def _cross_check_pass_through(
+        self,
+        transform: TransformProtocol,
+        token: TokenInfo,
+        ctx: PluginContext,
+        result: TransformResult,
+    ) -> None:
+        """Runtime cross-check for ``passes_through_input=True`` transforms (ADR-008).
+
+        Asserts that every emitted row's contract field set is a superset of
+        the input row's contract field set. A mis-annotation is evidence
+        tampering — the static validator was told the transform emits a
+        superset; runtime observed otherwise. ``PassThroughContractViolation``
+        is registered in ``TIER_1_ERRORS`` so ``on_error`` routing cannot
+        absorb it.
+
+        Tier 2/Tier 1 boundary: ``input_row.contract`` / ``emitted_row.contract``
+        are Tier 2 pipeline data (type-trusted). ``None`` here is a framework
+        invariant violation and raises ``FrameworkBugError`` (Tier 1). Silent
+        skip would let a violation produce no audit event — evidence
+        destruction.
+
+        Called only when ``transform.passes_through_input`` and
+        ``result.status == "success"`` (checked by the caller). Skipped when
+        the transform emitted zero rows (filter semantics are compatible with
+        pass-through annotation: emitting nothing drops nothing).
+        """
+        input_contract = token.row_data.contract
+        if input_contract is None:
+            raise FrameworkBugError(
+                f"Transform {transform.name!r} has passes_through_input=True but input row has no contract. Framework invariant violated."
+            )
+        input_fields = frozenset(fc.normalized_name for fc in input_contract.fields)
+
+        if result.row is not None:
+            emitted_rows = [result.row]
+        elif result.rows is not None:
+            emitted_rows = list(result.rows)
+        else:
+            return
+
+        static_contract: frozenset[str] = (
+            transform._output_schema_config.get_effective_guaranteed_fields()
+            if transform._output_schema_config is not None
+            else frozenset()
+        )
+
+        transform_node_id = transform.node_id
+        if transform_node_id is None:
+            raise OrchestrationInvariantError(f"Transform {transform.name!r} has no node_id set at cross-check time.")
+
+        for emitted_row in emitted_rows:
+            if emitted_row.contract is None:
+                raise FrameworkBugError(f"Transform {transform.name!r} emitted row with no contract. Framework invariant violated.")
+            runtime_observed = frozenset(fc.normalized_name for fc in emitted_row.contract.fields)
+            divergence_set = input_fields - runtime_observed
+            if divergence_set:
+                # Fire telemetry counter BEFORE raising so the metric captures
+                # the event independently of downstream serialization outcome.
+                self._pass_through_violations_counter.add(1, {"transform": transform.name})
+                raise PassThroughContractViolation(
+                    transform=transform.name,
+                    transform_node_id=transform_node_id,
+                    run_id=ctx.run_id,
+                    row_id=token.row_id,
+                    token_id=token.token_id,
+                    static_contract=static_contract,
+                    runtime_observed=runtime_observed,
+                    divergence_set=frozenset(divergence_set),
+                    message=(
+                        f"Transform {transform.name!r} (node {transform_node_id!r}) "
+                        f"declared passes_through_input=True but dropped fields "
+                        f"{sorted(divergence_set)!r} from row {token.row_id!r}."
+                    ),
+                )
 
     def execute_transform(
         self,
@@ -339,6 +430,17 @@ class TransformExecutor:
             # -- Post-processing (GUARDED by NodeStateGuard) --
             # If any of the following steps raise before guard.complete() is
             # called, the guard auto-completes the state as FAILED in __exit__.
+
+            # Pass-through contract cross-check (ADR-008).
+            # When a transform declares passes_through_input=True, verify that
+            # every emitted row's contract is a superset of the input row's
+            # field set. A mis-annotation is a framework contract violation,
+            # not a row-level data error — PassThroughContractViolation is
+            # registered in TIER_1_ERRORS, so the enclosing NodeStateGuard
+            # catches it via __exit__ (structured context is threaded into
+            # ExecutionError.context via to_audit_dict()).
+            if transform.passes_through_input and result.status == "success":
+                self._cross_check_pass_through(transform, token, ctx, result)
 
             # Populate audit fields
             # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.

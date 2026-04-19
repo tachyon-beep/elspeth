@@ -1554,3 +1554,460 @@ class TestNestedCoalesceSchemaProgation:
         assert graph.get_effective_guaranteed_fields("coalesce_1") == frozenset({"all", "level1_shared"})
         assert graph.get_effective_guaranteed_fields("coalesce_2") == frozenset({"all"})
         assert graph.get_effective_guaranteed_fields("coalesce_3") == frozenset({"all"})
+
+
+class TestPassThroughPropagation:
+    """Tests for ADR-007 pass-through propagation through get_effective_guaranteed_fields.
+
+    These tests pin the propagation-aware implementation of
+    ``get_effective_guaranteed_fields``. A pass-through transform
+    (``passes_through_input=True``) inherits the intersection of its
+    predecessors' effective guarantees, unioned with its own declared fields.
+    """
+
+    @staticmethod
+    def _build_simple_chain(
+        *,
+        source_config: dict[str, Any],
+        transform_config: dict[str, Any],
+        transform_passes_through: bool,
+        sink_declared_required: frozenset[str] = frozenset(),
+    ) -> ExecutionGraph:
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config=source_config,
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config=transform_config,
+            passes_through_input=transform_passes_through,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=sink_declared_required,
+        )
+        graph.add_edge("source", "pt", label="continue")
+        graph.add_edge("pt", "sink", label="continue")
+        return graph
+
+    def test_pass_through_transform_propagates_predecessor_guarantees(self) -> None:
+        """Source(fixed{a,b}) → PT(declared={c}, passes_through_input=True) → sink requires {a,b,c}.
+
+        Without propagation this would reject because PT's static contract
+        contains only {c}. With propagation it must succeed — inherited {a,b}
+        union own {c}.
+        """
+        graph = self._build_simple_chain(
+            source_config={"schema": {"mode": "fixed", "fields": ["a: str", "b: str"], "guaranteed_fields": ["a", "b"]}},
+            transform_config={
+                "schema": {"mode": "observed", "guaranteed_fields": ["c"]},
+            },
+            transform_passes_through=True,
+            sink_declared_required=frozenset({"a", "b", "c"}),
+        )
+        # Should not raise
+        graph._validate_sink_required_fields()
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset({"a", "b", "c"})
+
+    def test_non_pass_through_transform_still_rejects_missing_fields(self) -> None:
+        """Same shape with passes_through_input=False must reject (regression guard)."""
+        from elspeth.core.dag.models import GraphValidationError
+
+        graph = self._build_simple_chain(
+            source_config={"schema": {"mode": "fixed", "fields": ["a: str", "b: str"], "guaranteed_fields": ["a", "b"]}},
+            transform_config={
+                "schema": {"mode": "observed", "guaranteed_fields": ["c"]},
+            },
+            transform_passes_through=False,
+            sink_declared_required=frozenset({"a", "b", "c"}),
+        )
+        with pytest.raises(GraphValidationError, match=r"does not guarantee"):
+            graph._validate_sink_required_fields()
+
+    def test_pass_through_intersection_across_multiple_predecessors(self) -> None:
+        """Two predecessors guaranteeing different field sets — intersection.
+
+        source → gate → t_a({a,b}) → coalesce(union,best_effort) with union-intersection
+        → PT(passes_through_input=True) → sink requiring {a}.
+
+        Only {a} is common across both branches, so intersection = {a}.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.schema import FieldDefinition
+
+        branch_a_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("a", "str", required=True), FieldDefinition("b", "str", required=True)),
+            guaranteed_fields=("a", "b"),
+        )
+        branch_b_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("a", "str", required=True),),
+            guaranteed_fields=("a",),
+        )
+        # Coalesce pre-computes strategy-aware guarantees on its own schema.
+        coalesce_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("a", "str", required=True),),
+            guaranteed_fields=("a",),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv")
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        graph.add_node(
+            "t_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="a",
+            output_schema_config=branch_a_schema,
+        )
+        graph.add_node(
+            "t_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="b",
+            output_schema_config=branch_b_schema,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "best_effort", "merge": "union"},
+            output_schema_config=coalesce_schema,
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            passes_through_input=True,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"a"}),
+        )
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "t_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("t_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "pt", label="continue")
+        graph.add_edge("pt", "sink", label="continue")
+
+        # Coalesce leaf gives {a}; PT inherits {a} and has no own declaration.
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset({"a"})
+
+    def test_pass_through_chain_diamond_topology_uses_memoization(self) -> None:
+        """Diamond topology: source → pt_a, pt_b → coalesce → sink.
+
+        Correctness: intersection of branches' effective guarantees.
+        Memoization: each node visited at most once via the shared cache.
+        """
+        from unittest import mock
+
+        from elspeth.contracts import RoutingMode
+        from elspeth.contracts.schema import FieldDefinition
+
+        leaf_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("a", "str", required=True), FieldDefinition("b", "str", required=True)),
+            guaranteed_fields=("a", "b"),
+        )
+        coalesce_schema = SchemaConfig(
+            mode="flexible",
+            fields=(FieldDefinition("a", "str", required=True), FieldDefinition("b", "str", required=True)),
+            guaranteed_fields=("a", "b"),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="csv", output_schema_config=leaf_schema)
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork")
+        graph.add_node(
+            "pt_a",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="a",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_node(
+            "pt_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="b",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_node(
+            "coalesce",
+            node_type=NodeType.COALESCE,
+            plugin_name="coalesce:merge",
+            config={"branches": {"a": "a", "b": "b"}, "policy": "require_all", "merge": "union"},
+            output_schema_config=coalesce_schema,
+        )
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="csv_sink")
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "pt_a", label="a", mode=RoutingMode.COPY)
+        graph.add_edge("gate", "pt_b", label="b", mode=RoutingMode.COPY)
+        graph.add_edge("pt_a", "coalesce", label="a", mode=RoutingMode.MOVE)
+        graph.add_edge("pt_b", "coalesce", label="b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue")
+
+        # Count _walk_effective_guaranteed_fields invocations.
+        original = ExecutionGraph._walk_effective_guaranteed_fields
+        calls: list[str] = []
+
+        def counting_walk(self_inner: ExecutionGraph, node_id: str, cache: dict[str, frozenset[str]]) -> frozenset[str]:
+            calls.append(node_id)
+            return original(self_inner, node_id, cache)
+
+        with mock.patch.object(ExecutionGraph, "_walk_effective_guaranteed_fields", new=counting_walk):
+            result = graph.get_effective_guaranteed_fields("coalesce")
+
+        # Coalesce pre-computed its own guarantees; recursion stops at the leaf.
+        assert result == frozenset({"a", "b"})
+        # Memoization: no node walked more than once per get_effective call.
+        assert len(calls) == len(set(calls)), f"Duplicate walk calls: {calls}"
+
+    def test_pass_through_with_abstaining_predecessor_skips_in_intersection(self) -> None:
+        """Predecessor with guaranteed_fields=None abstains and is skipped."""
+        from elspeth.contracts import RoutingMode
+
+        # Source: abstains (guaranteed_fields=None via observed mode with nothing declared).
+        # Pass-through consumer sees no participating predecessor → inherited = empty.
+        graph = ExecutionGraph()
+        # Abstaining source
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "observed"}},  # No guaranteed_fields → abstain
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_edge("source", "pt", label="continue", mode=RoutingMode.MOVE)
+
+        # Source abstains → no predecessor participates → inherited = empty.
+        # PT own = empty. Total empty.
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset()
+        # But it doesn't crash — abstain-skip is the correct behavior.
+
+    def test_pass_through_with_explicit_empty_predecessor_collapses_intersection(self) -> None:
+        """Predecessor with guaranteed_fields=() participates; intersection collapses to empty."""
+        empty_schema = SchemaConfig(
+            mode="flexible",
+            fields=(),
+            guaranteed_fields=(),  # Explicit empty
+        )
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            output_schema_config=empty_schema,
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_edge("source", "pt", label="continue")
+        # Source declares explicit empty → participating with empty → intersection empty
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset()
+
+    def test_pass_through_downstream_of_observed_aggregation_inherits_empty(self) -> None:
+        """Observed-mode aggregation upstream yields empty inheritance."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "fixed", "fields": ["a: str", "b: str"], "guaranteed_fields": ["a", "b"]}},
+        )
+        graph.add_node(
+            "agg",
+            node_type=NodeType.AGGREGATION,
+            plugin_name="batch_stats",
+            config={"input_schema": {"mode": "observed"}},
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_edge("source", "agg", label="continue")
+        graph.add_edge("agg", "pt", label="continue")
+
+        # Aggregation declares nothing → PT inherits empty → own empty → empty total.
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset()
+
+    def test_pass_through_with_abstaining_self_propagates_predecessor_unchanged(self) -> None:
+        """PT with output_schema_config=None propagates predecessor fields unchanged."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "fixed", "fields": ["x: str", "y: str"], "guaranteed_fields": ["x", "y"]}},
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},  # No own declaration
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_edge("source", "pt", label="continue")
+        # Own empty, inherited {x, y}, total {x, y}.
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset({"x", "y"})
+
+    def test_get_effective_guaranteed_fields_public_api_signature_unchanged(self) -> None:
+        """Guards against future _cache=None parameter regression."""
+        import inspect
+
+        sig = inspect.signature(ExecutionGraph.get_effective_guaranteed_fields)
+        params = list(sig.parameters.values())
+        # (self, node_id) — two parameters total, both positional.
+        assert len(params) == 2, f"Public API must take only (self, node_id); got {params!r}"
+        assert params[1].name == "node_id"
+        assert params[1].default is inspect.Parameter.empty
+
+    def test_get_effective_guaranteed_fields_no_longer_delegates_to_get_guaranteed_fields(self) -> None:
+        """Pin the semantic split: get_guaranteed_fields is raw, get_effective is propagation-aware."""
+        graph = self._build_simple_chain(
+            source_config={"schema": {"mode": "fixed", "fields": ["a: str", "b: str"], "guaranteed_fields": ["a", "b"]}},
+            transform_config={
+                "schema": {"mode": "observed", "guaranteed_fields": ["c"]},
+            },
+            transform_passes_through=True,
+        )
+        # get_guaranteed_fields: this node alone declares {c}.
+        assert graph.get_guaranteed_fields("pt") == frozenset({"c"})
+        # get_effective_guaranteed_fields: propagation-aware includes {a, b, c}.
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset({"a", "b", "c"})
+        # Idempotent — two calls return identical results.
+        assert graph.get_effective_guaranteed_fields("pt") == graph.get_effective_guaranteed_fields("pt")
+
+    def test_node_info_passes_through_on_non_transform_raises(self) -> None:
+        """NodeInfo guard: passes_through_input=True rejected on non-transform-class node types.
+
+        Per ADR-007, the flag applies to nodes that execute transform-class
+        plugins — TRANSFORM (plain transforms) and AGGREGATION (batch-aware
+        transforms like BatchReplicate wired under `aggregations:` in YAML).
+        All other node types are rejected at construction.
+        """
+        from elspeth.core.dag.models import GraphValidationError, NodeInfo
+
+        for bad_type in (
+            NodeType.SOURCE,
+            NodeType.COALESCE,
+            NodeType.SINK,
+            NodeType.GATE,
+        ):
+            with pytest.raises(GraphValidationError, match="passes_through_input"):
+                NodeInfo(
+                    node_id="n",
+                    node_type=bad_type,
+                    plugin_name="p",
+                    passes_through_input=True,
+                )
+
+        # TRANSFORM and AGGREGATION both accept the flag.
+        NodeInfo(node_id="t", node_type=NodeType.TRANSFORM, plugin_name="p", passes_through_input=True)
+        NodeInfo(node_id="a", node_type=NodeType.AGGREGATION, plugin_name="p", passes_through_input=True)
+
+    def test_pass_through_with_no_predecessors_raises_framework_bug_error(self) -> None:
+        """Source-position PT is impossible in a built DAG — raise FrameworkBugError."""
+        from elspeth.contracts.errors import FrameworkBugError
+
+        graph = ExecutionGraph()
+        # Construct a pass-through transform with NO predecessors (manual graph, bypasses builder).
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            passes_through_input=True,
+        )
+        with pytest.raises(FrameworkBugError, match=r"Pass-through transform .* has no predecessors"):
+            graph.get_effective_guaranteed_fields("pt")
+
+    def test_cache_memory_bounded(self) -> None:
+        """NFR: per-call cache memory ≤ 4 KiB per 100 nodes (Q-18 revised)."""
+        from tests.performance.benchmarks._deep_size import deep_sizeof
+
+        graph = ExecutionGraph()
+        # Build a 100-node pass-through chain: source → pt_0 → pt_1 → ... → pt_98.
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={"schema": {"mode": "fixed", "fields": ["a: str"], "guaranteed_fields": ["a"]}},
+        )
+        for i in range(99):
+            graph.add_node(
+                f"pt_{i}",
+                node_type=NodeType.TRANSFORM,
+                plugin_name="passthrough",
+                config={"schema": {"mode": "observed"}},
+                output_schema_config=None,
+                passes_through_input=True,
+            )
+        # Wire
+        graph.add_edge("source", "pt_0", label="continue")
+        for i in range(98):
+            graph.add_edge(f"pt_{i}", f"pt_{i + 1}", label="continue")
+
+        # Measure cache size after one full walk.
+        cache: dict[str, frozenset[str]] = {}
+        graph._walk_effective_guaranteed_fields("pt_98", cache)
+        size = deep_sizeof(cache)
+        assert size < 4096, f"Cache exceeded 4 KiB budget: {size} bytes"
+
+    def test_pass_through_schema_config_from_dict_participates(self) -> None:
+        """PT downstream of a flexible-mode predecessor with explicit guaranteed fields inherits them."""
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            config={
+                "schema": {
+                    "mode": "flexible",
+                    "fields": ["q: int", "r: str"],
+                    "guaranteed_fields": ["q", "r"],
+                },
+            },
+        )
+        graph.add_node(
+            "pt",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_edge("source", "pt", label="continue")
+        assert graph.get_effective_guaranteed_fields("pt") == frozenset({"q", "r"})

@@ -2193,6 +2193,14 @@ class TestSchemaContractValidation:
             def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
                 raise TemplateError("invalid template syntax")
 
+            def get_transforms(self) -> list[type]:
+                # ADR-007: composer now queries the plugin registry to compute
+                # the known-pass-through set. For this mock, return an empty
+                # list so the probe-failure path takes the non-pass-through
+                # branch (medium warning, raw_guaranteed fallback) — matches
+                # the v2 behavior the surrounding test pins.
+                return []
+
         monkeypatch.setattr(
             "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
             lambda: _BrokenManager(),
@@ -2263,6 +2271,13 @@ class TestSchemaContractValidation:
         class _LeakyManager:
             def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
                 raise RuntimeError(f"plugin '{plugin_name}' failed to initialize: " + " | ".join(leaked_substrings))
+
+            def get_transforms(self) -> list[type]:
+                # ADR-007: composer now queries the plugin registry for the
+                # known-pass-through set. Empty list keeps the probe-failure
+                # path on the v2 (non-pass-through) branch — the redaction
+                # test pins that path specifically.
+                return []
 
         monkeypatch.setattr(
             "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
@@ -3518,3 +3533,135 @@ class TestSchemaContractValidation:
         assert payload["satisfied"] is True
         assert "from_id" not in payload
         assert "to_id" not in payload
+
+
+class TestPassThroughComposerParity:
+    """ADR-007 composer parity tests for known-pass-through plugins.
+
+    The composer preview must mirror runtime propagation for pass-through
+    plugins. Two behaviours are pinned:
+
+    - Probe succeeds → the producer_guarantees on downstream edges include
+      predecessor fields (not just the transform's own declared output).
+    - Probe fails for a *known* pass-through plugin → fail-closed with
+      high-severity warning, producer_guarantees=(), Stage 1 rejects the
+      pipeline (mirroring runtime rejection).
+    - Probe fails for a *non*-pass-through plugin → v2 behaviour preserved
+      (medium-severity warning, return raw_guaranteed).
+    """
+
+    def _empty_state(self) -> CompositionState:
+        return CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+    def _make_source(self, on_success: str, plugin: str = "csv", options: dict[str, Any] | None = None) -> SourceSpec:
+        opts = dict(options or {})
+        if plugin == "csv":
+            opts = {"path": "/data/input.csv", **opts}
+        return SourceSpec(
+            plugin=plugin,
+            on_success=on_success,
+            options=opts,
+            on_validation_failure="quarantine",
+        )
+
+    def _make_transform(
+        self,
+        id: str,
+        input: str,
+        on_success: str,
+        plugin: str,
+        options: dict[str, Any] | None = None,
+        on_error: str = "discard",
+    ) -> NodeSpec:
+        return NodeSpec(
+            id=id,
+            node_type="transform",
+            plugin=plugin,
+            input=input,
+            on_success=on_success,
+            on_error=on_error,
+            options=dict(options or {}),
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+
+    def _make_edge(self, id: str, from_id: str, to_id: str) -> EdgeSpec:
+        return EdgeSpec(id=id, from_node=from_id, to_node=to_id, edge_type="on_success", label=None)
+
+    def test_preview_fails_closed_when_known_pass_through_constructor_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Probe failure on a known pass-through plugin → Stage 1 rejects pipeline.
+
+        Composer preview must surface high-severity warning and return an
+        empty producer_guarantees set, matching the runtime rejection that
+        would occur if the transform were constructed at DAG build time.
+        """
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="pt_node",
+                plugin="csv",
+                options={"schema": {"mode": "fixed", "fields": ["id: str", "body: str"], "guaranteed_fields": ["id", "body"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "pt_node",
+                "source",
+                "main",
+                plugin="passthrough",  # Known pass-through plugin
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "pt_node"))
+        state = state.with_edge(self._make_edge("e2", "pt_node", "main"))
+
+        # Stub the plugin manager: get_transforms returns a minimal shim with
+        # passthrough annotated True; create_transform raises for passthrough.
+        class _StubPassThrough:
+            name = "passthrough"
+            passes_through_input = True
+
+        class _StubPluginManager:
+            def get_transforms(self) -> list[type]:
+                return [_StubPassThrough]
+
+            def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
+                raise RuntimeError("intentional probe failure")
+
+        monkeypatch.setattr(
+            "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
+            lambda: _StubPluginManager(),
+        )
+
+        result = state.validate()
+
+        # Stage 1 rejects because producer guarantees are empty and sink requires 'body'.
+        assert not result.is_valid
+        high_warnings = [w for w in result.warnings if w.severity == "high"]
+        probe_high = [w for w in high_warnings if "computed contract probe" in w.message.lower() and "pass-through" in w.message.lower()]
+        assert probe_high, f"Expected a high-severity probe warning mentioning pass-through; got warnings={result.warnings!r}"
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert sink_contract.producer_guarantees == ()
+        assert sink_contract.satisfied is False

@@ -27,12 +27,20 @@ class ExecutionError:
     The ``exception_type`` field is renamed from ``type`` to avoid
     shadowing the Python builtin.  ``to_dict()`` serializes it back
     as ``"type"`` for hash stability with existing audit records.
+
+    The optional ``context`` field carries structured per-exception payload
+    (e.g., ``PassThroughContractViolation.to_audit_dict()``). It is populated
+    by ``NodeStateGuard.__exit__`` when the wrapped exception exposes
+    ``to_audit_dict()`` — see ``engine/executors/state_guard.py``.
+    Serialized as the top-level ``context`` key by ``to_dict()`` so triage
+    queries can filter on ``json_extract(error_data, '$.context.<field>')``.
     """
 
     exception: str  # String representation of the exception
     exception_type: str  # Exception class name (e.g., "ValueError")
     traceback: str | None = None  # Optional full traceback
     phase: str | None = None  # Optional phase indicator (e.g., "flush" for sink flush errors)
+    context: Mapping[str, Any] | None = None  # Structured per-exception audit payload (ADR-008)
 
     def __post_init__(self) -> None:
         """Validate that required error fields are non-empty.
@@ -44,6 +52,10 @@ class ExecutionError:
             raise ValueError("ExecutionError.exception must not be empty")
         if not self.exception_type:
             raise ValueError("ExecutionError.exception_type must not be empty")
+        # Deep-freeze the structured context payload (ADR-008) so the Tier-1
+        # audit-recording path cannot be mutated after construction.
+        if self.context is not None:
+            freeze_fields(self, "context")
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to audit-trail dict.
@@ -60,6 +72,8 @@ class ExecutionError:
             d["traceback"] = self.traceback
         if self.phase is not None:
             d["phase"] = self.phase
+        if self.context is not None:
+            d["context"] = self.context
         return d
 
 
@@ -806,31 +820,116 @@ class PluginContractViolation(RuntimeError):
     - Plugin violates interface contract
 
     Recovery: Fix the plugin. These errors indicate bugs in plugin code.
+
+    Base class accepts a positional message, matching RuntimeError. Subclasses
+    (e.g., PassThroughContractViolation) add structured fields and override
+    to_audit_dict() to contribute them to the audit trail via
+    ExecutionError.context.
     """
 
-    pass
+    def to_audit_dict(self) -> dict[str, Any]:
+        """Canonical audit-recording payload for ExecutionError.context.
+
+        Base implementation is message-only. Subclasses should override to
+        surface structured fields. Return value must be JSON-serializable —
+        the Landscape records it through canonical JSON serialization.
+        """
+        return {"exception_type": type(self).__name__, "message": str(self)}
+
+
+class PassThroughContractViolation(PluginContractViolation):
+    """Raised by TransformExecutor when a passes_through_input=True transform
+    drops input fields from its emitted row(s).
+
+    This is a framework contract violation, not a row-level data error — hence
+    registration in ``TIER_1_ERRORS``. It cannot be silenced by on_error
+    routing or generic ``except Exception`` handlers. A mis-annotation is
+    evidence tampering: the static validator was told the transform emits a
+    superset of input, and runtime observed otherwise; routing past that
+    divergence would corrupt the audit trail.
+
+    Attributes:
+        transform: Name of the offending transform class.
+        transform_node_id: DAG node identifier.
+        run_id: Pipeline run identifier for audit correlation.
+        row_id: Source row identifier.
+        token_id: DAG token identifier (post-fork/join lineage).
+        static_contract: Fields the static validator computed for output.
+        runtime_observed: Fields actually present in the emitted row's contract.
+        divergence_set: ``input_fields - runtime_observed`` (the dropped fields).
+    """
+
+    def __init__(
+        self,
+        *,
+        transform: str,
+        transform_node_id: str,
+        run_id: str,
+        row_id: str,
+        token_id: str,
+        static_contract: frozenset[str],
+        runtime_observed: frozenset[str],
+        divergence_set: frozenset[str],
+        message: str,
+    ) -> None:
+        super().__init__(message)
+        self.transform = transform
+        self.transform_node_id = transform_node_id
+        self.run_id = run_id
+        self.row_id = row_id
+        self.token_id = token_id
+        self.static_contract = static_contract
+        self.runtime_observed = runtime_observed
+        self.divergence_set = divergence_set
+
+    def to_audit_dict(self) -> dict[str, Any]:
+        """Return 9-key structured payload for ExecutionError.context.
+
+        frozenset fields are sorted into lists for canonical JSON
+        determinism — the Landscape serializer requires stable ordering.
+        """
+        return {
+            "exception_type": "PassThroughContractViolation",
+            "message": str(self),
+            "transform": self.transform,
+            "transform_node_id": self.transform_node_id,
+            "run_id": self.run_id,
+            "row_id": self.row_id,
+            "token_id": self.token_id,
+            "static_contract": sorted(self.static_contract),
+            "runtime_observed": sorted(self.runtime_observed),
+            "divergence_set": sorted(self.divergence_set),
+        }
 
 
 # =============================================================================
 # Tier 1 Guard Tuple — Single Source of Truth
 # =============================================================================
-# These exception types indicate system corruption, framework bugs, or
-# orchestration invariant violations. They must NEVER be caught by broad
+# These exception types indicate system corruption, framework bugs,
+# orchestration invariant violations, or framework-contract violations that
+# must survive on_error routing. They must NEVER be caught by broad
 # `except Exception` handlers — doing so either swallows evidence of
 # corruption or pollutes the audit trail with misleading FAILED states.
 #
 # Usage: `except TIER_1_ERRORS: raise` before any `except Exception:` block.
 #
-# PluginContractViolation is intentionally excluded: it represents a plugin
-# bug (row-level failure), not system corruption. Recording FAILED state
-# for a PluginContractViolation is accurate; recording it for these three
-# is misleading.
+# PluginContractViolation (the base class) is intentionally excluded: it
+# represents a plugin bug (row-level failure), not system corruption.
+# Recording FAILED state for a PluginContractViolation is accurate;
+# recording it for the base members is misleading.
+#
+# PassThroughContractViolation IS included (ADR-008) because a pass-through-
+# annotation lie is a framework contract violation (the static validator was
+# told the transform emits a superset of input; runtime observed otherwise),
+# not a row-level data error. Audit integrity demands it crash, not be
+# absorbed by on_error routing.
 # =============================================================================
 
 TIER_1_ERRORS: tuple[type[Exception], ...] = (
     AuditIntegrityError,
     FrameworkBugError,
     OrchestrationInvariantError,
+    PassThroughContractViolation,
 )
 
 

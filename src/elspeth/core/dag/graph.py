@@ -24,6 +24,7 @@ from elspeth.contracts import (
     check_compatibility,
 )
 from elspeth.contracts.enums import NodeType
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.schema import FIELD_TYPE_MAP, SchemaConfig, get_raw_node_required_fields, get_raw_schema_config
 from elspeth.contracts.types import (
     AggregationName,
@@ -176,6 +177,7 @@ class ExecutionGraph:
         input_schema_config: SchemaConfig | None = None,
         output_schema_config: SchemaConfig | None = None,
         declared_required_fields: frozenset[str] = _EMPTY_DECLARED_REQUIRED_FIELDS,
+        passes_through_input: bool = False,
     ) -> None:
         """Add a node to the execution graph.
 
@@ -193,6 +195,11 @@ class ExecutionGraph:
             declared_required_fields: For SINK nodes only — the set of fields the
                 sink requires in its input rows. Populated by the builder from
                 SinkProtocol.declared_required_fields. Empty frozenset otherwise.
+            passes_through_input: For TRANSFORM nodes only — True iff the transform
+                unconditionally emits rows containing every input field
+                (ADR-007). Validator walk propagates predecessor guarantees
+                through nodes where this is True. Must be False for non-TRANSFORM
+                nodes; NodeInfo guards against misuse.
         """
         resolved_config = config or {}
 
@@ -222,6 +229,7 @@ class ExecutionGraph:
             input_schema_config=input_schema_config,
             output_schema_config=output_schema_config,
             declared_required_fields=declared_required_fields,
+            passes_through_input=passes_through_input,
         )
         self._graph.add_node(node_id, info=info)
 
@@ -1708,6 +1716,11 @@ class ExecutionGraph:
             GraphValidationError: if a sink's direct predecessor does not
                 guarantee a field the sink requires.
         """
+        # Shared cache across all sinks' predecessor walks. Mirrors the
+        # schema_cache pattern at validate_edge_compatibility — avoids
+        # re-walking common upstream nodes in fan-in topologies.
+        effective_fields_cache: dict[str, frozenset[str]] = {}
+
         for node_id, data in self._graph.nodes(data=True):
             info = data["info"]
             if info.node_type != NodeType.SINK:
@@ -1719,7 +1732,7 @@ class ExecutionGraph:
 
             for predecessor_id in self._graph.predecessors(node_id):
                 predecessor_info = self.get_node_info(predecessor_id)
-                guaranteed = self.get_effective_guaranteed_fields(predecessor_id)
+                guaranteed = self._walk_effective_guaranteed_fields(predecessor_id, effective_fields_cache)
                 if not guaranteed:
                     # Empty guarantees are ambiguous under the abstain-vs-empty
                     # contract (see SchemaConfig.declares_guaranteed_fields):
@@ -1830,14 +1843,19 @@ class ExecutionGraph:
             ) from exc
 
     def get_effective_guaranteed_fields(self, node_id: str) -> frozenset[str]:
-        """Get effective output guarantees for a node.
+        """Get effective output guarantees for a node (propagation-aware).
 
-        All nodes (including coalesce) return their pre-computed guarantees
-        directly. The builder materialises policy-aware guarantees into
-        output_schema_config via _assign_schema (see builder.py).
+        Per ADR-007, this method is the propagation-aware implementation.
+        For a TRANSFORM node whose plugin declared ``passes_through_input=True``,
+        the effective guarantees are the intersection of its participating
+        predecessors' guarantees unioned with the node's own declared fields.
+        For all other nodes, returns the node's own declarations (same as
+        ``get_guaranteed_fields``).
 
-        For coalesce nodes specifically, builder.py computes strategy-aware
-        guarantees:
+        Callers that want the raw per-node declarations (without propagation)
+        must call ``get_guaranteed_fields`` instead.
+
+        For coalesce nodes, builder.py pre-computes strategy-aware guarantees:
         - **union** with require_all: union of branch guarantees (all branches arrive)
         - **union** with other policies: intersection (only fields in ALL branches)
         - **nested**: the node's own guarantees (branch names, not inner fields)
@@ -1852,4 +1870,79 @@ class ExecutionGraph:
         Returns:
             Frozenset of field names effectively guaranteed at this point
         """
-        return self.get_guaranteed_fields(node_id)
+        return self._walk_effective_guaranteed_fields(node_id, {})
+
+    def _walk_effective_guaranteed_fields(
+        self,
+        node_id: str,
+        cache: dict[str, frozenset[str]],
+    ) -> frozenset[str]:
+        """Recursive implementation of get_effective_guaranteed_fields.
+
+        Explicit (non-optional) cache parameter — internal callers with
+        bulk-validation scope (e.g., ``_validate_sink_required_fields``)
+        pass a shared cache across their loop to avoid per-node re-allocation
+        and re-walking. Public callers go through ``get_effective_guaranteed_fields``
+        which allocates a fresh per-call cache.
+
+        For pass-through transforms, intersects the effective guarantees of
+        participating predecessors (those that declared guarantees — the
+        abstain-vs-empty semantics in ``_predecessor_declares_guarantees``
+        match ``_validate_sink_required_fields``) and unions with this node's
+        own declared fields.
+
+        Raises ``FrameworkBugError`` if a pass-through transform has no
+        predecessors — per the NodeInfo guard, pass-through nodes are
+        transforms, and transforms in a built DAG always have at least one
+        upstream edge.
+        """
+        if node_id in cache:
+            return cache[node_id]
+
+        node_info = self.get_node_info(node_id)
+        own = (
+            node_info.output_schema_config.get_effective_guaranteed_fields() if node_info.output_schema_config is not None else frozenset()
+        )
+
+        if node_info.passes_through_input:
+            predecessors = list(self._graph.predecessors(node_id))
+            if not predecessors:
+                raise FrameworkBugError(
+                    f"Pass-through transform {node_id!r} has no predecessors. Builder must wire transforms with at least one upstream edge."
+                )
+            participating = [
+                self._walk_effective_guaranteed_fields(pred_id, cache)
+                for pred_id in predecessors
+                if self._predecessor_declares_guarantees(pred_id)
+            ]
+            if not participating:
+                inherited: frozenset[str] = frozenset()
+            else:
+                inherited = participating[0]
+                for guarantees in participating[1:]:
+                    inherited = inherited & guarantees
+            result = inherited | own
+        else:
+            result = own
+
+        cache[node_id] = result
+        return result
+
+    def _predecessor_declares_guarantees(self, node_id: str) -> bool:
+        """Determine whether a predecessor participates in pass-through intersection.
+
+        Uses ``has_effective_guarantees`` (explicit declarations OR typed
+        fields), not the narrower ``declares_guaranteed_fields``. This
+        matches the semantics of ``get_effective_guaranteed_fields()`` on
+        SchemaConfig: fixed-mode schemas with typed fields implicitly
+        guarantee those fields even without explicit ``guaranteed_fields``.
+
+        A predecessor with ``has_effective_guarantees=False`` is truly
+        abstaining — no explicit declaration AND no typed fields — and is
+        skipped. A predecessor with typed fields but no explicit declaration
+        participates with its derived guarantee set. A predecessor with
+        ``guaranteed_fields=()`` (explicit empty) participates and collapses
+        the intersection to empty.
+        """
+        schema = self.get_node_info(node_id).output_schema_config
+        return schema is not None and schema.has_effective_guarantees
