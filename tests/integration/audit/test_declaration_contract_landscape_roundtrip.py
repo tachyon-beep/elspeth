@@ -79,7 +79,6 @@ class TestDeclarationContractViolationRoundTrip:
         )
 
         violation = DeclarationContractViolation(
-            contract_name="test_roundtrip",
             plugin="FakeTransform",
             node_id=node_id,
             run_id=run_id,
@@ -93,6 +92,10 @@ class TestDeclarationContractViolationRoundTrip:
             },
             message="round-trip test violation",
         )
+        # Integration test simulates dispatcher attribution — in production
+        # run_runtime_checks calls _attach_contract_name before the violation
+        # reaches to_audit_dict.
+        violation._attach_contract_name("test_roundtrip")
 
         audit_context = violation.to_audit_dict()
 
@@ -171,7 +174,6 @@ class TestDeclarationContractViolationRoundTrip:
         )
 
         violation = DeclarationContractViolation(
-            contract_name="secret_test",
             plugin="FakeTransform",
             node_id=node_id,
             run_id=run_id,
@@ -180,6 +182,7 @@ class TestDeclarationContractViolationRoundTrip:
             payload={"api_key": "sk-abcdef1234567890abcdef1234567890"},
             message="secret test",
         )
+        violation._attach_contract_name("secret_test")
 
         audit_context = violation.to_audit_dict()
 

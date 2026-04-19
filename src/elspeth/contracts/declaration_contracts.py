@@ -105,12 +105,40 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
     returns it (reviewer B7/F-4). The scrub is applied at serialization time
     so the stored payload keeps full information for in-process diagnostics
     while the Landscape record gets the redacted form.
+
+    **contract_name is dispatcher-attributed (issue elspeth-d74fe81529 / C4).**
+    Contracts MUST NOT supply ``contract_name`` at construction; the
+    declaration dispatcher (``run_runtime_checks``) catches the raised
+    violation and attaches the authoritative name via
+    ``_attach_contract_name`` before the exception propagates to the
+    audit-recording boundary. This closes the contract-name spoofing vector
+    where one contract's ``runtime_check`` could construct a violation
+    labelled with another contract's name and corrupt the audit trail.
+
+    ``contract_name`` is exposed as a read-only property; assigning to
+    ``violation.contract_name`` after construction raises ``AttributeError``
+    (the property has no setter). ``_attach_contract_name`` is one-shot —
+    a second call raises ``RuntimeError``.
+
+    ``__slots__`` names every identity field. ``BaseException`` unavoidably
+    provides a ``__dict__`` so __slots__ is not a hard mutation guard for
+    arbitrary attribute names; the property is. __slots__ is still declared
+    for code-review discoverability and memory/speed on the named fields.
     """
+
+    __slots__ = (
+        "_contract_name",
+        "node_id",
+        "payload",
+        "plugin",
+        "row_id",
+        "run_id",
+        "token_id",
+    )
 
     def __init__(
         self,
         *,
-        contract_name: str,
         plugin: str,
         node_id: str,
         run_id: str,
@@ -120,7 +148,11 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         message: str,
     ) -> None:
         super().__init__(message)
-        self.contract_name = contract_name
+        # Dispatcher attaches via _attach_contract_name before the violation
+        # leaves run_runtime_checks. A None value here means the violation
+        # was raised outside the dispatch path — the ``contract_name``
+        # property will raise on read rather than silently serialize None.
+        self._contract_name: str | None = None
         self.plugin = plugin
         self.node_id = node_id
         self.run_id = run_id
@@ -129,6 +161,51 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         # Deep-freeze so the attacker-under-debugger vector is closed (cannot
         # mutate between raise and record).
         self.payload: Mapping[str, Any] = deep_freeze(dict(payload))
+
+    @property
+    def contract_name(self) -> str:
+        """Return the authoritative contract name attached by the dispatcher.
+
+        Raises ``RuntimeError`` if the violation was raised outside the
+        declaration-dispatch path — the audit trail requires an
+        authoritative contract name and there is no safe fallback.
+        """
+        cn = self._contract_name
+        if cn is None:
+            raise RuntimeError(
+                "DeclarationContractViolation.contract_name accessed before "
+                "the dispatcher attached an authoritative name. This "
+                "indicates the violation was raised outside "
+                "run_runtime_checks (the declaration-dispatch boundary). "
+                "All DeclarationContractViolation instances must propagate "
+                "through the dispatcher so their contract_name can be "
+                "derived from the firing contract's registry entry; "
+                "caller-supplied names were removed to close the spoofing "
+                "vector (issue elspeth-d74fe81529 / ADR-010 C4)."
+            )
+        return cn
+
+    def _attach_contract_name(self, name: str) -> None:
+        """One-shot setter for the authoritative contract name.
+
+        Called by the declaration dispatcher (``run_runtime_checks``) after a
+        violation is raised and before it propagates to the audit-recording
+        boundary. A second call raises ``RuntimeError`` to catch double-
+        attachment bugs in the dispatcher or any other code path that
+        shouldn't be writing this field.
+
+        The underscore prefix signals private API; ``contract_name`` is the
+        public read-only surface.
+        """
+        if self._contract_name is not None:
+            raise RuntimeError(
+                f"DeclarationContractViolation._attach_contract_name called "
+                f"twice: already set to {self._contract_name!r}, refused "
+                f"overwrite with {name!r}. This indicates a dispatcher or "
+                f"exception-handling bug — the authoritative name is set "
+                f"exactly once per violation lifecycle."
+            )
+        self._contract_name = name
 
     def to_audit_dict(self) -> Mapping[str, Any]:
         return {

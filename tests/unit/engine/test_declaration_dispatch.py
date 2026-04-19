@@ -63,8 +63,9 @@ class _RaisesViolationContract:
         return True
 
     def runtime_check(self, inputs, outputs) -> None:
+        # C4: contract_name is attached by the dispatcher from the registry;
+        # contracts MUST NOT supply it at construction.
         raise DeclarationContractViolation(
-            contract_name="raises_violation",
             plugin="P",
             node_id="n",
             run_id="r",

@@ -102,8 +102,11 @@ class CreatesTokensContract:
         emitted_count = len(outputs.emitted_rows)
 
         if creates_tokens_flag and emitted_count == 1:
+            # C4: contract_name is attached by the dispatcher; the contract's
+            # own runtime_check MUST NOT supply it. (Previously the proof
+            # contract passed ``contract_name=self.name`` — the whole point
+            # of the C4 closure is that contracts cannot self-label.)
             raise CreatesTokensViolation(
-                contract_name=self.name,
                 plugin=inputs.plugin.name,
                 node_id=inputs.node_id,
                 run_id=inputs.run_id,
@@ -244,7 +247,6 @@ def test_creates_tokens_violation_is_audit_evidence(
     requiring engine infrastructure (unit-scope proof).
     """
     violation = CreatesTokensViolation(
-        contract_name="creates_tokens",
         plugin="TestTransform",
         node_id="ct-node",
         run_id="ct-run",
@@ -253,6 +255,9 @@ def test_creates_tokens_violation_is_audit_evidence(
         payload={"creates_tokens": True, "emitted_count": 1},
         message="proof violation",
     )
+    # Simulate dispatcher-attached contract_name (the C4 closure makes this
+    # the only attribution path).
+    violation._attach_contract_name("creates_tokens")
 
     assert isinstance(violation, AuditEvidenceBase), "CreatesTokensViolation must inherit AuditEvidenceBase to integrate with Landscape."
     assert isinstance(violation, DeclarationContractViolation), "CreatesTokensViolation must be a DeclarationContractViolation subclass."

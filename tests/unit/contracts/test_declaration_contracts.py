@@ -32,8 +32,9 @@ class _FakeContract:
 
     def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
         if inputs.plugin.fake_violate:
+            # C4 closure: ``contract_name`` is attached by the dispatcher from
+            # the registry entry; contracts MUST NOT supply it here.
             raise DeclarationContractViolation(
-                contract_name="fake_declaration",
                 plugin=type(inputs.plugin).__name__,
                 node_id=inputs.node_id,
                 run_id=inputs.run_id,
@@ -160,7 +161,6 @@ def test_violation_inherits_audit_evidence_base() -> None:
     from elspeth.contracts.audit_evidence import AuditEvidenceBase
 
     v = DeclarationContractViolation(
-        contract_name="t",
         plugin="P",
         node_id="n",
         run_id="r",
@@ -174,7 +174,6 @@ def test_violation_inherits_audit_evidence_base() -> None:
 
 def test_violation_payload_is_deep_frozen() -> None:
     v = DeclarationContractViolation(
-        contract_name="t",
         plugin="P",
         node_id="n",
         run_id="r",
@@ -192,7 +191,6 @@ def test_violation_payload_is_deep_frozen() -> None:
 
 def test_violation_payload_secrets_scrubbed() -> None:
     v = DeclarationContractViolation(
-        contract_name="t",
         plugin="P",
         node_id="n",
         run_id="r",
@@ -201,11 +199,20 @@ def test_violation_payload_secrets_scrubbed() -> None:
         payload={"api_key": "sk-abcdef1234567890abcdef1234567890"},
         message="m",
     )
+    # to_audit_dict reads contract_name, so attach before inspecting.
+    v._attach_contract_name("t")
     dump = v.to_audit_dict()
     assert dump["payload"]["api_key"] == "<redacted-secret>"
 
 
 def test_runtime_check_raises_violation() -> None:
+    """Invoke the contract through the dispatcher so C4's contract_name
+    attribution path is exercised. The pre-C4 version of this test called
+    ``c.runtime_check`` directly and relied on the contract self-labelling;
+    after C4 the authoritative label comes from the registry via the
+    dispatcher, so driving the check end-to-end is the honest assertion."""
+    from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+
     c = _FakeContract()
     register_declaration_contract(c)
 
@@ -223,7 +230,7 @@ def test_runtime_check_raises_violation() -> None:
     outputs = RuntimeCheckOutputs(emitted_rows=(object(),))
 
     with pytest.raises(DeclarationContractViolation) as exc_info:
-        c.runtime_check(inputs, outputs)
+        run_runtime_checks(inputs=inputs, outputs=outputs)
     assert exc_info.value.contract_name == "fake_declaration"
 
 
@@ -264,7 +271,6 @@ def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
     """Regression test: all identity fields must surface to the audit trail
     (attributability invariant per reviewer B16)."""
     v = DeclarationContractViolation(
-        contract_name="c",
         plugin="P",
         node_id="n",
         run_id="r",
@@ -273,6 +279,9 @@ def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
         payload={"k": "v"},
         message="m",
     )
+    # Simulate dispatcher attribution so to_audit_dict's contract_name read
+    # does not hit the pre-attach guard.
+    v._attach_contract_name("c")
     dump = v.to_audit_dict()
     expected_keys = {
         "exception_type",
@@ -295,6 +304,165 @@ def test_fake_contract_satisfies_declaration_contract_protocol() -> None:
 
     c = _FakeContract()
     assert isinstance(c, DeclarationContract)
+
+
+# ---------------------------------------------------------------------------
+# C4 — DeclarationContractViolation: contract_name must come from the
+# dispatcher, not the caller. Mutation post-construction must raise.
+# ---------------------------------------------------------------------------
+
+
+def test_violation_init_does_not_accept_contract_name_kwarg() -> None:
+    """C4 Part 1 (issue elspeth-d74fe81529): contract_name must not be a
+    caller-supplied parameter. The authoritative name is attached by the
+    dispatcher from the firing contract's registry entry; allowing callers
+    to supply it lets one contract spoof another's identity in the audit
+    trail.
+    """
+    with pytest.raises(TypeError):
+        DeclarationContractViolation(
+            contract_name="spoofed",  # type: ignore[call-arg]
+            plugin="P",
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="tk",
+            payload={"k": "v"},
+            message="m",
+        )
+
+
+def test_violation_contract_name_read_before_dispatcher_attach_raises() -> None:
+    """Reading ``violation.contract_name`` before the dispatcher has attached
+    the authoritative name must raise, so a stray raise path that bypasses
+    the dispatcher cannot silently serialize ``contract_name=None`` into the
+    audit record.
+    """
+    v = DeclarationContractViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"k": "v"},
+        message="m",
+    )
+    with pytest.raises((RuntimeError, AttributeError)):
+        _ = v.contract_name
+
+
+def test_violation_contract_name_is_read_only_after_attach() -> None:
+    """C4 Part 2: ``violation.contract_name = "other"`` must raise
+    AttributeError. Use the dispatcher-simulating helper to attach a name,
+    then verify reassignment is rejected.
+    """
+    v = DeclarationContractViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"k": "v"},
+        message="m",
+    )
+    v._attach_contract_name("contract_a")
+    assert v.contract_name == "contract_a"
+    with pytest.raises(AttributeError):
+        v.contract_name = "contract_b"  # type: ignore[misc]
+
+
+def test_violation_contract_name_attach_is_one_shot() -> None:
+    """_attach_contract_name must reject a second call — guards against a
+    misbehaving dispatcher or other code path trying to overwrite the
+    authoritative name after it has been set.
+    """
+    v = DeclarationContractViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"k": "v"},
+        message="m",
+    )
+    v._attach_contract_name("first")
+    with pytest.raises(RuntimeError, match="already"):
+        v._attach_contract_name("second")
+
+
+def test_violation_declares_slots() -> None:
+    """C4 Part 2: ``DeclarationContractViolation`` declares ``__slots__`` for
+    every identity field. ``BaseException`` unavoidably carries a ``__dict__``,
+    so __slots__ here is primarily a code-review signal + memory/speed win
+    for the named fields — the mutation guarantee comes from the
+    ``contract_name`` property. Assert the declaration exists so a future
+    author doesn't quietly remove it.
+    """
+    slots = set(DeclarationContractViolation.__slots__)
+    assert "_contract_name" in slots
+    for field in ("plugin", "node_id", "run_id", "row_id", "token_id", "payload"):
+        assert field in slots, f"{field} missing from __slots__: {slots}"
+
+
+def test_dispatcher_attaches_contract_name_from_registry() -> None:
+    """End-to-end C4 Part 1 acceptance: when a registered contract's
+    ``runtime_check`` raises a DeclarationContractViolation WITHOUT
+    supplying a name (new signature), the dispatcher attaches
+    ``contract.name`` from the registry before the violation propagates.
+    """
+    from elspeth.contracts.declaration_contracts import (
+        RuntimeCheckInputs,
+        RuntimeCheckOutputs,
+        register_declaration_contract,
+    )
+    from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+
+    class _AttackerPayload(TypedDict):
+        reason: str
+
+    class _AttackerContract:
+        """A contract that attempts to fire — the dispatcher must label the
+        resulting violation with THIS contract's name, regardless of what the
+        runtime_check body thought it was producing."""
+
+        name = "authentic_contract_name"
+        payload_schema: type = _AttackerPayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return True
+
+        def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
+            raise DeclarationContractViolation(
+                plugin="P",
+                node_id="n",
+                run_id="r",
+                row_id="rw",
+                token_id="tk",
+                payload={"reason": "test"},
+                message="under test",
+            )
+
+        @classmethod
+        def negative_example(cls):  # type: ignore[override]
+            raise NotImplementedError
+
+    register_declaration_contract(_AttackerContract())
+
+    inputs = RuntimeCheckInputs(
+        plugin=_FakePlugin(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        input_row=object(),
+        static_contract=frozenset(),
+    )
+    outputs = RuntimeCheckOutputs(emitted_rows=(object(),))
+
+    with pytest.raises(DeclarationContractViolation) as exc_info:
+        run_runtime_checks(inputs=inputs, outputs=outputs)
+    # Dispatcher wrote the authoritative name onto the violation.
+    assert exc_info.value.contract_name == "authentic_contract_name"
 
 
 def test_clear_registry_without_pytest_env_raises(monkeypatch) -> None:
