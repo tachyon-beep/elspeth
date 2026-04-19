@@ -26,7 +26,7 @@ list is empty (silent "0 tests" passes are the worst kind of theatre).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -45,6 +45,23 @@ class _UnprobeableTransform(Exception):
         super().__init__(reason)
 
 
+def _registered_transform_classes() -> list[type[BaseTransform]]:
+    """Return registered transforms as ``BaseTransform`` subclasses.
+
+    ``PluginManager.get_transforms()`` is typed ``list[type[TransformProtocol]]``
+    because the public surface is the protocol. In practice every registered
+    plugin subclasses ``BaseTransform`` to inherit the
+    ``passes_through_input``, ``is_batch_aware``, and ``probe_config()``
+    machinery the harness relies on. The cast documents that framework
+    invariant; if a non-``BaseTransform`` plugin were ever registered the
+    harness would still typecheck and fail loudly at first use.
+    """
+    return cast(
+        "list[type[BaseTransform]]",
+        get_shared_plugin_manager().get_transforms(),
+    )
+
+
 def _annotated_pass_through_plugins() -> list[type[BaseTransform]]:
     """Every registered transform class with ``passes_through_input=True``.
 
@@ -52,12 +69,12 @@ def _annotated_pass_through_plugins() -> list[type[BaseTransform]]:
     Missing attribute is a framework bug (``BaseTransform`` supplies it) and
     a silent ``False`` coercion would hide the annotation from governance.
     """
-    return [cls for cls in get_shared_plugin_manager().get_transforms() if cls.passes_through_input]
+    return [cls for cls in _registered_transform_classes() if cls.passes_through_input]
 
 
 def _non_pass_through_plugins() -> list[type[BaseTransform]]:
     """Every registered transform class without pass-through annotation."""
-    return [cls for cls in get_shared_plugin_manager().get_transforms() if not cls.passes_through_input]
+    return [cls for cls in _registered_transform_classes() if not cls.passes_through_input]
 
 
 def _probe_instantiate(cls: type[BaseTransform]) -> BaseTransform:
@@ -144,7 +161,6 @@ def test_annotated_transforms_preserve_input_fields(
         transform = _probe_instantiate(_annotated_cls)
     except _UnprobeableTransform as exc:
         pytest.skip(f"{_annotated_cls.__name__}: {exc.reason}")
-        return
 
     # Batch-aware transforms receive list[PipelineRow]; single-token transforms
     # receive PipelineRow. Both shapes are exercised by the same probe.
@@ -155,7 +171,6 @@ def test_annotated_transforms_preserve_input_fields(
             result = transform.process(row, _probe_context(transform))
     except (TypeError, AttributeError) as exc:
         pytest.skip(f"{_annotated_cls.__name__}: probe invocation rejected: {exc}")
-        return
 
     if result.status != "success":
         # Legitimate processing error on this probe (e.g., quarantine). Not
@@ -192,7 +207,6 @@ def test_harness_skip_rate_budget() -> None:
     transforms = _annotated_pass_through_plugins()
     if not transforms:
         pytest.skip("No annotated transforms registered.")
-        return
 
     unprobeable: list[str] = []
     for cls in transforms:
@@ -251,7 +265,6 @@ def test_non_pass_through_transforms_do_drop_fields(
         # skip-rate budget cover the annotated set; this test only
         # exercises transforms that explicitly declared a probe config.
         pytest.skip(f"{_non_pass_through_cls.__name__}: not probeable (no probe_config() or constructor mismatch).")
-        return
 
     probes_preserved = True
     probe_count = 0

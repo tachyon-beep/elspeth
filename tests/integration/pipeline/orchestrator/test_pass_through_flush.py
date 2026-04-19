@@ -191,7 +191,7 @@ def _build_aggregation_pipeline(
     # _build_interruptible_aggregation_config does the same thing; the
     # transform instance carries it for runtime identification.
     agg_node_id = graph.get_aggregation_id_map()[AggregationName("dropper_agg")]
-    transform.node_id = agg_node_id  # type: ignore[attr-defined]
+    transform.node_id = agg_node_id
 
     config = PipelineConfig(
         source=as_source(source),

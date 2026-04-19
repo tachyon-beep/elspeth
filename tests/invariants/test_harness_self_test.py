@@ -2,11 +2,29 @@
 
 Registers a deliberately mis-annotated fixture transform and asserts the
 harness catches it. Without this, a refactor that accidentally empties the
-discovery list would silently make the harness a no-op — the worst kind of
-governance theatre.
+discovery list — or that weakens the forward-invariant assertion itself —
+would silently make the harness a no-op. That is the worst kind of
+governance theatre: a test that always passes regardless of underlying
+reality.
 
-Uses ``monkeypatch`` to scope the patched plugin list to exactly this test
-— the global plugin manager is restored on teardown.
+The test drives the live ``test_annotated_transforms_preserve_input_fields``
+function rather than reimplementing its assertion logic. This means:
+
+- A regression that weakens the assertion (e.g. removes the ``not dropped``
+  check) fails this test, because the live function would no longer raise
+  on the deliberately-broken fixture.
+- A regression that breaks discovery (e.g. ``_annotated_pass_through_plugins``
+  returns the wrong list) fails this test, because the fixture would never
+  reach the parametrize.
+- A regression that breaks probe-row generation (e.g. ``probe_row()`` only
+  generates 0-field or 1-field rows) is detected indirectly: the fixture
+  drops fields only when 2+ are present, so a too-narrow strategy would
+  cause the assertion never to fire.
+
+Earlier versions of this self-test reimplemented the assertion logic
+inline; that version would still pass if the live function's assertion
+was broken but the duplicate logic remained correct. The current shape
+closes that gap by invoking the live function directly.
 """
 
 from __future__ import annotations
@@ -54,22 +72,40 @@ class _DeliberatelyMisannotatedDropper(BaseTransform):
                 PipelineRow(data, row.contract),
                 success_reason={"action": "passthrough-empty"},
             )
-        # Keep only the first key.
+        # Keep only the first key; drop both contract entries AND payload
+        # entries for the rest. The forward invariant computes
+        # `runtime_observed = contract_fields & payload_fields`, so dropping
+        # from both is the unambiguous violation case.
         first_key = next(iter(data))
         reduced = {first_key: data[first_key]}
+        from elspeth.contracts.schema_contract import SchemaContract
+
+        kept_fields = tuple(fc for fc in row.contract.fields if fc.normalized_name == first_key)
+        reduced_contract = SchemaContract(
+            mode=row.contract.mode,
+            fields=kept_fields,
+            locked=row.contract.locked,
+        )
         return TransformResult.success(
-            PipelineRow(reduced, row.contract),  # Contract still names ALL fields (LIE)
+            PipelineRow(reduced, reduced_contract),
             success_reason={"action": "reduce"},
         )
 
 
 def test_harness_catches_deliberate_misannotation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """If the harness is healthy, the forward invariant must raise
-    AssertionError when run against _DeliberatelyMisannotatedDropper.
+    """If the harness is healthy, the live forward-invariant function must
+    raise ``AssertionError`` when run against ``_DeliberatelyMisannotatedDropper``.
 
-    This meta-test patches the plugin manager to include ONLY the fixture
-    transform, then invokes the harness's discovery and forward-invariant
-    logic directly.
+    Drives the live ``test_annotated_transforms_preserve_input_fields``
+    function — not a local copy of its assertion — so a regression that
+    weakens the live assertion is caught here.
+
+    Mechanism: monkeypatch the plugin manager to return only the fixture,
+    then call the live ``@given``-decorated test function directly with the
+    fixture as ``_annotated_cls``. Hypothesis will explore probe rows; the
+    fixture drops fields whenever the probe has 2+ keys, so the assertion
+    fires reliably. ``pytest.raises(AssertionError)`` confirms the live
+    assertion still rejects the violation.
     """
     from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
 
@@ -80,47 +116,34 @@ def test_harness_catches_deliberate_misannotation(monkeypatch: pytest.MonkeyPatc
 
     monkeypatch.setattr(manager, "get_transforms", _patched_get_transforms)
 
-    # Drive the harness's discovery + forward invariant manually. We don't
-    # use pytest's parametrize machinery here because that would require
-    # running the harness as a subprocess.
+    # Discovery sanity: the patched manager returns the fixture alone. If
+    # this fails, the rest of the test is meaningless — surface that
+    # explicitly rather than letting Hypothesis run against the wrong target.
     from tests.invariants.test_pass_through_invariants import (
         _annotated_pass_through_plugins,
-        _probe_instantiate,
+        test_annotated_transforms_preserve_input_fields,
     )
 
     plugins = _annotated_pass_through_plugins()
-    assert plugins == [_DeliberatelyMisannotatedDropper], "monkeypatch failed — plugin manager did not return the fixture alone"
-
-    # Instantiate the fixture and run it on a multi-field probe row.
-    transform = _probe_instantiate(_DeliberatelyMisannotatedDropper)
-    from elspeth.contracts.schema_contract import FieldContract, SchemaContract
-    from tests.fixtures.factories import make_context
-
-    contract = SchemaContract(
-        mode="OBSERVED",
-        fields=(
-            FieldContract(normalized_name="a", original_name="a", python_type=int, required=True, source="inferred", nullable=False),
-            FieldContract(normalized_name="b", original_name="b", python_type=int, required=True, source="inferred", nullable=False),
-        ),
-        locked=True,
+    assert plugins == [_DeliberatelyMisannotatedDropper], (
+        f"monkeypatch failed — plugin manager did not return the fixture alone. Got {[p.__name__ for p in plugins]!r}."
     )
-    probe = PipelineRow({"a": 1, "b": 2}, contract)
-    result = transform.process(probe, make_context())
 
-    # Manually assert the invariant the harness checks — mirroring the
-    # forward-invariant logic.
-    emitted = [result.row] if result.row is not None else list(result.rows or [])
-    assert emitted, "fixture must emit at least one row"
+    # Drive the live forward-invariant function. ``@given(row=probe_row())``
+    # supplies row values; ``_annotated_cls`` is a regular keyword arg passed
+    # through Hypothesis to the inner function. Hypothesis raises the
+    # underlying ``AssertionError`` after shrinking to a minimal probe.
+    with pytest.raises(AssertionError) as exc_info:
+        test_annotated_transforms_preserve_input_fields(
+            _annotated_cls=_DeliberatelyMisannotatedDropper,
+        )
 
-    input_fields = frozenset(fc.normalized_name for fc in probe.contract.fields)
-    dropped_fields: list[str] = []
-    for emitted_row in emitted:
-        runtime_observed = frozenset(fc.normalized_name for fc in emitted_row.contract.fields) & frozenset(emitted_row.keys())
-        dropped = input_fields - runtime_observed
-        if dropped:
-            dropped_fields.extend(sorted(dropped))
-
-    assert dropped_fields, (
-        "Fixture should drop at least one field — the harness self-test catches regressions where the forward invariant stops working."
+    # The live assertion message names the offending plugin and the
+    # dropped fields. We verify both — a regression that broke the
+    # message format (without breaking the assertion itself) would still
+    # affect operator triage and is worth catching here.
+    message = str(exc_info.value)
+    assert "deliberately-misannotated-dropper" in message.lower() or (_DeliberatelyMisannotatedDropper.__name__ in message), (
+        f"Live assertion message must identify the offending plugin; got {message!r}"
     )
-    assert "b" in dropped_fields, f"Expected dropper to drop 'b'; dropped {dropped_fields!r}"
+    assert "dropped" in message.lower(), f"Live assertion message must explain the failure mode ('dropped fields'); got {message!r}"

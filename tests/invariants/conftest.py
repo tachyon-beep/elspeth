@@ -12,6 +12,7 @@ Two concerns managed here:
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -21,7 +22,7 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 
 
 @pytest.fixture(autouse=True)
-def _verify_plugin_manager_clean(monkeypatch: pytest.MonkeyPatch) -> None:
+def _verify_plugin_manager_clean(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Ensure plugin manager is not left in a modified state after a test.
 
     Tests that use ``monkeypatch`` to patch ``get_shared_plugin_manager``
@@ -39,8 +40,12 @@ _SCALAR_STRATEGIES = st.one_of(
     st.floats(min_value=-1e6, max_value=1e6, allow_nan=False, allow_infinity=False),
 )
 
+# st.characters' whitelist_categories is typed Collection[Literal["Ll", ...]];
+# passing a tuple of literal strings satisfies the runtime API but mypy needs
+# the literal to be explicitly retained, so we declare the constant inline.
+_LOWERCASE_LETTER: Any = ("Ll",)
 _FIELD_NAME_STRATEGY = st.text(
-    alphabet=st.characters(whitelist_categories=("Ll",), whitelist_characters="_"),
+    alphabet=st.characters(whitelist_categories=_LOWERCASE_LETTER, whitelist_characters="_"),
     min_size=1,
     max_size=12,
 ).filter(lambda s: s.replace("_", "").isalpha() or s == "_")
