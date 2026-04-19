@@ -54,14 +54,14 @@ Runtime-checkable protocol carrying:
 - `name: str`
 - `applies_to(plugin) -> bool`
 - `runtime_check(inputs, outputs) -> None`
-- `payload_schema: type[TypedDict]` (secrets scrubbed before audit serialization)
+- `payload_schema: type[TypedDict]` — enforced at violation construction (deny-by-default) and as defence-in-depth at Landscape serialization (scrubber)
 - `negative_example() -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]` (classmethod; harness asserts it fires the contract's violation)
 
 `static_check` is NOT in the 2A protocol. Walker refactor is fully Phase 2B scope — designing a `static_check` shape without a second real walker-aware declaration would be premature abstraction (the ADR-009 §Alternatives #1 concern). Phase 2B's first declaration will validate the walker-side extension.
 
-Registry freezes at bootstrap; orchestrator asserts `len(registered_declaration_contracts()) >= 1` at the same point (non-empty invariant — prevents silent runtime VAL disable, which was reviewer B9's concern).
+Registry freezes at bootstrap; orchestrator asserts set-equality between `{c.name for c in registered_declaration_contracts()}` and the `EXPECTED_CONTRACTS` manifest at the same point (prevents silent runtime VAL disable — reviewer B9's concern; the weaker non-empty check was replaced by the manifest gate per issue `elspeth-b03c6112c0` / C2).
 
-`DeclarationContractViolation` inherits `AuditEvidenceBase`, deep-freezes its payload in `__init__`, and runs `scrub_payload_for_audit` before returning `to_audit_dict`.
+`DeclarationContractViolation` inherits `AuditEvidenceBase`. Every subclass declares its own `payload_schema` (TypedDict). At construction, `__init__` rejects any payload carrying undeclared keys or missing a required key (issue `elspeth-3956044fb7` / H5 Layer 1 — see **Payload-schema enforcement** below). After validation, the payload is deep-frozen; on `to_audit_dict` it is passed through `scrub_payload_for_audit` (H5 Layer 2 defence-in-depth).
 
 ## Consequences
 
@@ -72,7 +72,7 @@ Registry freezes at bootstrap; orchestrator asserts `len(registered_declaration_
 - `negative_example()` requirement closes the dormant-`runtime_check` failure mode — a silently-returning `runtime_check` fails CI immediately.
 - Audit evidence is contract-orthogonal. A future non-plugin Tier-1 exception (e.g., checkpoint-integrity violation) can contribute structured context without subclassing `PluginContractViolation`.
 - TIER_1 registration is greppable at the class declaration site, requires a `reason`, and rejects plugin-module callers.
-- Secret-scrubbing on payload serialization closes the audit-legal-record-as-secret-leak vector (reviewer F-4) defensively, independent of per-contract author discipline.
+- Secret-scrubbing on payload serialization closes the audit-legal-record-as-secret-leak vector (reviewer F-4) defensively. As of issue `elspeth-3956044fb7` / H5 the scrubber is the _second_ of a two-layer defence: violation `__init__` now rejects any undeclared payload key up-front (H5 Layer 1), so an unknown secret format cannot reach the scrubber at all. The expanded scrubber (Azure SAS, DB conn strings, basic-auth URLs, bearer/session key names) remains as defence-in-depth for cases where a schema declares a `str` field whose value happens to carry a secret (H5 Layer 2).
 
 ### Negative
 
@@ -102,6 +102,26 @@ where the 27 µs N=1 baseline = 25 µs (ADR-008 direct `verify_pass_through` on 
 **Aggregate throughput bound.** At 20 000 rows/sec per worker and N = 16 contracts, per-row dispatch overhead is ≤ (27 + 15 × 1.5) µs = 49.5 µs = ≈1.0 second of wall time per second of throughput. Half of that is the ADR-008 verify baseline; the dispatcher contribution is ~23 µs ≈ 46 % of wall time. This is the worst-case the registry can reach before the review date (2026-10-19 / adoption-evidence triggers) re-evaluates the framework against observed experience.
 
 **Amendment policy.** New contracts that register MUST preserve the scaling law. A contract with an intrinsically expensive `applies_to` (e.g. requiring a deep attribute walk) must either (a) cache its decision at registration time and short-circuit on a scalar, or (b) amend this derivation with a justification and tighten the per-skip budget. The CI benchmark is the enforcement mechanism.
+
+### Payload-schema enforcement (deny-by-default) — issue `elspeth-3956044fb7` / H5
+
+**Claim.** Every `DeclarationContractViolation` payload is validated against its subclass's `payload_schema` at construction time, BEFORE deep-freeze and BEFORE any serialization path. Undeclared keys and missing-required keys raise immediately.
+
+**Why the gate is at construction.** The Landscape audit record is the legal record. The `scrub_payload_for_audit` helper is a closed-set regex/key-name list — it can only redact secret formats it has been taught about. A new contract author who accidentally includes an undeclared field (`debug_connection_string`, `raw_response`, `parent_url`) could slip a secret format past the scrubber. The construction-time gate flips the posture: a violation whose payload carries undeclared keys cannot be instantiated, so unknown secret formats never reach the scrubber. The scrubber remains as defence-in-depth for keys that ARE declared but carry a value that matches a known pattern.
+
+**Mechanism.** `DeclarationContractViolation.payload_schema` is a `ClassVar[type]` defaulting to an empty `_EmptyPayload` TypedDict. Subclasses MUST override with a purpose-built TypedDict. `__init__` resolves `get_type_hints(schema, include_extras=True)` so `NotRequired[...]` / `Required[...]` wrappers are respected even when the defining module uses `from __future__ import annotations` (the metaclass-populated `__required_keys__` / `__optional_keys__` are unreliable under future annotations). Keys are classified via `typing.get_origin(annotation)`:
+
+| Origin | Classification |
+|--------|----------------|
+| `Required` | required |
+| `NotRequired` | optional |
+| `None` | follows the class-level `total` flag (default `True` → required) |
+
+Validation asserts `payload.keys() ⊆ required ∪ optional` AND `required ⊆ payload.keys()`. Violations raise `ValueError` with the schema name and the offending key set in the message — no debugger round-trip needed for triage.
+
+**Layer 2 patterns.** The scrubber's `_PATTERNS` tuple and `_SECRET_KEY_NAMES` frozenset were extended in the same issue to cover Azure SAS tokens (`sig=…`), ODBC- and URL-style database connection strings (`postgres(ql)?://u:p@`, `mysql://`, `mongodb(+srv)?://`, case-insensitive `Password=` / `PWD=`), HTTP(S) basic-auth URLs (with a required `user:pass@` discriminator so credential-free endpoint URIs pass through), and bearer/session key names (`session_token`, `access_token`, `refresh_token`, `auth_cookie`, `sas_token`, `connection_string`, `conn_string`). Whole-string replacement is retained — partial redaction leaks structure.
+
+**Adopter obligation.** Each 2B / 2C declaration contract's ADR MUST name the concrete violation subclass and its `payload_schema` TypedDict in the "Violation" subsection. CI does not yet scan for missing schemas (subclass discoverability is weaker than contract discoverability); the review gate is the ADR itself.
 
 ## Alternatives Considered
 

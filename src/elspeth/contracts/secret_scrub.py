@@ -20,6 +20,21 @@ from typing import Any, cast
 _REDACTED = "<redacted-secret>"
 
 # Heuristic patterns. Order matters — longer / more specific first.
+#
+# H5 Layer 2 additions (issue elspeth-3956044fb7 — closed-set blind spots):
+#  - Azure SAS ``sig=`` parameter. The whole-string redaction rule means any
+#    URI containing a SAS signature has the entire URI replaced — structure
+#    (container name, blob path) would otherwise leak alongside the
+#    authenticator.
+#  - Database connection strings. Both ODBC-style (``Password=x;``) and
+#    URL-style (``postgres(ql)?://u:p@h``, ``mysql://u:p@h``). The ODBC
+#    match is case-insensitive because real-world conn strings mix case
+#    (``PWD=``, ``password=``); the URL schemes are case-sensitive per RFC
+#    3986 §3.1 so left as-is.
+#  - Basic-auth URLs. The ``user:pass@`` discriminator is required so plain
+#    HTTPS endpoints (Landscape resource URIs, example.com links) do not
+#    get nuked in triage payloads — see ``test_plain_https_url_without
+#    _credentials_passes_through``.
 _PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
     re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI / generic "sk-" key
@@ -27,9 +42,48 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"ghp_[A-Za-z0-9]{36,}"),  # GitHub PAT
     re.compile(r"eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}"),  # JWT
     re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----"),  # PEM
+    # Azure SAS signature — the ``sig=`` parameter value is the authenticator.
+    re.compile(r"sig=[A-Za-z0-9%/+=]{20,}"),
+    # ODBC-style conn-string password field; case-insensitive because
+    # Password=, PASSWORD=, pwd=, PWD= all appear in the wild.
+    re.compile(r"(?i)(?:password|pwd)=[^;\s]+"),
+    # URL-style DB connection strings with embedded credentials.
+    re.compile(r"postgres(?:ql)?://[^:/\s]+:[^@/\s]+@"),
+    re.compile(r"mysql://[^:/\s]+:[^@/\s]+@"),
+    re.compile(r"mongodb(?:\+srv)?://[^:/\s]+:[^@/\s]+@"),
+    # Basic-auth HTTP(S) URLs — require the ``user:pass@`` discriminator so
+    # credential-free endpoint URIs are NOT redacted.
+    re.compile(r"https?://[^:/\s]+:[^@/\s]+@"),
 )
 
-_SECRET_KEY_NAMES: frozenset[str] = frozenset({"api_key", "apikey", "secret", "token", "password", "passwd", "authorization"})
+# Key-name match is case-insensitive (see ``_scrub_value``). Every entry must
+# be lowercase here; the lookup applies ``.lower()`` on the observed key.
+#
+# H5 Layer 2 additions (issue elspeth-3956044fb7): bearer/session tokens
+# carried under non-``authorization`` keys, and connection-string keys
+# whose value may carry credentials even if the string itself doesn't
+# happen to match a regex above.
+_SECRET_KEY_NAMES: frozenset[str] = frozenset(
+    {
+        # Existing 2A set.
+        "api_key",
+        "apikey",
+        "secret",
+        "token",
+        "password",
+        "passwd",
+        "authorization",
+        # H5 additions — bearer / session / refresh families.
+        "access_token",
+        "refresh_token",
+        "session_token",
+        "auth_cookie",
+        # H5 additions — connection / SAS families.
+        "sas_token",
+        "connection_string",
+        "conn_string",
+    }
+)
 
 
 def scrub_payload_for_audit(payload: Mapping[str, Any]) -> dict[str, Any]:

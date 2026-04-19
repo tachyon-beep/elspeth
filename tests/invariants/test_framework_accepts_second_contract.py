@@ -35,6 +35,17 @@ from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Payload schema (TypedDict — required by DeclarationContract protocol and by
+# H5 Layer 1 deny-by-default violation construction)
+# ---------------------------------------------------------------------------
+
+
+class CreatesTokensPayload(TypedDict):
+    creates_tokens: bool
+    emitted_count: int
+
+
 class CreatesTokensViolation(DeclarationContractViolation):
     """Raised when a creates_tokens=True transform emits only one row.
 
@@ -42,17 +53,13 @@ class CreatesTokensViolation(DeclarationContractViolation):
     multiple child tokens via deaggregation. Emitting a single row is a
     contract violation: either the annotation is wrong or the transform
     failed to expand.
+
+    H5 Layer 1: ``payload_schema`` matches ``CreatesTokensContract.payload_schema``
+    so construction-time validation rejects unknown keys on this violation's
+    ``payload`` kwarg.
     """
 
-
-# ---------------------------------------------------------------------------
-# Payload schema (TypedDict — required by DeclarationContract protocol)
-# ---------------------------------------------------------------------------
-
-
-class CreatesTokensPayload(TypedDict):
-    creates_tokens: bool
-    emitted_count: int
+    payload_schema = CreatesTokensPayload
 
 
 # ---------------------------------------------------------------------------

@@ -25,12 +25,85 @@ from __future__ import annotations
 import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, ClassVar, NotRequired, Protocol, Required, TypedDict, get_origin, get_type_hints, is_typeddict, runtime_checkable
 
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
 from elspeth.contracts.secret_scrub import scrub_payload_for_audit
 from elspeth.contracts.tier_registry import FrameworkBugError
+
+# -----------------------------------------------------------------------------
+# H5 Layer 1 — deny-by-default payload_schema (issue elspeth-3956044fb7)
+# -----------------------------------------------------------------------------
+#
+# The ADR-010 §Decision 3 protocol already declares ``payload_schema`` on each
+# contract. Layer 1 wires that schema onto the violation type so ``__init__``
+# validates caller-supplied payload keys before the payload is deep-frozen.
+# The base class inherits ``_EmptyPayload`` so the only legal base-class
+# payload is ``{}`` — any concrete violation MUST subclass and override
+# ``payload_schema`` with a purpose-built TypedDict.
+#
+# Why this matters: ``scrub_payload_for_audit`` is a closed-set defence
+# (patterns + key names) and cannot cover every secret format that might
+# appear in future contract payloads. The deny-by-default gate at
+# construction flips the posture — a contract carrying an undeclared key
+# cannot even be instantiated, so an unknown secret format cannot reach
+# the Landscape audit record at all.
+
+
+class _EmptyPayload(TypedDict):
+    """Default ``DeclarationContractViolation.payload_schema``.
+
+    Carries no keys. The only legal payload on the base class is ``{}``.
+    Every concrete violation MUST subclass ``DeclarationContractViolation``
+    and override ``payload_schema`` with a TypedDict that enumerates every
+    key the violation's payload carries — this is the Layer 1 deny-by-default
+    gate (issue elspeth-3956044fb7 / H5).
+    """
+
+
+def _resolve_typeddict_key_sets(schema: type) -> tuple[frozenset[str], frozenset[str]]:
+    """Return ``(required, optional)`` frozensets for a TypedDict class.
+
+    Implemented via ``typing.get_type_hints(schema, include_extras=True)``
+    so ``NotRequired[...]`` / ``Required[...]`` wrappers survive even when
+    the defining module uses ``from __future__ import annotations``. Under
+    future annotations, TypedDict's own ``__required_keys__`` /
+    ``__optional_keys__`` metaclass-populated attributes are unreliable
+    because the class body's annotations are string literals the metaclass
+    cannot parse at class-definition time — it defaults every key to the
+    ``total`` flag's polarity and the Required/NotRequired wrappers are
+    silently dropped. ``get_type_hints`` resolves the strings and
+    ``typing.get_origin`` then yields the wrapper so author intent is
+    preserved regardless of the caller's syntax.
+
+    Each key is classified by:
+      * If its origin is ``Required`` → required.
+      * If its origin is ``NotRequired`` → optional.
+      * Otherwise → follow the schema's class-level ``total`` flag
+        (``total=True`` default → required; ``total=False`` → optional).
+
+    Caller is responsible for confirming ``is_typeddict(schema)`` first;
+    ``__total__`` access here would fail on non-TypedDict classes.
+    """
+    # ``is_typeddict(schema)`` was verified by the caller, so ``__total__``
+    # exists. mypy does not narrow ``type`` through the typing discriminator,
+    # so the runtime-verified access is suppressed at the call site below.
+    total_required_default: bool = schema.__total__  # type: ignore[attr-defined]
+    hints = get_type_hints(schema, include_extras=True)
+    required: set[str] = set()
+    optional: set[str] = set()
+    for key, annotation in hints.items():
+        origin = get_origin(annotation)
+        if origin is Required:
+            required.add(key)
+        elif origin is NotRequired:
+            optional.add(key)
+        elif total_required_default:
+            required.add(key)
+        else:
+            optional.add(key)
+    return frozenset(required), frozenset(optional)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +209,12 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         "token_id",
     )
 
+    # H5 Layer 1 (issue elspeth-3956044fb7): deny-by-default payload schema.
+    # Subclasses MUST override with a purpose-built TypedDict enumerating
+    # every key the violation's ``payload`` can carry. The base class's
+    # empty default accepts only ``payload={}``.
+    payload_schema: ClassVar[type] = _EmptyPayload
+
     def __init__(
         self,
         *,
@@ -148,6 +227,11 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         message: str,
     ) -> None:
         super().__init__(message)
+        # H5 Layer 1: validate BEFORE deep-freeze. Deep-freeze is expensive
+        # and pointless on a payload we're about to reject; raising first
+        # also gives the caller a cleaner traceback pointing at the raw
+        # dict they supplied rather than the frozen proxy.
+        self._validate_payload_against_schema(payload)
         # Dispatcher attaches via _attach_contract_name before the violation
         # leaves run_runtime_checks. A None value here means the violation
         # was raised outside the dispatch path — the ``contract_name``
@@ -161,6 +245,64 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         # Deep-freeze so the attacker-under-debugger vector is closed (cannot
         # mutate between raise and record).
         self.payload: Mapping[str, Any] = deep_freeze(dict(payload))
+
+    @classmethod
+    def _validate_payload_against_schema(cls, payload: Mapping[str, Any]) -> None:
+        """H5 Layer 1: enforce ``payload.keys() ⊆ allowed`` and
+        ``required ⊆ payload.keys()`` against the class's ``payload_schema``.
+
+        Key resolution uses ``typing.get_type_hints(..., include_extras=True)``
+        rather than ``TypedDict.__required_keys__`` / ``__optional_keys__``.
+        The metaclass-populated attributes are unreliable under
+        ``from __future__ import annotations`` because ``NotRequired[...]``
+        / ``Required[...]`` become string literals that the metaclass
+        cannot parse at class-definition time. ``get_type_hints`` evaluates
+        the strings at call time, after which ``get_origin(annotation)``
+        correctly yields ``NotRequired`` / ``Required`` / ``None`` so the
+        resolved required/optional sets match author intent regardless of
+        whether the defining module uses future-annotation syntax.
+
+        Raises:
+            TypeError: ``payload_schema`` is not a TypedDict (canonical
+                ``typing.is_typeddict`` check).
+            ValueError: payload carries undeclared keys OR omits a required
+                key. Messages include the schema name + the offending key
+                set so the traceback identifies the culprit without a
+                debugger round-trip.
+        """
+        schema = cls.payload_schema
+        if not is_typeddict(schema):
+            raise TypeError(
+                f"{cls.__name__}.payload_schema must be a TypedDict "
+                f"(got {schema!r}). Declare a purpose-built TypedDict "
+                f"subclass for this violation's payload shape — this is "
+                f"the H5 Layer 1 deny-by-default gate "
+                f"(issue elspeth-3956044fb7)."
+            )
+        required_keys, optional_keys = _resolve_typeddict_key_sets(schema)
+        allowed = required_keys | optional_keys
+        payload_keys = frozenset(payload.keys())
+        unknown = payload_keys - allowed
+        if unknown:
+            raise ValueError(
+                f"{cls.__name__} payload contains undeclared keys "
+                f"{sorted(unknown)!r}; schema {schema.__name__} allows "
+                f"{sorted(allowed)!r}. Undeclared payload keys could "
+                f"carry secret formats the scrubber does not yet "
+                f"recognise — declare every key on the violation's "
+                f"payload_schema TypedDict "
+                f"(issue elspeth-3956044fb7 / H5 Layer 1)."
+            )
+        missing = required_keys - payload_keys
+        if missing:
+            raise ValueError(
+                f"{cls.__name__} payload missing required keys "
+                f"{sorted(missing)!r}; schema {schema.__name__} declares "
+                f"{sorted(required_keys)!r} as required. Supply every "
+                f"required key at construction time — the audit trail "
+                f"needs all declared context for triage "
+                f"(issue elspeth-3956044fb7 / H5 Layer 1)."
+            )
 
     @property
     def contract_name(self) -> str:

@@ -15,6 +15,7 @@ is exercised via the same code path the engine uses at runtime.
 from __future__ import annotations
 
 import json
+from typing import TypedDict
 
 from elspeth.contracts import NodeStateFailed, NodeType
 from elspeth.contracts.declaration_contracts import DeclarationContractViolation
@@ -22,6 +23,29 @@ from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import ExecutionError
 from elspeth.core.landscape.lineage import explain
 from tests.fixtures.landscape import make_recorder_with_run, register_test_node
+
+# H5 Layer 1: Landscape round-trip exercises a rich payload shape (nested
+# dicts, multiple field types). The round-trip contract's payload_schema
+# declares every key the test carries.
+
+
+class _RoundTripPayload(TypedDict):
+    field_name: str
+    expected_type: str
+    observed_type: str
+    nested: dict
+
+
+class _RoundTripViolation(DeclarationContractViolation):
+    payload_schema = _RoundTripPayload
+
+
+class _SecretPayload(TypedDict):
+    api_key: str
+
+
+class _SecretViolation(DeclarationContractViolation):
+    payload_schema = _SecretPayload
 
 
 def _setup_landscape(*, run_id: str, row_id: str, token_id: str, node_id: str):
@@ -78,7 +102,7 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        violation = DeclarationContractViolation(
+        violation = _RoundTripViolation(
             plugin="FakeTransform",
             node_id=node_id,
             run_id=run_id,
@@ -140,7 +164,11 @@ class TestDeclarationContractViolationRoundTrip:
         # error_json structure: {"exception": ..., "type": ..., "context": {...}}
         context = error_record["context"]
 
-        assert context["exception_type"] == "DeclarationContractViolation"
+        # H5 Layer 1: the recorded exception_type is the concrete violation
+        # subclass (every violation now subclasses DeclarationContractViolation
+        # and declares its own payload_schema). The class name is what
+        # triage reads — the base-class name would be a lossy approximation.
+        assert context["exception_type"] == "_RoundTripViolation"
         assert context["contract_name"] == "test_roundtrip"
         assert context["plugin"] == "FakeTransform"
         assert context["node_id"] == node_id
@@ -173,7 +201,7 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        violation = DeclarationContractViolation(
+        violation = _SecretViolation(
             plugin="FakeTransform",
             node_id=node_id,
             run_id=run_id,

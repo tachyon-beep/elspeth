@@ -55,6 +55,12 @@ class _SkipsContract:
         return _inputs(), _outputs()
 
 
+class _RaisesViolation(DeclarationContractViolation):
+    """H5 Layer 1: violation subclass declares its own ``payload_schema``."""
+
+    payload_schema = _Payload
+
+
 class _RaisesViolationContract:
     name = "raises_violation"
     payload_schema: type = _Payload
@@ -65,7 +71,7 @@ class _RaisesViolationContract:
     def runtime_check(self, inputs, outputs) -> None:
         # C4: contract_name is attached by the dispatcher from the registry;
         # contracts MUST NOT supply it at construction.
-        raise DeclarationContractViolation(
+        raise _RaisesViolation(
             plugin="P",
             node_id="n",
             run_id="r",

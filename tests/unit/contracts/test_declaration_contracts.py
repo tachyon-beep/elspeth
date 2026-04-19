@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 import pytest
 
@@ -22,6 +22,40 @@ class _FakePayload(TypedDict):
     reason: str
 
 
+# -----------------------------------------------------------------------------
+# H5 Layer 1 — deny-by-default payload_schema at violation construction
+# -----------------------------------------------------------------------------
+#
+# Existing identity-plumbing tests (contract_name round-trip, __slots__, etc.)
+# do not care about payload content — only that the rest of the violation
+# surface behaves. Under Layer 1 the base class rejects any non-empty payload
+# whose keys are not declared, so the plumbing tests use ``_TestViolation``
+# below, which declares a permissive schema covering every key the tests
+# carry. The ``NotRequired`` annotations mean any subset of the schema's
+# keys is legal, which matches how the plumbing tests exercise the class.
+
+
+class _TestPayload(TypedDict):
+    """Umbrella schema used by framework-internal identity-plumbing tests.
+
+    Every key is ``NotRequired`` so tests can carry any subset they need
+    without adding bespoke schemas. Production violations MUST declare a
+    purpose-built TypedDict — this one exists only for test ergonomics.
+    """
+
+    k: NotRequired[str]
+    outer: NotRequired[dict]
+    api_key: NotRequired[str]
+    reason: NotRequired[str]
+    note: NotRequired[str]
+
+
+class _TestViolation(DeclarationContractViolation):
+    """Test-only subclass with a permissive schema. See ``_TestPayload``."""
+
+    payload_schema = _TestPayload
+
+
 class _FakeContract:
     name = "fake_declaration"
     payload_schema: type = _FakePayload
@@ -34,7 +68,12 @@ class _FakeContract:
         if inputs.plugin.fake_violate:
             # C4 closure: ``contract_name`` is attached by the dispatcher from
             # the registry entry; contracts MUST NOT supply it here.
-            raise DeclarationContractViolation(
+            #
+            # H5 Layer 1: the violation subclass must declare a payload_schema
+            # that covers every key in the payload. ``_TestViolation`` is
+            # defined at module scope and uses ``_TestPayload``, which lists
+            # ``reason`` as ``NotRequired[str]``.
+            raise _TestViolation(
                 plugin=type(inputs.plugin).__name__,
                 node_id=inputs.node_id,
                 run_id=inputs.run_id,
@@ -160,7 +199,7 @@ def test_registration_after_freeze_raises() -> None:
 def test_violation_inherits_audit_evidence_base() -> None:
     from elspeth.contracts.audit_evidence import AuditEvidenceBase
 
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -173,7 +212,7 @@ def test_violation_inherits_audit_evidence_base() -> None:
 
 
 def test_violation_payload_is_deep_frozen() -> None:
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -190,7 +229,7 @@ def test_violation_payload_is_deep_frozen() -> None:
 
 
 def test_violation_payload_secrets_scrubbed() -> None:
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -270,7 +309,7 @@ def test_negative_example_fires_the_violation() -> None:
 def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
     """Regression test: all identity fields must surface to the audit trail
     (attributability invariant per reviewer B16)."""
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -338,7 +377,7 @@ def test_violation_contract_name_read_before_dispatcher_attach_raises() -> None:
     the dispatcher cannot silently serialize ``contract_name=None`` into the
     audit record.
     """
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -356,7 +395,7 @@ def test_violation_contract_name_is_read_only_after_attach() -> None:
     AttributeError. Use the dispatcher-simulating helper to attach a name,
     then verify reassignment is rejected.
     """
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -376,7 +415,7 @@ def test_violation_contract_name_attach_is_one_shot() -> None:
     misbehaving dispatcher or other code path trying to overwrite the
     authoritative name after it has been set.
     """
-    v = DeclarationContractViolation(
+    v = _TestViolation(
         plugin="P",
         node_id="n",
         run_id="r",
@@ -420,6 +459,12 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
     class _AttackerPayload(TypedDict):
         reason: str
 
+    class _AttackerViolation(DeclarationContractViolation):
+        """H5 Layer 1: every DeclarationContractViolation subclass declares
+        its own ``payload_schema``. Matches the contract's schema below."""
+
+        payload_schema = _AttackerPayload
+
     class _AttackerContract:
         """A contract that attempts to fire — the dispatcher must label the
         resulting violation with THIS contract's name, regardless of what the
@@ -432,7 +477,7 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
             return True
 
         def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
-            raise DeclarationContractViolation(
+            raise _AttackerViolation(
                 plugin="P",
                 node_id="n",
                 run_id="r",
@@ -463,6 +508,185 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
         run_runtime_checks(inputs=inputs, outputs=outputs)
     # Dispatcher wrote the authoritative name onto the violation.
     assert exc_info.value.contract_name == "authentic_contract_name"
+
+
+# ---------------------------------------------------------------------------
+# H5 Layer 1 — deny-by-default payload_schema validation at construction
+# (issue elspeth-3956044fb7). Every DeclarationContractViolation subclass
+# declares a TypedDict payload_schema; __init__ validates the caller-
+# supplied payload against it before the payload is deep-frozen. Unknown
+# keys and missing required keys raise at construction so undeclared
+# payload shapes cannot reach the Landscape audit record (where the
+# secret-scrubber's closed-set patterns are only a best-effort last line
+# of defence).
+# ---------------------------------------------------------------------------
+
+
+class _StrictPayload(TypedDict):
+    """Schema with both required and optional keys for Layer 1 tests."""
+
+    required_a: str
+    required_b: int
+    optional_c: NotRequired[str]
+
+
+class _StrictViolation(DeclarationContractViolation):
+    payload_schema = _StrictPayload
+
+
+def test_layer1_unknown_payload_key_rejected_at_construction() -> None:
+    """The canonical deny-by-default acceptance bullet from the H5 issue:
+    a contract cannot accidentally include an undeclared key like
+    ``debug_connection_string`` in its violation payload — construction
+    fails loudly before the payload ever reaches the scrubber.
+    """
+    with pytest.raises(ValueError, match="undeclared"):
+        _StrictViolation(
+            plugin="P",
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="tk",
+            payload={
+                "required_a": "x",
+                "required_b": 1,
+                "debug_connection_string": "Server=x;Password=leak;",
+            },
+            message="m",
+        )
+
+
+def test_layer1_missing_required_payload_key_rejected() -> None:
+    """Schema equality semantics: payload must carry every required key.
+    Catches a contract that forgot to populate a declared field — the
+    audit record would otherwise omit triage-critical context.
+    """
+    with pytest.raises(ValueError, match="missing required"):
+        _StrictViolation(
+            plugin="P",
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="tk",
+            payload={"required_a": "x"},  # required_b missing
+            message="m",
+        )
+
+
+def test_layer1_notrequired_key_omission_accepted() -> None:
+    """``NotRequired[X]`` keys on the TypedDict may be absent; only required
+    keys are mandatory. Respects TypedDict semantics so contracts can
+    carry context-dependent optional fields.
+    """
+    v = _StrictViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"required_a": "x", "required_b": 1},
+        message="m",
+    )
+    assert "optional_c" not in v.payload
+
+
+def test_layer1_exact_schema_match_accepted() -> None:
+    """Happy path: payload carrying every required key plus every optional
+    key constructs successfully and the payload is recorded."""
+    v = _StrictViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"required_a": "x", "required_b": 1, "optional_c": "y"},
+        message="m",
+    )
+    assert v.payload["required_a"] == "x"
+    assert v.payload["required_b"] == 1
+    assert v.payload["optional_c"] == "y"
+
+
+def test_layer1_base_class_rejects_undeclared_payload_keys() -> None:
+    """The base ``DeclarationContractViolation`` inherits an empty default
+    schema — the only accepted payload is ``{}``. Subclasses MUST override
+    ``payload_schema`` to carry any keys. This is the deny-by-default gate:
+    a violation raised without a declared schema cannot carry arbitrary
+    (potentially secret-bearing) data into the audit trail.
+    """
+    with pytest.raises(ValueError, match="undeclared"):
+        DeclarationContractViolation(
+            plugin="P",
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="tk",
+            payload={"anything": "x"},
+            message="m",
+        )
+
+
+def test_layer1_base_class_accepts_empty_payload() -> None:
+    """The empty default schema accepts only ``{}``. This lets minimal
+    plumbing tests (and future violations that genuinely carry no context)
+    construct the base class without subclassing."""
+    v = DeclarationContractViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={},
+        message="m",
+    )
+    assert dict(v.payload) == {}
+
+
+def test_layer1_subclass_without_schema_override_inherits_empty_schema() -> None:
+    """A subclass that forgets to declare ``payload_schema`` inherits the
+    empty default — any non-empty payload is still rejected. This closes
+    the footgun where a contract author creates a subclass but doesn't
+    remember Layer 1 requires declaring the schema.
+    """
+
+    class _ForgetfulViolation(DeclarationContractViolation):
+        pass  # no payload_schema override
+
+    with pytest.raises(ValueError, match="undeclared"):
+        _ForgetfulViolation(
+            plugin="P",
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="tk",
+            payload={"field": "x"},
+            message="m",
+        )
+
+
+def test_layer1_schema_not_a_typeddict_raises_helpful_error() -> None:
+    """A subclass that declares a non-TypedDict as ``payload_schema`` must
+    fail at construction with a clear message. ``register_declaration_contract``
+    only checks ``isinstance(schema, type)`` — it does not verify TypedDict
+    shape, so the violation must catch this late to avoid silent
+    corruption at serialization time."""
+
+    class _PlainClass:
+        pass
+
+    class _BadViolation(DeclarationContractViolation):
+        payload_schema = _PlainClass
+
+    with pytest.raises(TypeError, match="TypedDict"):
+        _BadViolation(
+            plugin="P",
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="tk",
+            payload={},
+            message="m",
+        )
 
 
 def test_clear_registry_without_pytest_env_raises(monkeypatch) -> None:
