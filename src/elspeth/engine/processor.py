@@ -63,7 +63,6 @@ from elspeth.engine.executors import (
     TransformExecutor,
 )
 from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
-from elspeth.engine.executors.pass_through import verify_pass_through
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
@@ -753,28 +752,35 @@ class RowProcessor:
                     # the OrchestrationInvariantError with its own message.
                     pass
             else:
-                # TRANSFORM mode: direct verify_pass_through call (dispatcher bypass).
-                # ADR-009 §Clause 2 defines batch-homogeneous semantics: the effective
-                # input_fields is the intersection of every buffered token's contract.
-                # RuntimeCheckInputs carries no override_input_fields field, so routing
-                # through the dispatcher would silently use one token's field set instead
-                # of the true batch intersection — producing an incorrect check. Phase 2B
-                # will extend RuntimeCheckInputs with override_input_fields to close this
-                # gap; tracked in filigree obs elspeth-obs-f7773241ad (to be promoted into
-                # the Track 2 Phase 2B epic in Task 13).
+                # TRANSFORM mode: batch-homogeneous intersection (ADR-009 §Clause 2).
+                # Every emitted row must preserve the intersection of every
+                # buffered token's input contract — the weakest shared guarantee.
+                # Route through the ADR-010 dispatcher and carry that intersection
+                # via ``RuntimeCheckInputs.override_input_fields`` so
+                # ``PassThroughDeclarationContract.runtime_check`` and every other
+                # registered contract (future Phase 2B/2C adopters) all see the
+                # same caller-computed field set. Previously this branch called
+                # ``verify_pass_through`` directly, silently skipping every
+                # non-pass-through contract on the batch-flush TRANSFORM path —
+                # regressing ADR-010's "single source of truth for runtime VAL
+                # dispatch" claim (filigree issue elspeth-ef8d5d92ff).
                 input_fields = frozenset.intersection(*per_input_field_sets)
                 # Triggering token is None for timeout flushes — use the first
-                # buffered token's lineage as the exception's identifying row.
+                # buffered token's lineage as the identifying row for
+                # RuntimeCheckInputs and any raised violation.
                 identity_token = fctx.triggering_token or fctx.buffered_tokens[0]
-                verify_pass_through(
-                    input_fields=input_fields,
-                    emitted_rows=emitted,
-                    static_contract=static_contract,
-                    transform_name=fctx.transform.name,
-                    transform_node_id=transform_node_id_str,
-                    run_id=self._run_id,
-                    row_id=identity_token.row_id,
-                    token_id=identity_token.token_id,
+                run_runtime_checks(
+                    inputs=RuntimeCheckInputs(
+                        plugin=fctx.transform,
+                        node_id=transform_node_id_str,
+                        run_id=self._run_id,
+                        row_id=identity_token.row_id,
+                        token_id=identity_token.token_id,
+                        input_row=identity_token.row_data,
+                        static_contract=static_contract,
+                        override_input_fields=input_fields,
+                    ),
+                    outputs=RuntimeCheckOutputs(emitted_rows=tuple(emitted)),
                 )
         except PassThroughContractViolation as violation:
             self._record_flush_violation(fctx, violation)

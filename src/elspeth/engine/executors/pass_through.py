@@ -2,19 +2,24 @@
 
 ADR-008 introduced the runtime cross-check for ``passes_through_input``
 transforms; ADR-009 §Clause 2 extracts it here so the single-token executor
-and the batch aggregation flush path share one verification implementation.
+and the batch aggregation flush path share one verification implementation;
+ADR-010 §Decision 3 makes ``run_runtime_checks`` the single call site for
+per-row declaration-contract dispatch.
 
-Two call sites import ``verify_pass_through``:
+The only caller of ``verify_pass_through`` is
+``PassThroughDeclarationContract.runtime_check`` in this module. Both the
+single-token path (``engine/executors/transform.py``) and the batch-flush
+path (``engine/processor.py::RowProcessor._cross_check_flush_output``) now
+reach it by way of ``run_runtime_checks`` — not by importing
+``verify_pass_through`` directly. The batch-flush TRANSFORM branch passes
+the batch-wide input intersection through
+``RuntimeCheckInputs.override_input_fields`` (ADR-009 §Clause 2
+batch-homogeneous semantics).
 
-- ``engine/executors/transform.py::TransformExecutor.execute_transform`` —
-  single-token and mixin-based batch-aware transforms.
-- ``engine/processor.py::RowProcessor._cross_check_flush_output`` — batch
-  aggregation flush path.
-
-The OpenTelemetry violation counter lives at module level so both call sites
-increment the same instrument. Cardinality is bounded by the annotated
-transform set (short, known at startup), so the ``transform=<name>`` tag is
-safe.
+The OpenTelemetry violation counter lives at module level so every
+invocation increments the same instrument. Cardinality is bounded by the
+annotated transform set (short, known at startup), so the
+``transform=<name>`` tag is safe.
 """
 
 from __future__ import annotations
@@ -160,13 +165,26 @@ class PassThroughDeclarationContract:
         # node_id must be set. These guards were previously in the now-deleted
         # TransformExecutor._cross_check_pass_through; they now live here so
         # the dispatcher path (ADR-010 §Decision 3) enforces the same invariants.
-        input_contract = inputs.input_row.contract
-        if input_contract is None:
-            raise FrameworkBugError(
-                f"Transform {inputs.plugin.name!r} has passes_through_input=True "
-                f"but input row has no contract. Framework invariant violated."
-            )
-        input_fields = frozenset(fc.normalized_name for fc in input_contract.fields)
+        #
+        # ADR-009 §Clause 2 batch-homogeneous semantics: when the caller (the
+        # batch-flush TRANSFORM branch of RowProcessor._cross_check_flush_output)
+        # supplies ``override_input_fields``, the effective input-field set is
+        # the caller-computed intersection of every buffered token's contract,
+        # not any single row's. In that case we skip the
+        # ``input_row.contract`` derivation entirely — the caller has already
+        # done the work and the single ``input_row`` cannot represent the
+        # batch intersection. Single-token callers (TransformExecutor) pass
+        # ``None`` and keep the original per-row derivation.
+        if inputs.override_input_fields is not None:
+            input_fields = inputs.override_input_fields
+        else:
+            input_contract = inputs.input_row.contract
+            if input_contract is None:
+                raise FrameworkBugError(
+                    f"Transform {inputs.plugin.name!r} has passes_through_input=True "
+                    f"but input row has no contract. Framework invariant violated."
+                )
+            input_fields = frozenset(fc.normalized_name for fc in input_contract.fields)
 
         transform_node_id = inputs.plugin.node_id
         if transform_node_id is None:

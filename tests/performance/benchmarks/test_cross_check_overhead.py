@@ -156,7 +156,12 @@ def test_batch_flush_cross_check_within_budget(benchmark: pytest.FixtureRequest)
 
     def run_batch_cross_check() -> None:
         # Batch-homogeneous input_fields — intersection across every
-        # buffered input contract. Identical to ``_cross_check_flush_output``.
+        # buffered input contract. Measures the primitive cost; the live
+        # ``_cross_check_flush_output`` path additionally routes through
+        # ``run_runtime_checks`` and ``PassThroughDeclarationContract`` (ADR-010
+        # §Decision 3), which adds the dispatcher-overhead benchmark's
+        # measured overhead (~15 µs median) on top — well within the 1500 µs
+        # budget for a 64-row batch.
         per_input_field_sets = [frozenset(fc.normalized_name for fc in row.contract.fields) for row in buffered_rows]
         input_fields = frozenset.intersection(*per_input_field_sets)
         verify_pass_through(

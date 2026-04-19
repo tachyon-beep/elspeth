@@ -41,6 +41,19 @@ class RuntimeCheckInputs:
     ``static_contract`` carries the DAG-validator-computed guarantee set for
     the current plugin's output (required by pass-through's verify_pass_through
     per pass_through.py:39). Contracts that do not need it can ignore it.
+
+    ``override_input_fields`` lets the caller name the effective input-field
+    set explicitly rather than have the contract derive it from
+    ``input_row.contract.fields``. This exists because batch-flush
+    TRANSFORM mode (``RowProcessor._cross_check_flush_output``) must check
+    emitted rows against the *intersection* of every buffered token's
+    contract (ADR-009 §Clause 2 batch-homogeneous semantics) — a shape the
+    single ``input_row`` cannot express. Contracts that need the input
+    fields MUST use ``override_input_fields`` when it is not ``None``;
+    otherwise they fall back to ``input_row.contract.fields``. The
+    single-token call site in ``TransformExecutor`` passes ``None``, so
+    existing behaviour is unchanged there. ``frozenset`` is immutable so no
+    freeze guard is required in ``__post_init__``.
     """
 
     plugin: Any
@@ -50,6 +63,7 @@ class RuntimeCheckInputs:
     token_id: str
     input_row: Any
     static_contract: frozenset[str]
+    override_input_fields: frozenset[str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
