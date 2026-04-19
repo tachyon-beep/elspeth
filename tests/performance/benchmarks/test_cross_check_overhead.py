@@ -18,8 +18,16 @@ from __future__ import annotations
 
 import pytest
 
+# Importing pass_through ensures PassThroughDeclarationContract registers
+# itself via its module-level side-effect before any benchmark runs.
+import elspeth.engine.executors.pass_through  # noqa: F401
+from elspeth.contracts.declaration_contracts import (
+    RuntimeCheckInputs,
+    RuntimeCheckOutputs,
+)
 from elspeth.contracts.errors import PassThroughContractViolation
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
 from elspeth.engine.executors.pass_through import verify_pass_through
 from elspeth.testing import make_field
 
@@ -172,5 +180,71 @@ def test_batch_flush_cross_check_within_budget(benchmark: pytest.FixtureRequest)
     assert median_sec < 1500e-6, f"Batch-flush median {median_sec * 1e6:.1f}us exceeds 1500us budget"
     assert p99_bound < 3000e-6, (
         f"Batch-flush mean+3*stddev {p99_bound * 1e6:.1f}us exceeds 3000us budget "
+        f"(mean={mean_sec * 1e6:.1f}us, stddev={stddev_sec * 1e6:.1f}us)"
+    )
+
+
+@pytest.mark.performance
+@pytest.mark.benchmark(group="dispatcher-overhead")
+def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.FixtureRequest) -> None:
+    """Reviewer O2/O7: quantify the per-row dispatcher overhead vs direct
+    verify_pass_through call. Budget: median ≤ 2 µs per registered contract
+    for applies_to short-circuit + one invoked contract.
+
+    The dispatcher adds one ``registered_declaration_contracts()`` call + one
+    ``applies_to()`` short-circuit + one ``runtime_check()`` invocation on top
+    of the direct ``verify_pass_through`` call. Total budget: median ≤ 27 µs
+    (25 µs ADR-008 baseline + 2 µs dispatcher overhead budget per ADR-010
+    §NFR).
+
+    Setup mirrors the direct-call benchmark: a 200-field input row with a
+    matching 200-field output row so the pass-through contract holds and the
+    happy path is exercised. The plugin stub has ``passes_through_input=True``
+    so ``PassThroughDeclarationContract.applies_to`` returns True and
+    ``runtime_check`` is invoked.
+    """
+
+    class _PassThroughPlugin:
+        """Minimal plugin stub satisfying PassThroughDeclarationContract.applies_to."""
+
+        name = "bench_dispatcher"
+        node_id = "bench_dispatcher_node"
+        passes_through_input = True
+        _output_schema_config = None
+
+    input_contract = _build_wide_contract(200)
+    output_contract = _build_wide_contract(200)
+
+    input_row = PipelineRow({f"field_{i}": f"v{i}" for i in range(200)}, input_contract)
+    output_row = PipelineRow({f"field_{i}": f"v{i}" for i in range(200)}, output_contract)
+    static_contract = frozenset(fc.normalized_name for fc in input_contract.fields)
+
+    plugin = _PassThroughPlugin()
+    inputs = RuntimeCheckInputs(
+        plugin=plugin,
+        node_id=plugin.node_id,
+        run_id="bench_run",
+        row_id="bench_row",
+        token_id="bench_token",
+        input_row=input_row,
+        static_contract=static_contract,
+    )
+    outputs = RuntimeCheckOutputs(emitted_rows=(output_row,))
+
+    def run_dispatcher() -> None:
+        run_runtime_checks(inputs=inputs, outputs=outputs)
+
+    benchmark(run_dispatcher)
+
+    stats = benchmark.stats
+    median_sec = stats["median"]
+    mean_sec = stats["mean"]
+    stddev_sec = stats["stddev"]
+    p99_bound = mean_sec + 3 * stddev_sec
+    assert median_sec < 27e-6, (
+        f"Dispatcher median {median_sec * 1e6:.1f}us exceeds 27us budget (25us direct + 2us dispatcher overhead per ADR-010 §NFR)"
+    )
+    assert p99_bound < 54e-6, (
+        f"Dispatcher mean+3*stddev {p99_bound * 1e6:.1f}us exceeds 54us budget "
         f"(mean={mean_sec * 1e6:.1f}us, stddev={stddev_sec * 1e6:.1f}us)"
     )
