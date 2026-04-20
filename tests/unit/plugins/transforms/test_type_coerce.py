@@ -521,3 +521,27 @@ class TestTypeCoerceBehavior:
         assert metadata["fields_coerced"] == ["price"]
         assert metadata["fields_unchanged"] == ["quantity"]
         assert metadata["rules_evaluated"] == 2
+
+    def test_fixed_schema_initializes_output_schema_config_and_aligns_output_contract(self, ctx: "PluginContext") -> None:
+        """TypeCoerce must emit the configured contract mode, not the upstream one."""
+        from elspeth.plugins.transforms.type_coerce import TypeCoerce
+        from elspeth.testing import make_pipeline_row
+
+        transform = TypeCoerce(
+            {
+                "schema": {
+                    "mode": "fixed",
+                    "fields": ["quantity: int"],
+                },
+                "conversions": [{"field": "quantity", "to": "int"}],
+            }
+        )
+        row = make_pipeline_row({"quantity": "42"})
+
+        result = transform.process(row, ctx)
+
+        assert transform._output_schema_config is not None
+        assert transform._output_schema_config.mode == "fixed"
+        assert result.row is not None
+        assert result.row.contract.mode == "FIXED"
+        assert result.row.contract.locked is True

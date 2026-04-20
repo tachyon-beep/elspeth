@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts import (
     Artifact,
@@ -45,6 +46,7 @@ from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.model_loaders import (
     ArtifactLoader,
     BatchLoader,
@@ -302,41 +304,49 @@ class ExecutionRepository:
         # Atomic conditional UPDATE: guard against already-terminal status in the
         # WHERE clause (same TOCTOU-safe pattern as complete_batch).
         terminal_values = [s.value for s in _TERMINAL_NODE_STATE_STATUSES]
-        with self._db.connection() as conn:
-            update_result = conn.execute(
-                node_states_table.update()
-                .where(node_states_table.c.state_id == state_id)
-                .where(node_states_table.c.status.notin_(terminal_values))
-                .values(
-                    status=status,
-                    output_hash=output_hash,
-                    duration_ms=duration_ms,
-                    error_json=error_json,
-                    success_reason_json=success_reason_json,
-                    context_after_json=context_json,
-                    completed_at=timestamp,
-                )
-            )
-            if update_result.rowcount == 0:
-                # Distinguish "not found" from "already terminal".
-                existing = conn.execute(select(node_states_table.c.status).where(node_states_table.c.state_id == state_id)).fetchone()
-                if existing is not None:
-                    raise AuditIntegrityError(
-                        f"Cannot complete node state {state_id}: current status {existing.status!r} is already terminal. "
-                        f"Terminal node states are immutable."
+        try:
+            with self._db.connection() as conn:
+                update_result = conn.execute(
+                    node_states_table.update()
+                    .where(node_states_table.c.state_id == state_id)
+                    .where(node_states_table.c.status.notin_(terminal_values))
+                    .values(
+                        status=status,
+                        output_hash=output_hash,
+                        duration_ms=duration_ms,
+                        error_json=error_json,
+                        success_reason_json=success_reason_json,
+                        context_after_json=context_json,
+                        completed_at=timestamp,
                     )
-                raise AuditIntegrityError(
-                    f"complete_node_state: zero rows affected for state_id={state_id} — target row does not exist (audit data corruption)"
                 )
+                if update_result.rowcount == 0:
+                    # Distinguish "not found" from "already terminal".
+                    existing = conn.execute(select(node_states_table.c.status).where(node_states_table.c.state_id == state_id)).fetchone()
+                    if existing is not None:
+                        raise LandscapeRecordError(
+                            f"Cannot complete node state {state_id}: current status {existing.status!r} is already terminal. "
+                            f"Terminal node states are immutable."
+                        )
+                    raise LandscapeRecordError(
+                        f"complete_node_state: zero rows affected for state_id={state_id} — target row does not exist (audit data corruption)"
+                    )
 
-            row = conn.execute(select(node_states_table).where(node_states_table.c.state_id == state_id)).fetchone()
+                row = conn.execute(select(node_states_table).where(node_states_table.c.state_id == state_id)).fetchone()
+        except SQLAlchemyError as exc:
+            raise LandscapeRecordError(
+                f"complete_node_state failed for state_id={state_id} — database rejected audit update: {type(exc).__name__}: {exc}"
+            ) from exc
 
         if row is None:
-            raise AuditIntegrityError(f"NodeState {state_id} not found after update — database corruption or transaction failure")
-        result = self._node_state_loader.load(row)
+            raise LandscapeRecordError(f"NodeState {state_id} not found after update — database corruption or transaction failure")
+        try:
+            result = self._node_state_loader.load(row)
+        except AuditIntegrityError as exc:
+            raise LandscapeRecordError(f"NodeState {state_id} became unreadable immediately after completion: {exc}") from exc
         # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
         if isinstance(result, NodeStateOpen):
-            raise AuditIntegrityError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
+            raise LandscapeRecordError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
         return result
 
     def get_node_state(self, state_id: str) -> NodeState | None:

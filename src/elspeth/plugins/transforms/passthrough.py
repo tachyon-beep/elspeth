@@ -38,7 +38,7 @@ class PassThrough(BaseTransform):
 
     name = "passthrough"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:fb92ac7641ea6f32"
+    source_file_hash: str | None = "sha256:2163447d28c7063d"
     config_model = PassThroughConfig
 
     # ADR-007: PassThrough emits a deep copy of the input row unchanged, so every
@@ -51,6 +51,7 @@ class PassThrough(BaseTransform):
         self._initialize_declared_input_fields(cfg)
 
         self._schema_config = cfg.schema_config
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")
 
     @classmethod

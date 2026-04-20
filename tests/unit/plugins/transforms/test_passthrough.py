@@ -123,3 +123,25 @@ class TestPassThrough:
 
         # Note: PassThrough has same input/output schema, so always compatible
         # More complex transforms tested separately
+
+    def test_fixed_schema_initializes_output_schema_config_and_aligns_output_contract(self, ctx: PluginContext) -> None:
+        """Declared fixed schemas must drive runtime output contracts."""
+        from elspeth.plugins.transforms.passthrough import PassThrough
+
+        transform = PassThrough(
+            {
+                "schema": {
+                    "mode": "fixed",
+                    "fields": ["id: int", "name: str"],
+                },
+            }
+        )
+        row = make_pipeline_row({"id": 1, "name": "alice"})
+
+        result = transform.process(row, ctx)
+
+        assert transform._output_schema_config is not None
+        assert transform._output_schema_config.mode == "fixed"
+        assert result.row is not None
+        assert result.row.contract.mode == "FIXED"
+        assert result.row.contract.locked is True

@@ -86,7 +86,7 @@ class Truncate(BaseTransform):
 
     name = "truncate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:4eeeded01f37bae4"
+    source_file_hash: str | None = "sha256:ea3d11dbc7ab4031"
     config_model = TruncateConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -98,6 +98,7 @@ class Truncate(BaseTransform):
         self._strict = cfg.strict
 
         self._schema_config = cfg.schema_config
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "Truncate")
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:

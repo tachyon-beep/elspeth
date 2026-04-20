@@ -447,29 +447,56 @@ class TestHasRefResolveInvariant:
         result = service.resolve("u1", "TEST_KEY", auth_provider_type="local")
         assert result is None
 
-    def test_resolve_emits_once_per_process_when_fingerprint_key_missing(
+    def test_resolve_re_emits_after_rate_limit_window_when_fingerprint_key_missing(
         self,
         service: WebSecretService,
         user_store: UserSecretStore,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A missing ELSPETH_FINGERPRINT_KEY on the resolve path must emit
-        exactly one operational breadcrumb per process, not one per call.
+        """A missing fingerprint key must re-emit after the cooldown window.
 
-        The resolve path cannot raise — the pipeline-validation aggregation
-        invariant requires all misses to bucket into a single
-        SecretResolutionError — so the typed signal is turned into an slog
-        event.  Without memoization the server would flood logs with one
-        entry per secret lookup (potentially thousands per composition),
-        which drowns out the signal operators need.
+        The resolve path still cannot raise, but operators tailing logs
+        after the first failure need a periodic breadcrumb that the
+        deployment is still unhealthy.
         """
         from elspeth.web.secrets import service as service_module
 
         user_store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
-        # Reset the process-global memo so the test is deterministic
-        # regardless of test ordering.
-        monkeypatch.setattr(service_module, "_fingerprint_missing_logged", False)
+        monkeypatch.setattr(service_module, "_fingerprint_missing_last_logged_at", None)
+        monkeypatch.setattr(service_module, "_fingerprint_missing_suppressed", 0)
+        monotonic_values = iter((100.0, 100.0, 161.0))
+        monkeypatch.setattr(service_module.time, "monotonic", lambda: next(monotonic_values))
+
+        with patch.object(service_module, "_slog") as mock_slog:
+            service.resolve("u1", "KEY", auth_provider_type="local")
+            service.resolve("u1", "KEY", auth_provider_type="local")
+            service.resolve("u1", "KEY", auth_provider_type="local")
+
+        assert mock_slog.error.call_count == 2
+        args, kwargs = mock_slog.error.call_args_list[0]
+        assert args[0] == "secret_resolve_fingerprint_key_missing"
+        assert "ELSPETH_FINGERPRINT_KEY" in kwargs["detail"]
+        assert kwargs["suppressed_since_last_emit"] == 0
+
+        args, kwargs = mock_slog.error.call_args_list[1]
+        assert args[0] == "secret_resolve_fingerprint_key_missing"
+        assert kwargs["suppressed_since_last_emit"] == 1
+
+    def test_resolve_suppresses_repeated_logs_within_rate_limit_window(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Repeated misses inside the cooldown window must not flood logs."""
+        from elspeth.web.secrets import service as service_module
+
+        user_store.set_secret("KEY", value="val", user_id="u1", auth_provider_type="local")
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
+        monkeypatch.setattr(service_module, "_fingerprint_missing_last_logged_at", None)
+        monkeypatch.setattr(service_module, "_fingerprint_missing_suppressed", 0)
+        monkeypatch.setattr(service_module.time, "monotonic", lambda: 100.0)
 
         with patch.object(service_module, "_slog") as mock_slog:
             service.resolve("u1", "KEY", auth_provider_type="local")
@@ -477,9 +504,7 @@ class TestHasRefResolveInvariant:
             service.resolve("u1", "OTHER", auth_provider_type="local")
 
         assert mock_slog.error.call_count == 1
-        args, kwargs = mock_slog.error.call_args
-        assert args[0] == "secret_resolve_fingerprint_key_missing"
-        assert "ELSPETH_FINGERPRINT_KEY" in kwargs["detail"]
+        assert service_module._fingerprint_missing_suppressed == 2
 
     def test_resolve_emits_breadcrumb_only_for_fingerprint_missing_not_generic_miss(
         self,
@@ -496,7 +521,8 @@ class TestHasRefResolveInvariant:
 
         # Fingerprint key IS set (the autouse fixture provides it).  The
         # lookup just misses — this is a normal validation condition.
-        monkeypatch.setattr(service_module, "_fingerprint_missing_logged", False)
+        monkeypatch.setattr(service_module, "_fingerprint_missing_last_logged_at", None)
+        monkeypatch.setattr(service_module, "_fingerprint_missing_suppressed", 0)
 
         with patch.object(service_module, "_slog") as mock_slog:
             result = service.resolve("u1", "NONEXISTENT", auth_provider_type="local")

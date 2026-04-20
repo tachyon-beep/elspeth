@@ -275,7 +275,7 @@ class TypeCoerce(BaseTransform):
 
     name = "type_coerce"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:4efd014678abb13c"
+    source_file_hash: str | None = "sha256:0525d9beaed7e674"
     config_model = TypeCoerceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -284,6 +284,7 @@ class TypeCoerce(BaseTransform):
         self._initialize_declared_input_fields(cfg)
         self._conversions = cfg.conversions
         self._schema_config = cfg.schema_config
+        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
 
         self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,

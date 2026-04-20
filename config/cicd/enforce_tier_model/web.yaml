@@ -406,7 +406,7 @@ allow_hits:
   reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
   safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=964779ff896c073d
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=2e5b2c59c17e0e70
   owner: web-secrets
   reason: |
     TOCTOU boundary — resolve() runs has-check and get-call across multiple
@@ -431,22 +431,23 @@ allow_hits:
     TestHasRefResolveInvariant.test_resolve_returns_none_when_user_secret_deleted_between_has_and_get
     and test_resolve_returns_none_when_server_env_cleared_between_has_and_get.
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=a72995a3ebcc2bd6
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=b26443a3d6d31bb6
   owner: web-secrets
   reason: |
     FingerprintKeyMissingError is handled separately (rather than inside the
-    TOCTOU-bucket catch below) so the once-per-process deployment breadcrumb
+    TOCTOU-bucket catch below) so the rate-limited deployment breadcrumb
     can fire.  The None return preserves the same aggregation contract
     (resolve() returning None for unresolvable refs), but the deployment
     misconfiguration — ELSPETH_FINGERPRINT_KEY unset — is no longer silent
-    to operators.  See _log_fingerprint_missing_once().
+    to operators.  See _log_fingerprint_missing_rate_limited().
   safety: |
     None return matches the aggregation contract (TOCTOU catch below).
-    Breadcrumb is memoized at module scope so flood of resolve calls
-    against a misconfigured deployment emits exactly one slog.error event,
-    not one per call.  Other exception classes (SQLAlchemyError, OSError)
-    still propagate.  Regression coverage:
-    test_resolve_emits_once_per_process_when_fingerprint_key_missing and
+    Breadcrumb is rate-limited at module scope so flood of resolve calls
+    against a misconfigured deployment emits periodic slog.error events
+    with a suppressed-call count, not one per call. Other exception
+    classes (SQLAlchemyError, OSError) still propagate. Regression coverage:
+    test_resolve_re_emits_after_rate_limit_window_when_fingerprint_key_missing,
+    test_resolve_suppresses_repeated_logs_within_rate_limit_window, and
     test_resolve_emits_breadcrumb_only_for_fingerprint_missing_not_generic_miss.
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
@@ -1023,7 +1024,7 @@ allow_hits:
     reading slog events and response bodies can distinguish
     middleware-bypassed failures from normal ones.
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=9dbfc1889b72c96e
+- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=ec5907c3811b5cb7
   owner: web-secrets
   reason: |
     Narrow catch by design. check_user_ref_resolvable is the typed-error

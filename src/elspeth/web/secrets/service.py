@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import structlog
 
 from elspeth.contracts.secrets import (
@@ -17,26 +19,18 @@ from elspeth.web.secrets.user_store import UserSecretStore
 
 _slog = structlog.get_logger()
 
-# Once-per-process memo so an unconfigured deployment emits exactly one
-# deployment-error breadcrumb on the resolve path, not one per request.
-# The ``resolve`` method aggregates FingerprintKeyMissingError into
-# "secret absent" to preserve its pipeline-validation contract, which
-# would otherwise make an unset ``ELSPETH_FINGERPRINT_KEY`` silently look
-# like "no secrets are configured" across the whole server — with no
-# audit record, no telemetry, and no log.  The ``check_user_ref_resolvable``
-# HTTP path surfaces the same error typed (mapped to 503), but any
-# non-HTTP caller (pipeline validation, composer tool execution) would
-# otherwise be invisible to operators.
-#
-# Module-level flag because the intent IS process-global: the second and
-# subsequent silencings carry zero operational information beyond the
-# first.  Test suites reset it via
-# ``monkeypatch.setattr(module, "_fingerprint_missing_logged", False)``.
-_fingerprint_missing_logged = False
+# Rate-limit deployment-error breadcrumbs so an unconfigured environment
+# remains visible to operators without flooding logs on every secret
+# lookup. The resolve path intentionally swallows
+# ``FingerprintKeyMissingError`` to preserve its "secret absent"
+# contract, so this emission is the operator-visible signal.
+_FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS = 60.0
+_fingerprint_missing_last_logged_at: float | None = None
+_fingerprint_missing_suppressed = 0
 
 
-def _log_fingerprint_missing_once() -> None:
-    """Emit a once-per-process breadcrumb when the resolve path swallows
+def _log_fingerprint_missing_rate_limited() -> None:
+    """Emit a rate-limited breadcrumb when the resolve path swallows
     FingerprintKeyMissingError.
 
     This is a web-layer deployment-error slog emission, matching the
@@ -54,10 +48,19 @@ def _log_fingerprint_missing_once() -> None:
     would be preferred but the web layer does not yet have an
     operational-metric emitter distinct from slog.
     """
-    global _fingerprint_missing_logged
-    if _fingerprint_missing_logged:
+    global _fingerprint_missing_last_logged_at, _fingerprint_missing_suppressed
+
+    now_monotonic = time.monotonic()
+    if (
+        _fingerprint_missing_last_logged_at is not None
+        and now_monotonic - _fingerprint_missing_last_logged_at < _FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS
+    ):
+        _fingerprint_missing_suppressed += 1
         return
-    _fingerprint_missing_logged = True
+
+    suppressed_since_last_emit = _fingerprint_missing_suppressed
+    _fingerprint_missing_last_logged_at = now_monotonic
+    _fingerprint_missing_suppressed = 0
     _slog.error(
         "secret_resolve_fingerprint_key_missing",
         detail=(
@@ -65,6 +68,8 @@ def _log_fingerprint_missing_once() -> None:
             "call to WebSecretService.resolve() will return None until "
             "the deployment environment is fixed."
         ),
+        emit_interval_seconds=_FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS,
+        suppressed_since_last_emit=suppressed_since_last_emit,
     )
 
 
@@ -145,14 +150,15 @@ class WebSecretService:
             value, ref = self._server_store.get_secret(name)
             return ResolvedSecret(name=name, value=value, scope="server", fingerprint=ref.fingerprint)
         except FingerprintKeyMissingError:
-            # Deployment misconfiguration breadcrumb (once per process) —
-            # see ``_log_fingerprint_missing_once`` docstring.  Returning
-            # None preserves the pipeline-validation aggregation contract
-            # (misses bucketed into a single SecretResolutionError), but
-            # without this emission the deployment error would be
-            # invisible to operators until they hit the /validate HTTP
-            # route or the ``set_user_secret`` write path.
-            _log_fingerprint_missing_once()
+            # Deployment misconfiguration breadcrumb (rate limited) —
+            # see ``_log_fingerprint_missing_rate_limited`` docstring.
+            # Returning None preserves the pipeline-validation
+            # aggregation contract (misses bucketed into a single
+            # SecretResolutionError), but without this emission the
+            # deployment error would be invisible to operators until
+            # they hit the /validate HTTP route or the
+            # ``set_user_secret`` write path.
+            _log_fingerprint_missing_rate_limited()
             return None
         except (SecretNotFoundError, SecretDecryptionError):
             return None

@@ -159,7 +159,7 @@ allow_hits:
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
-- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=7d2319a46ba5b7dd
+- key: core/landscape/execution_repository.py:R6:ExecutionRepository:begin_node_state:fp=929580000007cefd
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash which always succeeds; audit trail integrity maintained

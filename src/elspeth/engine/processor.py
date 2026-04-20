@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
-import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.freeze import deep_freeze
@@ -63,6 +62,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import FailureInfo
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.clock import DEFAULT_CLOCK
 from elspeth.engine.executors import (
@@ -1527,11 +1527,7 @@ class RowProcessor:
                 error_hash=error_hash,
                 context=audit_context,
             )
-        except contract_errors.TIER_1_ERRORS:
-            raise
-        except (TypeError, AttributeError, KeyError, NameError):
-            raise
-        except Exception as record_failure:
+        except LandscapeRecordError as record_failure:
             raise AuditIntegrityError(
                 f"Failed to record {type(violation).__name__} FAILED outcome for token {token.token_id!r} "
                 f"on source boundary (node={self._source_node_id!r}). Audit trail is INCOMPLETE — "
@@ -1550,11 +1546,7 @@ class RowProcessor:
                     context=audit_context,
                 ),
             )
-        except contract_errors.TIER_1_ERRORS:
-            raise
-        except (TypeError, AttributeError, KeyError, NameError):
-            raise
-        except Exception as record_failure:
+        except LandscapeRecordError as record_failure:
             raise AuditIntegrityError(
                 f"Failed to record FAILED source node state for token {token.token_id!r} "
                 f"on source boundary (node={self._source_node_id!r}). Audit trail is INCOMPLETE — "

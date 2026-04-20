@@ -168,3 +168,24 @@ class TestTruncateBehavior:
         transform = Truncate({"fields": {"title": 5}, "schema": DYNAMIC_SCHEMA})
         transform.close()
         transform.close()  # Idempotent
+
+    def test_fixed_schema_initializes_output_schema_config_and_aligns_output_contract(self, ctx: PluginContext) -> None:
+        """Truncate must preserve configured schema mode on emitted rows."""
+        transform = Truncate(
+            {
+                "fields": {"title": 5},
+                "schema": {
+                    "mode": "fixed",
+                    "fields": ["title: str"],
+                },
+            }
+        )
+        row = make_pipeline_row({"title": "Hello World"})
+
+        result = transform.process(row, ctx)
+
+        assert transform._output_schema_config is not None
+        assert transform._output_schema_config.mode == "fixed"
+        assert result.row is not None
+        assert result.row.contract.mode == "FIXED"
+        assert result.row.contract.locked is True
