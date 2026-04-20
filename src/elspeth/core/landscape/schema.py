@@ -27,7 +27,15 @@ metadata = MetaData()
 # Explicit SQLite schema epoch for pre-1.0 compatibility policy.
 # Stored in PRAGMA user_version so future releases can distinguish
 # "intentionally old schema, needs migration" from "runtime-required field".
-SQLITE_SCHEMA_EPOCH = 2
+#
+# Epoch history (pre-1.0 policy — bumps require DB recreation):
+#   1 → initial
+#   2 → Phase 5 schema contracts + operation I/O hashes (pre-ADR-010)
+#   3 → ADR-010 M3 (issue elspeth-1c8185dfec): runtime_val_manifest_json
+#        column on runs_table records the declaration + Tier-1 registries
+#        in effect at run start, enabling auditor queries like "which VAL
+#        contracts were in force during run X?"
+SQLITE_SCHEMA_EPOCH = 3
 
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.
@@ -64,6 +72,14 @@ runs_table = Table(
     # Stores the run-level schema contract with field resolution and types
     Column("schema_contract_json", Text),  # Full contract with field resolution and types
     Column("schema_contract_hash", String(16)),  # version_hash for integrity verification
+    # Runtime-VAL manifest for audit trail (ADR-010 M3, issue elspeth-1c8185dfec).
+    # Captures the set of DeclarationContract and Tier-1 error classes
+    # registered at bootstrap, serialized as canonical JSON. Enables auditor
+    # queries like "which VAL contracts were in force during run X?" and
+    # regression detection across runs ("are TIER_1_ERRORS the same between
+    # runs X and Y?"). The column is nullable for resume paths and for
+    # tests that skip the full bootstrap path.
+    Column("runtime_val_manifest_json", Text),
 )
 
 # === Nodes (Plugin Instances) ===

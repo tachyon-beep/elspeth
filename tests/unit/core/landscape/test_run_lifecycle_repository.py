@@ -88,6 +88,122 @@ class TestBeginRunDirect:
         assert repo.get_run("nonexistent") is None
 
 
+class TestBeginRunRuntimeValManifest:
+    """ADR-010 M3 (issue elspeth-1c8185dfec): runtime VAL manifest recorded at begin_run.
+
+    The declaration-contract + Tier-1-error registries must be serialized
+    into the runs row so an auditor can later answer "which VAL contracts
+    were in force during run X?" and "are TIER_1_ERRORS the same across
+    runs X and Y?".
+
+    Tests explicitly set up the registry state they need via
+    ``_snapshot_registry_for_tests`` / ``_restore_registry_snapshot_for_tests``
+    rather than relying on module-import side-effects; at unit-test level
+    ``pass_through.py`` is not automatically imported so the production
+    registry population never runs.
+    """
+
+    @staticmethod
+    def _fetch_manifest(db: LandscapeDB, run_id: str) -> dict[str, object]:
+        from sqlalchemy import select
+
+        with db.connection() as conn:
+            row = conn.execute(select(runs_table.c.runtime_val_manifest_json).where(runs_table.c.run_id == run_id)).fetchone()
+        assert row is not None, f"runs row for {run_id!r} missing"
+        manifest_json = row[0]
+        assert manifest_json is not None, "runtime_val_manifest_json is NULL"
+        return json.loads(manifest_json)
+
+    def test_manifest_records_declaration_contract_registry(self) -> None:
+        """Registered DeclarationContract instances appear in the manifest."""
+        # Force registration by importing pass_through — the production
+        # bootstrap path reaches it through Orchestrator.run(); unit tests
+        # skip that so we import explicitly.
+        import elspeth.contracts.declaration_contracts as dc
+        from elspeth.engine.executors import pass_through  # noqa: F401  (import side-effect)
+
+        snapshot = dc._snapshot_registry_for_tests()
+        try:
+            db = make_landscape_db()
+            ops = DatabaseOps(db)
+            repo = RunLifecycleRepository(db, ops, RunLoader())
+            repo.begin_run(config={}, canonical_version="v1", run_id="m3-declarations")
+            manifest = self._fetch_manifest(db, "m3-declarations")
+        finally:
+            dc._restore_registry_snapshot_for_tests(snapshot)
+
+        declaration_entries = manifest["declaration_contracts"]
+        assert isinstance(declaration_entries, list)
+        names = {entry["name"] for entry in declaration_entries}
+        assert "passes_through_input" in names
+        for entry in declaration_entries:
+            assert set(entry.keys()) == {"name", "class_name", "class_module"}
+            assert entry["class_module"].startswith("elspeth.")
+
+    def test_manifest_records_expected_contract_manifest(self) -> None:
+        """The EXPECTED_CONTRACTS closed-set manifest (C2) is captured verbatim."""
+        from elspeth.contracts.declaration_contracts import EXPECTED_CONTRACTS
+
+        db, _ = _make_repo(run_id="m3-manifest")
+        manifest = self._fetch_manifest(db, "m3-manifest")
+        assert set(manifest["expected_contract_manifest"]) == set(EXPECTED_CONTRACTS)
+
+    def test_manifest_records_tier_1_errors(self) -> None:
+        """Every Tier-1 error class with its reason is in the manifest."""
+        from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_reason
+
+        db, _ = _make_repo(run_id="m3-tier-1")
+        manifest = self._fetch_manifest(db, "m3-tier-1")
+
+        tier_1_entries = manifest["tier_1_errors"]
+        assert isinstance(tier_1_entries, list)
+        assert len(tier_1_entries) > 0  # at least FrameworkBugError + AuditIntegrityError
+
+        recorded_by_name = {(e["class_module"], e["class_name"]): e["reason"] for e in tier_1_entries}
+        for cls in TIER_1_ERRORS:
+            key = (cls.__module__, cls.__name__)
+            assert key in recorded_by_name, f"Tier-1 class {key} missing from manifest"
+            assert recorded_by_name[key] == tier_1_reason(cls)
+
+    def test_manifest_changes_when_declaration_registry_is_patched(self) -> None:
+        """Temporarily removing a contract from the registry changes the recorded manifest.
+
+        Required regression guard from the M3 ticket: if a future refactor
+        accidentally captured a *static* snapshot of the registry (e.g.
+        cached at import time), both runs would show the same manifest
+        because the cache would dominate the per-run query. By asserting
+        the patched run differs from the unpatched run we confirm the
+        manifest is computed at begin_run time, not earlier.
+        """
+        import elspeth.contracts.declaration_contracts as dc
+        from elspeth.engine.executors import pass_through  # noqa: F401  (import side-effect)
+
+        db = make_landscape_db()
+        ops = DatabaseOps(db)
+        repo = RunLifecycleRepository(db, ops, RunLoader())
+
+        snapshot = dc._snapshot_registry_for_tests()
+        try:
+            # Baseline: registry populated by pass_through import.
+            repo.begin_run(config={}, canonical_version="v1", run_id="m3-baseline")
+            baseline_manifest = self._fetch_manifest(db, "m3-baseline")
+
+            # Patch the registry to simulate a contract being absent.
+            # Pytest-gated via _require_pytest_process inside dc (C3).
+            dc._REGISTRY[:] = []  # type: ignore[attr-defined]  # test-only patch under pytest gate
+            repo.begin_run(config={}, canonical_version="v1", run_id="m3-patched")
+            patched_manifest = self._fetch_manifest(db, "m3-patched")
+        finally:
+            dc._restore_registry_snapshot_for_tests(snapshot)
+
+        assert baseline_manifest["declaration_contracts"] != patched_manifest["declaration_contracts"]
+        assert patched_manifest["declaration_contracts"] == []
+        # Expected-manifest (C2) is a module-level frozen constant, so it
+        # is identical across both runs — this confirms the manifest and
+        # the live registry are serialized independently.
+        assert baseline_manifest["expected_contract_manifest"] == patched_manifest["expected_contract_manifest"]
+
+
 class TestFinalizeRunDirect:
     """Direct tests for finalize_run (grade computation + completion)."""
 

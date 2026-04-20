@@ -31,6 +31,28 @@ if sys.flags.optimize != 0:
     )
 
 # ---------------------------------------------------------------------------
+# DeclarationContract registry population
+# ---------------------------------------------------------------------------
+#
+# ADR-010 Phase 2A introduced a set-equality bootstrap check against
+# EXPECTED_CONTRACTS (issue elspeth-b03c6112c0 / C2). Every contract in
+# the manifest MUST be registered before ``prepare_for_run()`` is called,
+# or bootstrap raises. Registration is a module-import side effect — see
+# ``src/elspeth/contracts/declaration_contracts.py`` CLOSED-SET comment.
+#
+# Test files that invoke the orchestrator (directly or via ``elspeth
+# run``) but do not transitively import the contract-defining executors
+# hit an empty-registry bootstrap failure. In xdist-distributed runs the
+# failure manifests non-deterministically depending on which worker
+# receives which test file first. Importing the executor module at root
+# conftest level populates the registry once per pytest process (xdist
+# workers included) so every test starts from the production registry
+# state. Individual tests that need to clear or mutate the registry use
+# the ``_snapshot_registry_for_tests`` / ``_restore_registry_snapshot_for_tests``
+# helpers, which are pytest-gated (issue elspeth-cc511e7234 / C3).
+from elspeth.engine.executors import pass_through  # noqa: F401  (import side-effect registers PassThroughDeclarationContract)
+
+# ---------------------------------------------------------------------------
 # Marker Registration
 # ---------------------------------------------------------------------------
 

@@ -52,6 +52,10 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("checkpoints", "coalesce_state_json"),
     # Mechanical change detection — hash of plugin source file at registration
     ("nodes", "source_file_hash"),
+    # ADR-010 M3 (issue elspeth-1c8185dfec): runtime VAL manifest — set of
+    # declaration contracts + Tier-1 error classes registered at bootstrap,
+    # serialized as canonical JSON on the runs row.
+    ("runs", "runtime_val_manifest_json"),
 )
 
 # Required foreign keys for audit integrity (Tier 1 trust).

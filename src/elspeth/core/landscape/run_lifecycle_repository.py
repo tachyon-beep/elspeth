@@ -23,6 +23,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw
+from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.dependency_config import PreflightResult
 from elspeth.core.landscape._database_ops import DatabaseOps
@@ -96,6 +97,15 @@ class RunLifecycleRepository:
             schema_contract_json = audit_record.to_json()
             schema_contract_hash = schema_contract.version_hash()
 
+        # ADR-010 M3 (issue elspeth-1c8185dfec): record the declaration +
+        # Tier-1 registries that were in force at run start. Canonicalised
+        # JSON so the value is stable across Python invocations and suitable
+        # for hash-based cross-run regression detection. Must run AFTER the
+        # orchestrator has frozen both registries; begin_run is called from
+        # Orchestrator.run() which sequences prepare_for_run() (which
+        # freezes) before this call.
+        runtime_val_manifest_json = canonical_json(build_runtime_val_manifest())
+
         run = Run(
             run_id=run_id,
             started_at=timestamp,
@@ -118,6 +128,7 @@ class RunLifecycleRepository:
                 source_schema_json=source_schema_json,
                 schema_contract_json=schema_contract_json,
                 schema_contract_hash=schema_contract_hash,
+                runtime_val_manifest_json=runtime_val_manifest_json,
             )
         )
 
