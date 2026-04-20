@@ -77,6 +77,7 @@ from elspeth.contracts.errors import (
     TIER_1_ERRORS,
     AuditIntegrityError,
     ContractMergeError,
+    DeclaredRequiredInputFieldsViolation,
     FrameworkBugError,
     OrchestrationInvariantError,
     PassThroughContractViolation,
@@ -411,6 +412,30 @@ class TestTransformExecutor:
         ctx = make_context()
 
         with pytest.raises(PluginContractViolation, match="input validation failed"):
+            executor.execute_transform(transform, token, ctx)
+
+        transform.process.assert_not_called()
+
+    def test_declared_input_fields_violation_precedes_generic_input_validation(self) -> None:
+        """Missing declared fields surface as ADR-013 violations before schema validation."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+        transform = _make_transform(declared_input_fields=frozenset({"customer_id"}))
+
+        from elspeth.contracts import PluginSchema
+
+        class StrictSchema(PluginSchema):
+            customer_id: str
+
+        transform.input_schema = StrictSchema
+        token = TokenInfo(
+            row_id="row_declared_required",
+            token_id="tok_declared_required",
+            row_data=make_row({"account_id": "acc-1"}),
+        )
+        ctx = make_context()
+
+        with pytest.raises(DeclaredRequiredInputFieldsViolation, match=r"missing \['customer_id'\]"):
             executor.execute_transform(transform, token, ctx)
 
         transform.process.assert_not_called()

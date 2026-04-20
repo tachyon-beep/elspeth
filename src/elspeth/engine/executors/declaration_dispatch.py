@@ -177,9 +177,11 @@ def _dispatch(
 def run_pre_emission_checks(inputs: PreEmissionInputs) -> None:
     """Dispatch all applicable pre-emission contracts for ``inputs.plugin``.
 
-    Called from ``TransformExecutor`` between input validation and
-    ``transform.process()`` (F2 §Fix direction). First adopter landing:
-    Phase 2B's ``DeclaredRequiredFieldsContract`` will register here.
+    Called from ``TransformExecutor`` before generic input validation and
+    before ``transform.process()``. This preserves first-class attribution
+    for declaration mismatches when a plugin's ``input_schema`` would also
+    reject the same missing field. First adopter landing: Phase 2B's
+    ``DeclaredRequiredFieldsContract`` will register here.
     """
     _dispatch(
         site=DispatchSite.PRE_EMISSION,

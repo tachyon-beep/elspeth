@@ -248,22 +248,13 @@ class TransformExecutor:
                         f"output fields collide with fields already present in the row."
                     )
 
-            # --- INPUT VALIDATION (pre-execution) ---
-            # Validate input against input_schema before calling process().
-            # Wrong types at a transform boundary are upstream plugin bugs (Tier 2).
-            try:
-                transform.input_schema.model_validate(input_dict)
-            except ValidationError as e:
-                raise PluginContractViolation(
-                    f"Transform '{transform.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
-                ) from e
-
             # --- PRE-EMISSION DECLARATION-CONTRACT DISPATCH (ADR-010 §Decision 3 + F2) ---
-            # Fires BEFORE transform.process() so pre-emission adopters (Phase 2B's
-            # DeclaredRequiredFieldsContract) can validate input-row field presence
-            # before the transform crashes on a missing field — which would
-            # mis-attribute the failure to the transform's process() body rather
-            # than to the declaration violation.
+            # Fires BEFORE generic input_schema validation so pre-emission adopters
+            # (Phase 2B's DeclaredRequiredFieldsContract) can attribute missing
+            # declared input fields to ADR-013 rather than collapsing them into a
+            # generic validation error when the schema requires the same field.
+            # It also runs BEFORE transform.process() so a missing-field crash in
+            # the plugin body cannot steal attribution from the declaration surface.
             #
             # effective_input_fields is derived once here and reused by the
             # post-emission call site (panel F1 resolution: contracts use the
@@ -286,6 +277,19 @@ class TransformExecutor:
                     effective_input_fields=effective_input_fields,
                 ),
             )
+
+            # --- INPUT VALIDATION (pre-execution) ---
+            # Validate input against input_schema before calling process().
+            # Wrong types at a transform boundary are upstream plugin bugs (Tier 2).
+            # ADR-013 declaration checks run first so missing declared fields stay
+            # on the declaration-contract audit surface instead of being diluted
+            # into ordinary schema validation failures.
+            try:
+                transform.input_schema.model_validate(input_dict)
+            except ValidationError as e:
+                raise PluginContractViolation(
+                    f"Transform '{transform.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
+                ) from e
 
             # Set state_id and node_id on context for external call recording
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
