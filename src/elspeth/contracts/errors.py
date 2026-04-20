@@ -7,9 +7,10 @@ recording.
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, NotRequired, Required, TypedDict
 
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
+from elspeth.contracts.declaration_contracts import DeclarationContractViolation
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
 
 # Re-export FrameworkBugError which now lives in tier_registry for the
@@ -794,6 +795,31 @@ class OrchestrationInvariantError(Exception):
     """
 
     pass
+
+
+class DeclaredOutputFieldsPayload(TypedDict):
+    """Audit payload for ADR-011 declared-output-fields mismatches."""
+
+    declared: Required[list[str]]
+    runtime_observed: Required[list[str]]
+    missing: Required[list[str]]
+
+
+@tier_1_error(
+    reason="ADR-011: declared output-field lie corrupts downstream lineage",
+    caller_module=__name__,
+)
+class DeclaredOutputFieldsViolation(DeclarationContractViolation):
+    """Raised when a transform emits rows missing declared output fields.
+
+    ``declared_output_fields`` is trusted by DAG/schema propagation. If a
+    transform advertises output fields the emitted rows do not actually carry,
+    downstream lineage and required-field reasoning become silently wrong.
+    This is audit-integrity corruption, not a row-level data error, so the
+    violation is Tier 1 and must never be absorbed by ``on_error`` routing.
+    """
+
+    payload_schema: ClassVar[type] = DeclaredOutputFieldsPayload
 
 
 # TIER-2: Plugin retry signal — transient operational failure eligible for RetryManager retry, not a system corruption or framework bug.

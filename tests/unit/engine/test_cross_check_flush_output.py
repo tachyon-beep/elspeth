@@ -55,6 +55,7 @@ def _make_flush_transform(
     transform.on_success = None
     transform.is_batch_aware = True
     transform.creates_tokens = False
+    transform.declared_output_fields = frozenset()
     transform.passes_through_input = passes_through_input
     transform._output_schema_config = output_schema_config
     return transform

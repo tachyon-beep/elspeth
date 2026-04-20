@@ -9,6 +9,8 @@ from typing import NotRequired, TypedDict
 import pytest
 
 from elspeth.contracts.declaration_contracts import (
+    BatchFlushInputs,
+    BatchFlushOutputs,
     DeclarationContract,
     DeclarationContractViolation,
     DispatchSite,
@@ -18,6 +20,8 @@ from elspeth.contracts.declaration_contracts import (
     _clear_registry_for_tests,
     freeze_declaration_registry,
     implements_dispatch_site,
+    negative_example_bundles,
+    positive_example_does_not_apply_bundles,
     register_declaration_contract,
     registered_declaration_contracts,
 )
@@ -351,6 +355,80 @@ def test_negative_example_fires_the_violation() -> None:
     method = getattr(c, bundle.site.value)
     with pytest.raises(DeclarationContractViolation):
         method(*bundle.args)
+
+
+def test_negative_example_bundle_helper_collects_all_claimed_sites() -> None:
+    class _MultiSiteContract(DeclarationContract):
+        name = "multi_site_examples"
+        payload_schema: type = _FakePayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+            return None
+
+        @implements_dispatch_site("batch_flush_check")
+        def batch_flush_check(self, inputs: BatchFlushInputs, outputs: BatchFlushOutputs) -> None:
+            return None
+
+        @classmethod
+        def negative_example(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(object(), object()))
+
+        @classmethod
+        def negative_example_batch_flush(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.BATCH_FLUSH, args=(object(), object()))
+
+        @classmethod
+        def positive_example_does_not_apply(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(object(), object()))
+
+        @classmethod
+        def positive_example_does_not_apply_batch_flush(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.BATCH_FLUSH, args=(object(), object()))
+
+    contract = _MultiSiteContract()
+    assert tuple(bundle.site for bundle in negative_example_bundles(contract)) == (
+        DispatchSite.POST_EMISSION,
+        DispatchSite.BATCH_FLUSH,
+    )
+    assert tuple(bundle.site for bundle in positive_example_does_not_apply_bundles(contract)) == (
+        DispatchSite.POST_EMISSION,
+        DispatchSite.BATCH_FLUSH,
+    )
+
+
+def test_negative_example_bundle_helper_requires_every_claimed_site() -> None:
+    class _MissingCoverageContract(DeclarationContract):
+        name = "missing_site_example"
+        payload_schema: type = _FakePayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+            return None
+
+        @implements_dispatch_site("batch_flush_check")
+        def batch_flush_check(self, inputs: BatchFlushInputs, outputs: BatchFlushOutputs) -> None:
+            return None
+
+        @classmethod
+        def negative_example(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(object(), object()))
+
+        @classmethod
+        def positive_example_does_not_apply(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(object(), object()))
+
+    contract = _MissingCoverageContract()
+    with pytest.raises(RuntimeError, match="coverage mismatch"):
+        negative_example_bundles(contract)
+    with pytest.raises(RuntimeError, match="coverage mismatch"):
+        positive_example_does_not_apply_bundles(contract)
 
 
 def test_violation_to_audit_dict_contains_all_identity_fields() -> None:

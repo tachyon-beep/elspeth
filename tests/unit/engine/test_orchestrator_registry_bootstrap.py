@@ -12,15 +12,22 @@ Test isolation strategy:
 
 from __future__ import annotations
 
+import ast
+import importlib
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
-# Module-level import so ``_isolate_both_registries`` snapshots a
-# fully-populated registry even when this file is the *only* one pytest
-# collects (``pytest test_orchestrator_registry_bootstrap.py::test_x`` in
-# isolation). Without this, the first test's ``importlib.reload(pt_mod)``
-# triggers a duplicate-registration error because the initial import and the
-# reload both fire the module-level side-effect against a fresh registry.
-import elspeth.engine.executors.pass_through  # noqa: F401  — registers PassThroughDeclarationContract
+# Module-level import so ``_isolate_both_registries`` snapshots a fully-
+# populated registry even when this file is the *only* one pytest collects
+# (``pytest test_orchestrator_registry_bootstrap.py::test_x`` in isolation).
+# The authoritative bootstrap surface lives in declaration_contract_bootstrap.py;
+# reloading that module replays every production contract registration in one
+# place.
+import elspeth.engine.executors.declaration_contract_bootstrap  # noqa: F401
 
 
 @pytest.fixture()
@@ -66,6 +73,30 @@ def _isolate_both_registries():
     tr._FROZEN = saved_tr_frozen
 
 
+def _replay_bootstrap_import_surface() -> None:
+    """Reload every executor module imported by the bootstrap surface.
+
+    ``importlib.reload(declaration_contract_bootstrap)`` alone is insufficient
+    after ``_clear_registry_for_tests()`` because Python caches the modules
+    imported *by* the bootstrap file. Parsing the bootstrap module's direct
+    imports keeps the test aligned with the authoritative production import
+    surface without hard-coding ``pass_through.py`` here.
+    """
+    import elspeth.engine.executors.declaration_contract_bootstrap as dc_bootstrap
+
+    bootstrap_path = Path(dc_bootstrap.__file__)
+    tree = ast.parse(bootstrap_path.read_text(), filename=str(bootstrap_path))
+    prefix = "elspeth.engine.executors."
+
+    for node in tree.body:
+        if not isinstance(node, ast.Import):
+            continue
+        for alias in node.names:
+            if not alias.name.startswith(prefix):
+                continue
+            importlib.reload(importlib.import_module(alias.name))
+
+
 def test_bootstrap_asserts_registry_non_empty(_isolate_both_registries) -> None:
     """If no contracts are registered at bootstrap, prepare_for_run() must raise
     RuntimeError naming every contract missing from the manifest.
@@ -80,8 +111,8 @@ def test_bootstrap_asserts_registry_non_empty(_isolate_both_registries) -> None:
     )
     from elspeth.engine.orchestrator import prepare_for_run
 
-    # Clear the registry WITHOUT re-importing pass_through.py — simulates an
-    # import-order bug where the module-level side-effect never fired.
+    # Clear the registry WITHOUT re-importing the bootstrap module — simulates
+    # an import-order bug where the authoritative import surface never fired.
     _clear_registry_for_tests()
 
     with pytest.raises(RuntimeError) as exc_info:
@@ -143,9 +174,9 @@ def test_bootstrap_fails_when_specific_contract_conditionally_skipped(_isolate_b
         def positive_example_does_not_apply(cls):
             raise NotImplementedError
 
-    # Clear registry, then register ONLY an unexpected contract — pass_through
-    # is missing. The registry is non-empty, so a bare truthiness check would
-    # pass. The manifest-equality check must catch this.
+    # Clear registry, then register ONLY an unexpected contract — the bootstrap
+    # surface is missing. The registry is non-empty, so a bare truthiness check
+    # would pass. The manifest-equality check must catch this.
     _clear_registry_for_tests()
     register_declaration_contract(_UnexpectedContract())
 
@@ -221,25 +252,24 @@ def test_bootstrap_passes_when_registry_exactly_matches_manifest(_isolate_both_r
     """The happy path: registry == EXPECTED_CONTRACTS → no exception, registries freeze.
 
     Verifies the set-equality check permits the nominal case. Uses the
-    importlib.reload pattern to re-trigger pass_through.py's module-level
-    registration side-effect after _clear_registry_for_tests().
+    importlib.reload pattern to re-trigger the authoritative bootstrap module
+    after _clear_registry_for_tests().
     """
-    import importlib
-
     from elspeth.contracts.declaration_contracts import (
+        EXPECTED_CONTRACT_SITES,
         _clear_registry_for_tests,
         declaration_registry_is_frozen,
     )
     from elspeth.engine.orchestrator import prepare_for_run
 
     _clear_registry_for_tests()
-    import elspeth.engine.executors.pass_through as pt_mod
-
-    importlib.reload(pt_mod)
+    _replay_bootstrap_import_surface()
 
     # Must not raise.
     prepare_for_run()
     assert declaration_registry_is_frozen()
+    assert len(EXPECTED_CONTRACT_SITES) == 2
+    assert frozenset(EXPECTED_CONTRACT_SITES.keys()) == frozenset({"passes_through_input", "declared_output_fields"})
 
 
 def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> None:
@@ -248,8 +278,6 @@ def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> Non
     Subsequent registration attempts must raise FrameworkBugError, proving the
     registry cannot be extended after bootstrap completes.
     """
-    import importlib
-
     from elspeth.contracts.declaration_contracts import (
         _clear_registry_for_tests,
         register_declaration_contract,
@@ -257,12 +285,10 @@ def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> Non
     from elspeth.contracts.tier_registry import FrameworkBugError
     from elspeth.engine.orchestrator import prepare_for_run
 
-    # Clear registry and re-import pass_through.py to repopulate
-    # PassThroughDeclarationContract via its module-level side-effect.
+    # Clear registry and re-import the authoritative bootstrap module to
+    # repopulate every production contract via its module-level side-effects.
     _clear_registry_for_tests()
-    import elspeth.engine.executors.pass_through as pt_mod
-
-    importlib.reload(pt_mod)
+    _replay_bootstrap_import_surface()
 
     # Bootstrap: assert non-empty, freeze both registries.
     prepare_for_run()
@@ -306,17 +332,13 @@ def test_bootstrap_freezes_tier_registry(_isolate_both_registries) -> None:
 
     Subsequent @tier_1_error registrations must raise FrameworkBugError.
     """
-    import importlib
-
     from elspeth.contracts.declaration_contracts import _clear_registry_for_tests
     from elspeth.contracts.tier_registry import FrameworkBugError, tier_1_error
     from elspeth.engine.orchestrator import prepare_for_run
 
-    # Clear declaration registry and reload pass_through to repopulate.
+    # Clear declaration registry and reload the bootstrap module to repopulate.
     _clear_registry_for_tests()
-    import elspeth.engine.executors.pass_through as pt_mod
-
-    importlib.reload(pt_mod)
+    _replay_bootstrap_import_surface()
 
     prepare_for_run()
 
@@ -326,6 +348,38 @@ def test_bootstrap_freezes_tier_registry(_isolate_both_registries) -> None:
         @tier_1_error(reason="post-bootstrap: must fail", caller_module=__name__)
         class _TooLate(Exception):
             pass
+
+
+def test_prepare_for_run_succeeds_in_subprocess_via_bootstrap_import_surface() -> None:
+    """Production-shape regression: prepare_for_run() must work in a fresh process.
+
+    This is the real failure mode the explicit bootstrap module fixes: a fresh
+    process importing ``elspeth.engine.orchestrator`` and calling
+    ``prepare_for_run()`` must succeed without pytest importing
+    ``pass_through.py`` as a side effect first.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    env = dict(os.environ)
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = f"{repo_root / 'src'}:{existing_pythonpath}" if existing_pythonpath else str(repo_root / "src")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from elspeth.engine.orchestrator import prepare_for_run; prepare_for_run()",
+        ],
+        check=False,
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, (
+        "prepare_for_run() failed in a fresh subprocess despite the bootstrap "
+        f"module. stdout={completed.stdout!r} stderr={completed.stderr!r}"
+    )
 
 
 def test_resume_calls_prepare_for_run() -> None:

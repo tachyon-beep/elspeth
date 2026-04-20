@@ -315,17 +315,17 @@ allow_hits:
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BoundaryOutputs.rows — identical pattern to RuntimeCheckOutputs freeze guard."
   safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R2:_collect_contract_sites:fp=2f181ad5a78f20fb
+- key: contracts/declaration_contracts.py:R2:_collect_contract_sites:fp=8376b30e71f33603
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) getattr(candidate, _DISPATCH_SITE_MARKER_ATTR, None) probes for the @implements_dispatch_site decorator marker on contract methods. The default-None is semantic: 'this method did not declare a dispatch site'. Using direct attribute access (bare .x access) would crash on every non-decorated method walked (applies_to, negative_example, __init_subclass__, etc.), defeating the discovery pass. This is the canonical marker-discovery pattern the @implements_dispatch_site decorator contract specifies."
   safety: Invalid marker values (site_name not in _DISPATCH_SITE_VALUES) raise FrameworkBugError immediately — no silent fallthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=9b95ae98072dd18c
+- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=7b46b783c9f243a7
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) nominal ABC gate — register_declaration_contract uses isinstance(contract, DeclarationContract) to enforce ADR-010 §Alternative 3 nominal-typing posture (rejects structural Protocol matching). This is a Tier-1 trust boundary check at the registry's entry point; a non-DeclarationContract passed here is a framework bug that MUST crash loudly before the registry freezes. TypeError raised with a self-diagnosing message."
   safety: TypeError raised immediately naming ADR-010 §Alternative 3 rationale
   expires: null
-- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=67c63bf8c80d249c
+- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=b9392f464c0af94b
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) payload_schema type gate — register_declaration_contract uses isinstance(payload_schema, type) to reject non-type payload_schema values (must be a TypedDict class, not an instance or string). Tier-1 trust boundary at registry entry; caller-supplied bad shape is a framework bug that crashes before the registry freezes. Predates H2 (C2 closure); H2 preserves the same pattern."
   safety: TypeError raised immediately with diagnostic message

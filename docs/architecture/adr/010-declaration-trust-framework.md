@@ -45,7 +45,7 @@ ADRs 007, 008, and 009 established a single-declaration implementation of the "d
 
 ADR-008 §Explicit scope boundary deferred the wider class. ADR-010 generalises the pattern into a framework that future declarations adopt in ~200 LOC per declaration, without duplicating the static/runtime/invariant trio.
 
-**Rule-of-three satisfaction:** ADR-009 §Alternatives Considered #1 rejected "DeclarationContract protocol up front" as premature abstraction. ADR-010 satisfies rule-of-three by paper-sketching `DeclaredOutputFieldsContract` against the protocol during Task 0 (before Task 1 implementation) — if the sketch exposes protocol gaps, they are closed in Tasks 1–5. The protocol shape in 2A reflects what the sketch validated, plus what Phase 2B's `CreatesTokensContract` preview (Task 11) exercised.
+**Rule-of-three satisfaction:** ADR-009 §Alternatives Considered #1 rejected "DeclarationContract protocol up front" as premature abstraction. ADR-010 satisfies rule-of-three by paper-sketching `DeclaredOutputFieldsContract` against the protocol during Task 0 (before Task 1 implementation) — if the sketch exposes protocol gaps, they are closed in Tasks 1–5. The protocol shape in 2A reflects what that sketch validated. The old `CreatesTokensContract` preview used during 2A exploration was later retired by ADR-015 once the codebase confirmed `creates_tokens` is a permission flag, not an obligation.
 
 ## Decision
 
@@ -252,6 +252,11 @@ boundary subtype — see the paired-landing rule below.
 | `post_emission_check` | 1 | NO — 2 more needed | `PassThroughDeclarationContract` |
 | `batch_flush_check` | 1 | NO — 2 more needed | `PassThroughDeclarationContract` |
 | `boundary_check` | 0 | NO — 3 needed | paired adopters: `SourceGuaranteedFieldsContract` (`elspeth-48c8a9762b`) + `SinkRequiredFieldsContract` (`elspeth-ea5e9e4759`) — 2C |
+
+**ADR-015 note (2026-04-20).** `CreatesTokensContract` is rejected as a
+Phase 2B production adopter. `creates_tokens` remains a permission flag, not
+a "must expand" runtime declaration. Remove it from future adopter-candidate
+lists unless a later ADR changes the flag's semantics first.
 
 **Paired-landing rule (boundary subtype).** The boundary subtype lands
 with BOTH `SourceGuaranteedFieldsContract` AND `SinkRequiredFieldsContract`

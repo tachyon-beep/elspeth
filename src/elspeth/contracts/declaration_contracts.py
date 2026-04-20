@@ -374,13 +374,121 @@ class ExampleBundle:
       * BATCH_FLUSH: ``(BatchFlushInputs, BatchFlushOutputs)``
       * BOUNDARY: ``(BoundaryInputs, BoundaryOutputs)``
 
-    Contracts implementing multiple sites return the bundle for whichever
-    site their negative_example primarily exercises. Phase 2B may refine
-    if per-site harness coverage needs formalising.
+    Multi-site contracts return one bundle from the base classmethod
+    (typically the post-emission case) and may add site-specific helper
+    classmethods named ``negative_example_<site>`` /
+    ``positive_example_does_not_apply_<site>`` where ``<site>`` is one of
+    ``pre_emission``, ``post_emission``, ``batch_flush``, ``boundary``.
+    ``negative_example_bundles(contract)`` and
+    ``positive_example_does_not_apply_bundles(contract)`` collect these and
+    enforce coverage for every claimed dispatch site.
     """
 
     site: DispatchSite
     args: tuple[Any, ...]
+
+
+_EXAMPLE_SITE_SUFFIXES: Mapping[DispatchSite, str] = MappingProxyType(
+    {
+        DispatchSite.PRE_EMISSION: "pre_emission",
+        DispatchSite.POST_EMISSION: "post_emission",
+        DispatchSite.BATCH_FLUSH: "batch_flush",
+        DispatchSite.BOUNDARY: "boundary",
+    }
+)
+
+
+def _resolve_contract_example_method(
+    contract_cls: type[DeclarationContract],
+    method_name: str,
+) -> Callable[[], object]:
+    """Resolve a known example helper through the class MRO.
+
+    ``hasattr`` is banned in this codebase because it silently swallows
+    exceptions from descriptors. We instead walk the MRO explicitly over a
+    closed allowset of helper names derived from ``DispatchSite``.
+    """
+    for owner in contract_cls.__mro__:
+        namespace = vars(owner)
+        if method_name not in namespace:
+            continue
+        descriptor = namespace[method_name]
+        bound = descriptor.__get__(None, contract_cls)
+        if not callable(bound):
+            raise TypeError(
+                f"{contract_cls.__name__}.{method_name} must resolve to a callable example helper, got {type(bound).__name__!r}."
+            )
+        return cast(Callable[[], object], bound)
+    raise AttributeError(f"{contract_cls.__name__} has no attribute {method_name!r}")
+
+
+def _contract_declares_example_method(
+    contract_cls: type[DeclarationContract],
+    method_name: str,
+) -> bool:
+    """Return whether ``method_name`` appears anywhere in ``contract_cls``'s MRO."""
+    return any(method_name in vars(owner) for owner in contract_cls.__mro__)
+
+
+def _collect_example_bundles(
+    contract: DeclarationContract,
+    *,
+    base_method_name: str,
+) -> tuple[ExampleBundle, ...]:
+    """Return every example bundle declared for ``contract``.
+
+    Phase 2B multi-site adopters need shared-harness coverage at every
+    claimed dispatch site. The base classmethod remains mandatory for
+    backwards compatibility; additional sites are surfaced via optional
+    ``<base_method_name>_<site>`` helpers whose suffix is derived from the
+    dispatch-site enum.
+    """
+    contract_cls = type(contract)
+    claimed_sites = frozenset(DispatchSite(site_name) for site_name in contract_sites(contract))
+    method_names: list[str] = [base_method_name]
+    for site in DispatchSite:
+        if site not in claimed_sites:
+            continue
+        helper_name = f"{base_method_name}_{_EXAMPLE_SITE_SUFFIXES[site]}"
+        if _contract_declares_example_method(contract_cls, helper_name):
+            method_names.append(helper_name)
+
+    bundles: list[ExampleBundle] = []
+    seen_sites: set[DispatchSite] = set()
+    for method_name in method_names:
+        method = _resolve_contract_example_method(contract_cls, method_name)
+        bundle = method()
+        if type(bundle) is not ExampleBundle:
+            raise TypeError(f"{contract_cls.__name__}.{method_name}() must return ExampleBundle, got {type(bundle).__name__!r}.")
+        if bundle.site in seen_sites:
+            raise RuntimeError(
+                f"{contract_cls.__name__} declared duplicate {base_method_name} coverage for site "
+                f"{bundle.site.value!r}. Each claimed dispatch site must have exactly one example bundle."
+            )
+        bundles.append(bundle)
+        seen_sites.add(bundle.site)
+
+    missing_sites = claimed_sites - seen_sites
+    extra_sites = seen_sites - claimed_sites
+    if missing_sites or extra_sites:
+        raise RuntimeError(
+            f"{contract_cls.__name__}.{base_method_name} coverage mismatch: claimed={sorted(site.value for site in claimed_sites)!r}, "
+            f"provided={sorted(site.value for site in seen_sites)!r}, "
+            f"missing={sorted(site.value for site in missing_sites)!r}, "
+            f"extra={sorted(site.value for site in extra_sites)!r}. "
+            f"Multi-site contracts must supply one ExampleBundle per claimed dispatch site."
+        )
+    return tuple(bundles)
+
+
+def negative_example_bundles(contract: DeclarationContract) -> tuple[ExampleBundle, ...]:
+    """Return the negative-example bundle(s) for every claimed site."""
+    return _collect_example_bundles(contract, base_method_name="negative_example")
+
+
+def positive_example_does_not_apply_bundles(contract: DeclarationContract) -> tuple[ExampleBundle, ...]:
+    """Return the non-applying example bundle(s) for every claimed site."""
+    return _collect_example_bundles(contract, base_method_name="positive_example_does_not_apply")
 
 
 # =============================================================================
@@ -701,6 +809,9 @@ class DeclarationContract(ABC):
       * Implement ``applies_to(plugin) -> bool``.
       * Implement ``negative_example(cls) -> ExampleBundle``.
       * Implement ``positive_example_does_not_apply(cls) -> ExampleBundle``.
+      * For multi-site contracts, add optional site helpers named
+        ``negative_example_<site>`` / ``positive_example_does_not_apply_<site>``
+        so the shared invariant harness covers every claimed site.
       * Override at least ONE dispatch method AND decorate it.
 
     Registration-time enforcement (``register_declaration_contract``) rejects
@@ -719,13 +830,24 @@ class DeclarationContract(ABC):
     @abstractmethod
     def negative_example(cls) -> ExampleBundle:
         """Return a site-tagged scenario that MUST trigger the contract's
-        violation when passed to the contract's decorated dispatch method."""
+        violation when passed to the contract's decorated dispatch method.
+
+        Multi-site contracts may add ``negative_example_<site>`` helpers for
+        their additional claimed sites; the harness collects them via
+        ``negative_example_bundles(contract)``.
+        """
 
     @classmethod
     @abstractmethod
     def positive_example_does_not_apply(cls) -> ExampleBundle:
         """Return a site-tagged scenario for which ``applies_to`` MUST
-        return False (N2 Layer A non-fire invariant)."""
+        return False (N2 Layer A non-fire invariant).
+
+        Multi-site contracts may add
+        ``positive_example_does_not_apply_<site>`` helpers for their
+        additional claimed sites; the harness collects them via
+        ``positive_example_does_not_apply_bundles(contract)``.
+        """
 
     # -------------------------------------------------------------------------
     # Dispatch methods — default no-op bodies. Concrete contracts override
@@ -817,6 +939,13 @@ _FROZEN: bool = False
 
 EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]] = MappingProxyType(
     {
+        # DeclaredOutputFieldsContract
+        #   Defined:    src/elspeth/engine/executors/declared_output_fields.py
+        #   Registered: src/elspeth/engine/executors/declared_output_fields.py (module-import side-effect)
+        #   ADR:        ADR-011
+        #   Sites:      post_emission_check (single-token TransformExecutor path)
+        #               batch_flush_check   (RowProcessor._cross_check_flush_output)
+        "declared_output_fields": frozenset({"post_emission_check", "batch_flush_check"}),
         # PassThroughDeclarationContract
         #   Defined:    src/elspeth/engine/executors/pass_through.py
         #   Registered: src/elspeth/engine/executors/pass_through.py (module-import side-effect)

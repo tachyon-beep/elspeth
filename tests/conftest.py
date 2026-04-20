@@ -50,7 +50,10 @@ if sys.flags.optimize != 0:
 # state. Individual tests that need to clear or mutate the registry use
 # the ``_snapshot_registry_for_tests`` / ``_restore_registry_snapshot_for_tests``
 # helpers, which are pytest-gated (issue elspeth-cc511e7234 / C3).
-from elspeth.engine.executors import pass_through  # noqa: F401  (import side-effect registers PassThroughDeclarationContract)
+from elspeth.engine.executors import (
+    declared_output_fields,  # noqa: F401  (import side-effect registers DeclaredOutputFieldsContract)
+    pass_through,  # noqa: F401  (import side-effect registers PassThroughDeclarationContract)
+)
 
 # ---------------------------------------------------------------------------
 # Marker Registration

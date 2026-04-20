@@ -109,6 +109,7 @@ def test_recorder_failure_mid_loop_raises_audit_integrity_error() -> None:
     transform.on_success = None
     transform.is_batch_aware = True
     transform.creates_tokens = False
+    transform.declared_output_fields = frozenset()
     transform.passes_through_input = True
     transform._output_schema_config = None
 

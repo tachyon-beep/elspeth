@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
     from elspeth.telemetry import TelemetryManager
 
+import elspeth.engine.executors.declaration_contract_bootstrap  # noqa: F401
 from elspeth import __version__ as ENGINE_VERSION
 from elspeth.contracts import (
     BatchCheckpointState,
@@ -166,10 +167,12 @@ def prepare_for_run() -> None:
     any DAG node begins execution.
 
     The normal import chain guarantees this ordering in production:
-    - ``orchestrator/core.py`` imports ``processor.py`` at module level.
-    - ``processor.py`` imports ``verify_pass_through`` from ``pass_through.py``.
-    - ``pass_through.py`` registers ``PassThroughDeclarationContract`` as a
-      module-level side-effect.
+    - ``orchestrator/core.py`` imports
+      ``engine.executors.declaration_contract_bootstrap`` at module level.
+    - ``declaration_contract_bootstrap.py`` imports every production contract
+      module with a module-level ``register_declaration_contract(...)`` call.
+    - Each imported contract module registers its contract as a module-level
+      side-effect.
 
     If the declaration registry is empty at this point, the import chain is
     broken — this is an import-order bug, not a runtime configuration error.

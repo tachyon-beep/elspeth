@@ -303,6 +303,104 @@ class PassThroughDeclarationContract(DeclarationContract):
         outputs = PostEmissionOutputs(emitted_rows=(_row(("a", "b", "c")),))
         return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
+    @classmethod
+    def negative_example_batch_flush(cls) -> ExampleBundle:
+        """Batch-flush negative-example companion for the shared invariant harness."""
+        from elspeth.contracts.declaration_contracts import BatchFlushInputs, BatchFlushOutputs
+        from elspeth.contracts.schema_contract import (
+            FieldContract,
+            PipelineRow,
+            SchemaContract,
+        )
+
+        def _row(fields: tuple[str, ...]) -> PipelineRow:
+            c = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=n,
+                        original_name=n,
+                        python_type=str,
+                        required=True,
+                        source="inferred",
+                        nullable=False,
+                    )
+                    for n in fields
+                ),
+                locked=True,
+            )
+            return PipelineRow(dict.fromkeys(fields, "v"), c)
+
+        class _MinimalTransform:
+            name = "NegativeBatchFlushExample"
+            node_id = "neg-batch-1"
+            passes_through_input = True
+            declared_output_fields: frozenset[str] = frozenset()
+            _output_schema_config = None
+
+        token_row = _row(("a", "b", "c"))
+        inputs = BatchFlushInputs(
+            plugin=_MinimalTransform(),
+            node_id="neg-batch-1",
+            run_id="neg-batch-run",
+            row_id="neg-batch-row",
+            token_id="neg-batch-token",
+            buffered_tokens=(token_row,),
+            static_contract=frozenset({"a", "b", "c"}),
+            effective_input_fields=frozenset({"a", "b", "c"}),
+        )
+        outputs = BatchFlushOutputs(emitted_rows=(_row(("a", "c")),))
+        return ExampleBundle(site=DispatchSite.BATCH_FLUSH, args=(inputs, outputs))
+
+    @classmethod
+    def positive_example_does_not_apply_batch_flush(cls) -> ExampleBundle:
+        """Batch-flush non-fire companion for the shared invariant harness."""
+        from elspeth.contracts.declaration_contracts import BatchFlushInputs, BatchFlushOutputs
+        from elspeth.contracts.schema_contract import (
+            FieldContract,
+            PipelineRow,
+            SchemaContract,
+        )
+
+        def _row(fields: tuple[str, ...]) -> PipelineRow:
+            c = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=n,
+                        original_name=n,
+                        python_type=str,
+                        required=True,
+                        source="inferred",
+                        nullable=False,
+                    )
+                    for n in fields
+                ),
+                locked=True,
+            )
+            return PipelineRow(dict.fromkeys(fields, "v"), c)
+
+        class _NonPassThroughTransform:
+            name = "NonFireBatchFlushExample"
+            node_id = "non-fire-batch-1"
+            passes_through_input = False
+            declared_output_fields: frozenset[str] = frozenset()
+            _output_schema_config = None
+
+        token_row = _row(("x", "y"))
+        inputs = BatchFlushInputs(
+            plugin=_NonPassThroughTransform(),
+            node_id="non-fire-batch-1",
+            run_id="non-fire-batch-run",
+            row_id="non-fire-batch-row",
+            token_id="non-fire-batch-token",
+            buffered_tokens=(token_row,),
+            static_contract=frozenset({"x", "y"}),
+            effective_input_fields=frozenset({"x", "y"}),
+        )
+        outputs = BatchFlushOutputs(emitted_rows=(_row(("x", "y")),))
+        return ExampleBundle(site=DispatchSite.BATCH_FLUSH, args=(inputs, outputs))
+
 
 # Module import side-effect: register with the framework. Bootstrap asserts
 # the registration actually happened (orchestrator.core.prepare_for_run).
