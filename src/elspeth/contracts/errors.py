@@ -845,6 +845,54 @@ class DeclaredOutputFieldsViolation(DeclarationContractViolation):
     payload_schema: ClassVar[type] = DeclaredOutputFieldsPayload
 
 
+class SourceGuaranteedFieldsPayload(TypedDict):
+    """Audit payload for ADR-016 source guaranteed-field mismatches."""
+
+    declared: Required[list[str]]
+    runtime_observed: Required[list[str]]
+    missing: Required[list[str]]
+
+
+@tier_1_error(
+    reason="ADR-016: source guaranteed-field lie corrupts downstream propagation and audit lineage",
+    caller_module=__name__,
+)
+class SourceGuaranteedFieldsViolation(DeclarationContractViolation):
+    """Raised when a source emits a row missing a guaranteed field.
+
+    Source guaranteed fields feed the framework's producer-side propagation
+    logic. If a source advertises a stable field that the emitted row does not
+    actually carry at runtime, downstream reasoning is built on fabricated
+    provenance.
+    """
+
+    payload_schema: ClassVar[type] = SourceGuaranteedFieldsPayload
+
+
+class SinkRequiredFieldsPayload(TypedDict):
+    """Audit payload for ADR-017 sink required-field mismatches."""
+
+    declared: Required[list[str]]
+    runtime_observed: Required[list[str]]
+    missing: Required[list[str]]
+
+
+@tier_1_error(
+    reason="ADR-017: sink required-field contract failure corrupts sink-intent attribution",
+    caller_module=__name__,
+)
+class SinkRequiredFieldsViolation(DeclarationContractViolation):
+    """Raised when a row reaches a sink missing declared required fields.
+
+    This is the framework-owned Layer 1 sink boundary contract. It fires
+    before schema validation and before sink I/O so attribution stays on the
+    sink's declared intent surface rather than collapsing into a generic
+    validation or transactional failure.
+    """
+
+    payload_schema: ClassVar[type] = SinkRequiredFieldsPayload
+
+
 class SchemaConfigModePayload(TypedDict):
     """Audit payload for ADR-014 schema-mode/runtime-semantic mismatches."""
 

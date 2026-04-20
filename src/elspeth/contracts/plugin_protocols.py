@@ -101,6 +101,10 @@ class SourceProtocol(Protocol):
     # All sources must set this - config-based sources get it from SourceDataConfig
     on_success: str
 
+    # Producer-guarantee declaration surface (ADR-016).
+    # Set from the source's effective SchemaConfig guarantees at construction.
+    declared_guaranteed_fields: frozenset[str]
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration."""
         ...

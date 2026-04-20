@@ -45,6 +45,7 @@ class _TestSourceBase:
     source_file_hash: str | None = None
     _on_validation_failure: str = "discard"
     on_success: str = "default"
+    declared_guaranteed_fields: frozenset[str] = frozenset()
 
     def __init__(self) -> None:
         self.config: dict[str, Any] = {"schema": {"mode": "observed"}}

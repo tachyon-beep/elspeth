@@ -191,7 +191,7 @@ class DataverseSource(BaseSource):
 
     name = "dataverse"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:565556df837dc22d"
+    source_file_hash: str | None = "sha256:3b7175a3f4353053"
     determinism = Determinism.EXTERNAL_CALL  # Live REST API, not static file read
     config_model = DataverseSourceConfig
 
@@ -216,6 +216,7 @@ class DataverseSource(BaseSource):
 
         # Store schema config
         self._schema_config = cfg.schema_config
+        self._initialize_declared_guaranteed_fields(self._schema_config)
 
         # CRITICAL: allow_coercion=True for sources (external data boundary)
         self._schema_class: type[PluginSchema] = create_schema_from_config(

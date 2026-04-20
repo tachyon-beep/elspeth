@@ -227,13 +227,11 @@ def run_boundary_checks(
     inputs: BoundaryInputs,
     outputs: BoundaryOutputs,
 ) -> None:
-    """Dispatch all applicable boundary contracts (2C source/sink adopters).
+    """Dispatch all applicable boundary contracts for one row at a time.
 
-    Wired into source bootstrap + sink commit-boundary paths when 2C paired
-    adopters land (F4 paired-landing rule — both boundary adopters must
-    land in the same PR). Under this H2 landing no 2C adopter registers
-    yet; the site exists for N1 manifest coverage and is exercised via
-    MC3 fixture tests.
+    Phase 2C wires this into:
+    - ``RowProcessor.process_row()`` after token creation on the source side
+    - ``SinkExecutor.write()`` before Layer 2/schema checks on sink paths
     """
     _dispatch(
         site=DispatchSite.BOUNDARY,

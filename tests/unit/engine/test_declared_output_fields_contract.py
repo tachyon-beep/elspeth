@@ -250,8 +250,8 @@ def test_batch_flush_dispatcher_raises_declared_output_fields_violation(_isolate
     assert exc_info.value.contract_name == "declared_output_fields"
 
 
-def test_phase_2b_manifest_contains_all_production_contracts() -> None:
-    assert len(EXPECTED_CONTRACT_SITES) == 5
+def test_phase_2c_manifest_contains_all_production_contracts() -> None:
+    assert len(EXPECTED_CONTRACT_SITES) == 7
     assert frozenset(EXPECTED_CONTRACT_SITES.keys()) == frozenset(
         {
             "passes_through_input",
@@ -259,5 +259,7 @@ def test_phase_2b_manifest_contains_all_production_contracts() -> None:
             "declared_required_fields",
             "schema_config_mode",
             "can_drop_rows",
+            "source_guaranteed_fields",
+            "sink_required_fields",
         }
     )

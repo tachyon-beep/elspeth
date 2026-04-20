@@ -296,46 +296,43 @@ class BatchFlushOutputs:
 
 @dataclass(frozen=True, slots=True)
 class BoundaryInputs:
-    """Bundle for boundary dispatch (source emission / sink consumption — 2C).
+    """Bundle for row-attributed boundary dispatch (source / sink, Phase 2C).
 
-    Single ``rows`` tuple whose meaning is context-dependent:
-      * source-side adopter: ``rows`` = rows the source produced (plural).
-      * sink-side adopter: ``rows`` = rows the sink consumed (plural).
+    Boundary contracts execute once per row, not once per batch. The bundle
+    therefore carries the row's stable identity (``row_id``, ``token_id``),
+    the row payload as observed at the boundary (``row_data``), and optional
+    contract context (``row_contract``) for adopters that need contract-aware
+    interpretation of the payload.
 
-    The contract's ``applies_to`` discriminates source-side vs sink-side
-    based on the plugin's concrete class. No singular ``input_row`` —
-    sources have none; sinks have plural inputs.
-
-    2C paired-landing (F4) will validate whether this unified bundle is
-    sufficient or whether sub-types are needed. Under this H2 landing the
-    site + bundle exist so the N1 manifest can record coverage; no 2C
-    adopter registers yet.
+    The meaning of ``static_contract`` is adopter-specific:
+      * source-side: producer-guaranteed fields declared by the source
+      * sink-side: consumer-required fields declared by the sink
     """
 
     plugin: Any
     node_id: str
     run_id: str
+    row_id: str
+    token_id: str
     static_contract: frozenset[str]
-    rows: tuple[Any, ...]
+    row_data: Any
+    row_contract: Any | None = None
 
     def __post_init__(self) -> None:
-        value: object = self.rows
-        if isinstance(value, list):
-            object.__setattr__(self, "rows", tuple(value))
-        elif isinstance(value, tuple):
-            pass
-        else:
-            raise TypeError(f"BoundaryInputs.rows must be list or tuple, got {type(value).__name__!r}")
+        if not self.row_id:
+            raise ValueError("BoundaryInputs.row_id must not be empty")
+        if not self.token_id:
+            raise ValueError("BoundaryInputs.token_id must not be empty")
 
 
 @dataclass(frozen=True, slots=True)
 class BoundaryOutputs:
     """Outputs bundle for boundary dispatch.
 
-    For most boundary contracts this is vestigial (sources' emitted rows ARE
-    ``BoundaryInputs.rows``; sinks produce nothing). The bundle exists so
-    the dispatcher signature ``boundary_check(inputs, outputs)`` matches the
-    other three sites structurally. 2C may refine if necessary.
+    Most Phase 2C boundary adopters read only ``BoundaryInputs``. The bundle
+    remains so the dispatcher signature ``boundary_check(inputs, outputs)``
+    matches the other three sites structurally and future boundary adopters
+    have a place to hang explicit output evidence if needed.
     """
 
     rows: tuple[Any, ...] = ()
@@ -968,6 +965,18 @@ EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]] = MappingProx
         #   Sites:      post_emission_check (single-token TransformExecutor path)
         #               batch_flush_check   (RowProcessor._cross_check_flush_output)
         "schema_config_mode": frozenset({"post_emission_check", "batch_flush_check"}),
+        # SourceGuaranteedFieldsContract
+        #   Defined:    src/elspeth/engine/executors/source_guaranteed_fields.py
+        #   Registered: src/elspeth/engine/executors/source_guaranteed_fields.py (module-import side-effect)
+        #   ADR:        ADR-016
+        #   Sites:      boundary_check (RowProcessor source-boundary path)
+        "source_guaranteed_fields": frozenset({"boundary_check"}),
+        # SinkRequiredFieldsContract
+        #   Defined:    src/elspeth/engine/executors/sink_required_fields.py
+        #   Registered: src/elspeth/engine/executors/sink_required_fields.py (module-import side-effect)
+        #   ADR:        ADR-017
+        #   Sites:      boundary_check (SinkExecutor primary + failsink paths)
+        "sink_required_fields": frozenset({"boundary_check"}),
         # PassThroughDeclarationContract
         #   Defined:    src/elspeth/engine/executors/pass_through.py
         #   Registered: src/elspeth/engine/executors/pass_through.py (module-import side-effect)

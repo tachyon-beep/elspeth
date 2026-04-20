@@ -3,7 +3,7 @@
 import hashlib
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 
 from pydantic import ValidationError
@@ -18,6 +18,12 @@ from elspeth.contracts import (
     TokenInfo,
 )
 from elspeth.contracts.audit import TokenRef
+from elspeth.contracts.declaration_contracts import (
+    AggregateDeclarationContractViolation,
+    BoundaryInputs,
+    BoundaryOutputs,
+    DeclarationContractViolation,
+)
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
@@ -35,6 +41,7 @@ from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.operations import track_operation
+from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
 from elspeth.engine.spans import SpanFactory
 
 logger = logging.getLogger(__name__)
@@ -187,9 +194,9 @@ class SinkExecutor:
             #
             # This inline check is the TRANSACTIONAL BACKSTOP (Layer 2).
             # It runs INSIDE the sink's commit boundary where the dispatcher-
-            # owned pre-write contract (Layer 1 — a future Phase 2C
-            # SinkRequiredFieldsContract) cannot see partial state. The two
-            # layers serve different audit purposes:
+            # owned pre-write contract (Layer 1 — SinkRequiredFieldsContract)
+            # cannot see partial state. The two layers serve different audit
+            # purposes:
             #
             #   * Layer 1 (pre-write contract, 2C): intent validation.
             #     Triage SQL: WHERE exception_type = 'SinkRequiredFieldsViolation'
@@ -252,6 +259,46 @@ class SinkExecutor:
                     f"cross-token mutation or mid-batch field "
                     f"removal.{contract_context}"
                 )
+
+    @staticmethod
+    def _build_boundary_error(
+        *,
+        exc: DeclarationContractViolation | AggregateDeclarationContractViolation | PluginContractViolation,
+        phase: str,
+    ) -> ExecutionError:
+        return ExecutionError(
+            exception=str(exc),
+            exception_type=type(exc).__name__,
+            phase=phase,
+            context=exc.to_audit_dict(),
+        )
+
+    @staticmethod
+    def _run_sink_boundary_checks(
+        *,
+        sink: SinkProtocol,
+        rows: list[dict[str, object]],
+        tokens: list[TokenInfo],
+        run_id: str,
+        node_id: str,
+        row_contracts: Sequence[SchemaContract | None] | None,
+    ) -> None:
+        """Run Layer 1 boundary contracts once per row before sink validation."""
+        for row_index, (token, row) in enumerate(zip(tokens, rows, strict=True)):
+            row_contract = None if row_contracts is None else row_contracts[row_index]
+            run_boundary_checks(
+                inputs=BoundaryInputs(
+                    plugin=sink,
+                    node_id=node_id,
+                    run_id=run_id,
+                    row_id=token.row_id,
+                    token_id=token.token_id,
+                    static_contract=sink.declared_required_fields,
+                    row_data=row,
+                    row_contract=row_contract,
+                ),
+                outputs=BoundaryOutputs(),
+            )
 
     def write(
         self,
@@ -408,10 +455,19 @@ class SinkExecutor:
                     node_id=sink_node_id,
                     token_ids=sink_token_ids,
                 ):
+                    row_contracts = [t.row_data.contract for t in tokens]
+                    self._run_sink_boundary_checks(
+                        sink=sink,
+                        rows=rows,
+                        tokens=tokens,
+                        run_id=ctx.run_id,
+                        node_id=sink_node_id,
+                        row_contracts=row_contracts,
+                    )
+
                     # Centralized input validation (before sink.write).
                     # Wrong types at a sink boundary are upstream plugin bugs (Tier 2).
                     # Pass per-row contracts for context-aware error messages.
-                    row_contracts = [t.row_data.contract for t in tokens]
                     self._validate_sink_input(sink, rows, contracts=row_contracts)
 
                     # Reset diversion log and call sink.write()
@@ -453,6 +509,13 @@ class SinkExecutor:
                     "artifact_path": artifact_info.path_or_uri,
                     "content_hash": artifact_info.content_hash,
                 }
+        except (DeclarationContractViolation, AggregateDeclarationContractViolation, PluginContractViolation) as e:
+            self._complete_states_failed(
+                states=all_states,
+                duration_ms=0.0,
+                error=self._build_boundary_error(exc=e, phase="sink_write"),
+            )
+            raise
         except TIER_1_ERRORS as e:
             self._best_effort_cleanup(all_states, e, "sink_write")
             raise
@@ -585,6 +648,14 @@ class SinkExecutor:
                 # already open from the pre-phase).
                 failsink._reset_diversion_log()
                 try:
+                    self._run_sink_boundary_checks(
+                        sink=failsink,
+                        rows=enriched_rows,
+                        tokens=[token for token, _idx, _state in primary_divert_states],
+                        run_id=ctx.run_id,
+                        node_id=failsink_node_id,
+                        row_contracts=None,
+                    )
                     # Validate enriched rows against failsink required fields.
                     # skip_schema=True because the executor injects __diversion_*
                     # fields that are outside the failsink's declared schema —
@@ -601,6 +672,13 @@ class SinkExecutor:
                     self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
                     failsink_write_result = failsink.write(enriched_rows, ctx)
                     failsink.flush()
+                except (DeclarationContractViolation, AggregateDeclarationContractViolation, PluginContractViolation) as e:
+                    self._complete_states_failed(
+                        states=[(t, s) for t, _, s in primary_divert_states],
+                        duration_ms=0.0,
+                        error=self._build_boundary_error(exc=e, phase="failsink_write"),
+                    )
+                    raise
                 except TIER_1_ERRORS:
                     raise
                 except Exception as e:

@@ -318,7 +318,7 @@ class AzureBlobSource(BaseSource):
 
     name = "azure_blob"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:874d4c244e8bb968"
+    source_file_hash: str | None = "sha256:2bf2ccfa5d11ff7a"
     config_model = AzureBlobSourceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -339,6 +339,7 @@ class AzureBlobSource(BaseSource):
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
         self._schema_config = cfg.schema_config
+        self._initialize_declared_guaranteed_fields(self._schema_config)
 
         # Store quarantine routing destination
         self._on_validation_failure = cfg.on_validation_failure

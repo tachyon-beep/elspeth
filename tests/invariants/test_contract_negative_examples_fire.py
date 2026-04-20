@@ -14,11 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-import elspeth.engine.executors.declared_output_fields
-
-# Ensure pass_through.py has registered PassThroughDeclarationContract before
-# pytest evaluates the parametrize list at collection time.
-import elspeth.engine.executors.pass_through  # noqa: F401
+import elspeth.engine.executors.declaration_contract_bootstrap  # noqa: F401
 from elspeth.contracts.declaration_contracts import (
     DeclarationContractViolation,
     negative_example_bundles,

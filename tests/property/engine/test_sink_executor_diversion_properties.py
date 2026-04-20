@@ -60,6 +60,7 @@ def _build_scenario(batch_size: int, diverted_indices: set[int]) -> tuple[list[M
     sink = MagicMock()
     sink.name = "primary"
     sink.node_id = "node-primary"
+    sink.declared_guaranteed_fields = frozenset()
     sink.declared_required_fields = frozenset()
     sink._on_write_failure = "discard"
     sink._reset_diversion_log = MagicMock()
@@ -142,6 +143,7 @@ def _build_failsink_scenario(batch_size: int, diverted_indices: set[int]) -> tup
     sink = MagicMock()
     sink.name = "primary"
     sink.node_id = "node-primary"
+    sink.declared_guaranteed_fields = frozenset()
     sink.declared_required_fields = frozenset()
     sink._on_write_failure = "csv_failsink"
     sink._reset_diversion_log = MagicMock()
@@ -149,6 +151,8 @@ def _build_failsink_scenario(batch_size: int, diverted_indices: set[int]) -> tup
     failsink = MagicMock()
     failsink.name = "csv_failsink"
     failsink.node_id = "node-failsink"
+    failsink.declared_guaranteed_fields = frozenset()
+    failsink.declared_required_fields = frozenset()
     failsink.write.return_value = SinkWriteResult(artifact=failsink_artifact)
     failsink._reset_diversion_log = MagicMock()
     return tokens, sink, failsink

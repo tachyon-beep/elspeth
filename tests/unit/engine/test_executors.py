@@ -53,7 +53,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -81,6 +81,8 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     PassThroughContractViolation,
     PluginContractViolation,
+    SinkRequiredFieldsViolation,
+    SinkTransactionalInvariantError,
     TransformErrorReason,
     ZeroEmissionSuccessContractViolation,
 )
@@ -232,6 +234,7 @@ def _make_sink(
     sink = MagicMock()
     sink.name = name
     sink.node_id = node_id
+    sink.declared_guaranteed_fields = frozenset()
     sink.declared_required_fields = frozenset()
     sink._on_write_failure = "discard"
     sink._reset_diversion_log = MagicMock()
@@ -859,15 +862,26 @@ class TestTransformExecutor:
         """No collision raised when declared output fields don't overlap with input."""
         factory = _make_factory()
         executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
-        contract = _make_contract()
+        output_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("value", str, original_name="value", required=True, source="declared"),
+                make_field("new_field", str, original_name="new_field", required=True, source="declared"),
+                make_field("another_new", str, original_name="another_new", required=True, source="declared"),
+            ),
+            locked=True,
+        )
         transform = _make_transform(
             declared_output_fields=frozenset({"new_field", "another_new"}),
         )
         transform.process.return_value = TransformResult.success(
-            make_row({"value": "test", "new_field": "added", "another_new": "also added"}, contract=contract),
+            make_row(
+                {"value": "test", "new_field": "added", "another_new": "also added"},
+                contract=output_contract,
+            ),
             success_reason={"action": "test"},
         )
-        token = _make_token(contract=contract)
+        token = _make_token(contract=_make_contract())
         ctx = make_context()
 
         result, _, _ = executor.execute_transform(transform, token, ctx)
@@ -2638,7 +2652,7 @@ class TestSinkExecutor:
 
     # --- Required-field enforcement (centralized in executor) ---
 
-    def test_missing_required_field_raises_plugin_contract_violation(self) -> None:
+    def test_missing_required_field_raises_sink_required_fields_violation(self) -> None:
         """Executor rejects rows missing declared required fields before sink.write()."""
         factory = _make_factory()
         executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
@@ -2648,7 +2662,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(PluginContractViolation, match=r"missing required fields.*name"):
+        with pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"):
             executor.write(
                 sink,
                 [token],
@@ -2675,7 +2689,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(PluginContractViolation, match=r"row 1.*missing required fields.*name"):
+        with pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"):
             executor.write(
                 sink,
                 tokens,
@@ -2708,10 +2722,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(
-            PluginContractViolation,
-            match=r"optional in the row's schema contract.*coalesce merge",
-        ):
+        with pytest.raises(SinkRequiredFieldsViolation, match=r"optional in the row's schema contract.*coalesce merge"):
             executor.write(
                 sink,
                 [token],
@@ -2787,10 +2798,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(
-            PluginContractViolation,
-            match=r"optional in the row's schema contract.*coalesce merge",
-        ):
+        with pytest.raises(SinkRequiredFieldsViolation, match=r"optional in the row's schema contract.*coalesce merge"):
             executor.write(
                 sink,
                 [token],
@@ -2815,7 +2823,7 @@ class TestSinkExecutor:
         failsink.declared_required_fields = frozenset({"__diversion_reason"})
         rows: list[dict[str, object]] = [{"id": "1"}]  # Missing '__diversion_reason'
 
-        with pytest.raises(PluginContractViolation) as exc_info:
+        with pytest.raises(SinkTransactionalInvariantError) as exc_info:
             # skip_schema=True mirrors the executor's failsink call form; no
             # contracts are passed — this is the invariant under test.
             SinkExecutor._validate_sink_input(failsink, rows, skip_schema=True)
@@ -2824,6 +2832,60 @@ class TestSinkExecutor:
         assert "__diversion_reason" in str(exc_info.value)
         assert "coalesce merge" not in str(exc_info.value)
         assert "optional in the row's schema contract" not in str(exc_info.value)
+
+    def test_layer_2_backstop_fires_when_row_diverges_after_layer_1_passes(self) -> None:
+        """If row state diverges after Layer 1 passes, Layer 2 must still stop the write.
+
+        This simulates a refactor bug where a row is mutated after boundary
+        contract evaluation but before transactional validation. The primary
+        signal must be SinkTransactionalInvariantError, not the Layer 1
+        SinkRequiredFieldsViolation, so audit triage can distinguish
+        pre-write contract failures from mid-transaction divergence.
+        """
+        factory = _make_factory()
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        token = _make_token(data={"id": "1", "name": "alice"}, contract=contract)
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"id", "name"})
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        original_run_boundary_checks = SinkExecutor._run_sink_boundary_checks
+
+        def _pass_then_mutate(
+            *,
+            sink: Any,
+            rows: list[dict[str, object]],
+            tokens: list[TokenInfo],
+            run_id: str,
+            node_id: str,
+            row_contracts: list[SchemaContract | None] | None,
+        ) -> None:
+            original_run_boundary_checks(
+                sink=sink,
+                rows=rows,
+                tokens=tokens,
+                run_id=run_id,
+                node_id=node_id,
+                row_contracts=row_contracts,
+            )
+            rows[0].pop("name")
+
+        with (
+            patch.object(SinkExecutor, "_run_sink_boundary_checks", autospec=True, side_effect=_pass_then_mutate),
+            pytest.raises(SinkTransactionalInvariantError, match=r"Layer 2 transactional backstop.*state diverged"),
+        ):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        sink.write.assert_not_called()
 
     # --- Successful write ---
 
@@ -3993,9 +4055,16 @@ class TestTransformExecutorTerminality:
         executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
         transform = _make_transform(declared_output_fields=frozenset({"new_field"}))
 
-        contract = _make_contract()
+        output_contract = SchemaContract(
+            mode="FLEXIBLE",
+            fields=(
+                make_field("value", str, original_name="value", required=True, source="declared"),
+                make_field("new_field", str, original_name="new_field", required=True, source="declared"),
+            ),
+            locked=True,
+        )
         # Return a row with a new field (triggers contract evolution)
-        output_row = make_row({"value": "test", "new_field": "added"}, contract=contract)
+        output_row = make_row({"value": "test", "new_field": "added"}, contract=output_contract)
         transform.process.return_value = TransformResult.success(
             output_row,
             success_reason={"action": "tested"},
@@ -4596,6 +4665,7 @@ class TestTransformExecutorBatchPath:
         t.node_id = node_id
         t.on_error = on_error
         t.declared_output_fields = frozenset()
+        t.declared_input_fields = frozenset()
         t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
         t._on_start_called = True
         t._pool_size = pool_size

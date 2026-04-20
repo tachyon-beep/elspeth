@@ -44,19 +44,14 @@ if sys.flags.optimize != 0:
 # run``) but do not transitively import the contract-defining executors
 # hit an empty-registry bootstrap failure. In xdist-distributed runs the
 # failure manifests non-deterministically depending on which worker
-# receives which test file first. Importing the executor module at root
-# conftest level populates the registry once per pytest process (xdist
-# workers included) so every test starts from the production registry
-# state. Individual tests that need to clear or mutate the registry use
-# the ``_snapshot_registry_for_tests`` / ``_restore_registry_snapshot_for_tests``
+# receives which test file first. Importing the authoritative production
+# bootstrap surface at root-conftest level populates the registry once
+# per pytest process (xdist workers included) so every test starts from
+# the same contract set production uses. Individual tests that need to
+# clear or mutate the registry use the
+# ``_snapshot_registry_for_tests`` / ``_restore_registry_snapshot_for_tests``
 # helpers, which are pytest-gated (issue elspeth-cc511e7234 / C3).
-from elspeth.engine.executors import (
-    can_drop_rows,  # noqa: F401  (import side-effect registers CanDropRowsContract)
-    declared_output_fields,  # noqa: F401  (import side-effect registers DeclaredOutputFieldsContract)
-    declared_required_fields,  # noqa: F401  (import side-effect registers DeclaredRequiredFieldsContract)
-    pass_through,  # noqa: F401  (import side-effect registers PassThroughDeclarationContract)
-    schema_config_mode,  # noqa: F401  (import side-effect registers SchemaConfigModeContract)
-)
+import elspeth.engine.executors.declaration_contract_bootstrap  # noqa: F401
 
 # ---------------------------------------------------------------------------
 # Marker Registration

@@ -15,6 +15,8 @@ import elspeth.engine.executors.declared_output_fields as _declared_output_field
 import elspeth.engine.executors.declared_required_fields as _declared_required_fields
 import elspeth.engine.executors.pass_through as _pass_through
 import elspeth.engine.executors.schema_config_mode as _schema_config_mode
+import elspeth.engine.executors.sink_required_fields as _sink_required_fields
+import elspeth.engine.executors.source_guaranteed_fields as _source_guaranteed_fields
 
 REGISTERED_CONTRACT_MODULES = (
     _can_drop_rows,
@@ -22,4 +24,6 @@ REGISTERED_CONTRACT_MODULES = (
     _declared_required_fields,
     _pass_through,
     _schema_config_mode,
+    _sink_required_fields,
+    _source_guaranteed_fields,
 )

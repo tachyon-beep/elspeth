@@ -58,7 +58,7 @@ class TextSource(BaseSource):
 
     name = "text"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:a34ec07b7253d933"
+    source_file_hash: str | None = "sha256:1ce671a021bc5960"
     config_model = TextSourceConfig
     _on_validation_failure: str
 
@@ -95,6 +95,7 @@ class TextSource(BaseSource):
         self._strip_whitespace = cfg.strip_whitespace
         self._skip_blank_lines = cfg.skip_blank_lines
         self._schema_config = schema_config
+        self._initialize_declared_guaranteed_fields(self._schema_config)
         self._on_validation_failure = cfg.on_validation_failure
 
         self._schema_class: type[PluginSchema] = create_schema_from_config(

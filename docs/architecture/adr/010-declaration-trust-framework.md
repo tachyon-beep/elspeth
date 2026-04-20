@@ -240,7 +240,7 @@ regardless of registration order. (See `elspeth-60890a7388` / N3
 ## §Adoption State — per dispatch surface (Amendment A3, F4)
 
 Added 2026-04-20 per `elspeth-b513c01cff` (F4), updated 2026-04-20 after
-Phase 2B Tasks 3-7 landed. The 2A rule-of-three criterion treated the
+Phase 2B Tasks 3-7 and the paired Phase 2C boundary adopters landed. The 2A rule-of-three criterion treated the
 single-site registry as one surface; under H2 each dispatch site is its
 own surface with its own rule-of-three gate. A contract's landing on a
 new surface does NOT reset the rule for sites that already counted;
@@ -252,7 +252,7 @@ see the paired-landing rule below.
 | `pre_emission_check` | 1 | NO — 2 more needed | `DeclaredRequiredFieldsContract` (Phase 2B provisional adopter; batch-aware transforms remain fail-closed until a fifth site is ADR-approved) |
 | `post_emission_check` | 4 | YES — closed at 4/3 | `PassThroughDeclarationContract`, `DeclaredOutputFieldsContract`, `SchemaConfigModeContract`, `CanDropRowsContract` |
 | `batch_flush_check` | 4 | YES — closed at 4/3 | `PassThroughDeclarationContract`, `DeclaredOutputFieldsContract`, `SchemaConfigModeContract`, `CanDropRowsContract` |
-| `boundary_check` | 0 | NO — 3 needed | paired adopters: `SourceGuaranteedFieldsContract` (`elspeth-48c8a9762b`) + `SinkRequiredFieldsContract` (`elspeth-ea5e9e4759`) — 2C |
+| `boundary_check` | 2 | NO — 1 more needed | `SourceGuaranteedFieldsContract`, `SinkRequiredFieldsContract` |
 
 **ADR-015 note (2026-04-20).** `CreatesTokensContract` is rejected as a
 Phase 2B production adopter. `creates_tokens` remains a permission flag, not

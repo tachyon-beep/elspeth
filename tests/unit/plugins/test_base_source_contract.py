@@ -34,6 +34,11 @@ class StubSource(BaseSource):
 class TestBaseSourceContract:
     """Test contract tracking on BaseSource."""
 
+    def test_declared_guaranteed_fields_defaults_empty(self) -> None:
+        """BaseSource starts with an inert empty declaration surface."""
+        source = StubSource({})
+        assert source.declared_guaranteed_fields == frozenset()
+
     def test_get_schema_contract_returns_none_before_load(self) -> None:
         """get_schema_contract() returns None before load()."""
         source = StubSource({})

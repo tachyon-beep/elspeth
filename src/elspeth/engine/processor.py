@@ -35,16 +35,19 @@ if TYPE_CHECKING:
     from elspeth.engine.orchestrator.types import RowPlugin
     from elspeth.telemetry import TelemetryManager
 
-from elspeth.contracts import BatchTransformProtocol, TransformProtocol
+from elspeth.contracts import BatchTransformProtocol, SourceProtocol, TransformProtocol
 from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     BatchFlushInputs,
     BatchFlushOutputs,
+    BoundaryInputs,
+    BoundaryOutputs,
     DeclarationContractViolation,
 )
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import (
     AuditIntegrityError,
+    ExecutionError,
     FrameworkBugError,
     MaxRetriesExceeded,
     OrchestrationInvariantError,
@@ -66,7 +69,7 @@ from elspeth.engine.executors import (
     TransformExecutor,
 )
 from elspeth.engine.executors.can_drop_rows import verify_zero_emission_declaration_path
-from elspeth.engine.executors.declaration_dispatch import run_batch_flush_checks
+from elspeth.engine.executors.declaration_dispatch import run_batch_flush_checks, run_boundary_checks
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
@@ -251,6 +254,7 @@ class RowProcessor:
         source_node_id: NodeID,
         *,
         source_on_success: str,
+        source_plugin: SourceProtocol | None = None,
         edge_map: dict[tuple[NodeID, str], str] | None = None,
         route_resolution_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
         traversal: DAGTraversalContext,
@@ -276,6 +280,9 @@ class RowProcessor:
             run_id: Current run ID
             source_node_id: Source node ID
             source_on_success: Source's on_success sink name for COMPLETED routing
+            source_plugin: Optional source plugin instance. Production
+                orchestrator passes the concrete source so source-boundary
+                contracts can evaluate runtime declarations after token creation.
             edge_map: Map of (node_id, label) -> edge_id
             route_resolution_map: Map of (node_id, label) -> resolved route destination
             traversal: Precomputed DAG traversal context from orchestrator
@@ -305,6 +312,8 @@ class RowProcessor:
         self._node_step_map: Mapping[NodeID, int] = traversal.node_step_map
         self._step_resolver: StepResolver = make_step_resolver(traversal.node_step_map, source_node_id)
         self._node_to_plugin: Mapping[NodeID, RowPlugin | GateSettings] = traversal.node_to_plugin
+        source_plugin_candidate = source_plugin if source_plugin is not None else self._node_to_plugin[source_node_id]
+        self._source_plugin: SourceProtocol | None = cast(SourceProtocol | None, source_plugin_candidate)
         self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
         self._node_to_next: Mapping[NodeID, NodeID | None] = traversal.node_to_next
         self._retry_manager = retry_manager
@@ -1448,10 +1457,84 @@ class RowProcessor:
             is_retryable=is_retryable,
         )
 
+    def _record_source_node_state(
+        self,
+        *,
+        token: TokenInfo,
+        input_data: dict[str, object],
+        status: NodeStateStatus,
+        error: ExecutionError | None = None,
+    ) -> None:
+        """Record the source node state for a token.
+
+        Source "processing" already happened in the plugin iterator, so the
+        state is recorded immediately as COMPLETED or FAILED with duration 0.
+        """
+        source_state = self._execution.begin_node_state(
+            token_id=token.token_id,
+            node_id=self._source_node_id,
+            run_id=self._run_id,
+            step_index=0,
+            input_data=input_data,
+        )
+        if status == NodeStateStatus.COMPLETED:
+            self._execution.complete_node_state(
+                state_id=source_state.state_id,
+                status=NodeStateStatus.COMPLETED,
+                output_data=input_data,
+                duration_ms=0,
+            )
+            return
+        if status == NodeStateStatus.FAILED:
+            self._execution.complete_node_state(
+                state_id=source_state.state_id,
+                status=NodeStateStatus.FAILED,
+                duration_ms=0,
+                error=error,
+            )
+            return
+        raise OrchestrationInvariantError(f"Source node states may only be recorded as COMPLETED or FAILED, not {status!r}.")
+
+    def _record_source_boundary_failure(
+        self,
+        *,
+        token: TokenInfo,
+        input_data: dict[str, object],
+        violation: DeclarationContractViolation | AggregateDeclarationContractViolation | PluginContractViolation,
+    ) -> None:
+        """Record terminal audit evidence for a source boundary violation.
+
+        Source boundary validation runs after token creation so the violation
+        can use the real row/token identity. Because the failure happens before
+        DAG traversal begins, the processor must record BOTH the terminal token
+        outcome and the FAILED source node state before re-raising the Tier 1
+        exception.
+        """
+        audit_context = violation.to_audit_dict()
+        error_hash = hashlib.sha256(f"{type(violation).__name__}:{self._source_node_id}".encode()).hexdigest()[:16]
+        self._data_flow.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
+            outcome=RowOutcome.FAILED,
+            error_hash=error_hash,
+            context=audit_context,
+        )
+        self._emit_token_completed(token, RowOutcome.FAILED)
+        self._record_source_node_state(
+            token=token,
+            input_data=input_data,
+            status=NodeStateStatus.FAILED,
+            error=ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="source_boundary_check",
+                context=audit_context,
+            ),
+        )
+
     def _record_source_and_start_traversal(
         self,
         token: TokenInfo,
-        input_data: dict[str, Any],
+        input_data: dict[str, object],
         transforms: Sequence[Any],
         ctx: PluginContext,
         *,
@@ -1475,21 +1558,10 @@ class RowProcessor:
         Returns:
             List of RowResults, one per terminal token
         """
-        # Record source node_state (step_index=0) for audit lineage.
-        # Source "processing" already happened in the plugin iterator — we record
-        # the result immediately as COMPLETED with duration_ms=0.
-        source_state = self._execution.begin_node_state(
-            token_id=token.token_id,
-            node_id=self._source_node_id,
-            run_id=self._run_id,
-            step_index=0,
+        self._record_source_node_state(
+            token=token,
             input_data=input_data,
-        )
-        self._execution.complete_node_state(
-            state_id=source_state.state_id,
             status=NodeStateStatus.COMPLETED,
-            output_data=input_data,
-            duration_ms=0,
         )
 
         if transforms and self._first_transform_node_id is None:
@@ -1541,8 +1613,35 @@ class RowProcessor:
             source_row=source_row,
         )
 
-        # Valid SourceRows always have dict data (SourceRow.valid() takes dict[str, Any]).
-        source_input: dict[str, Any] = source_row.row
+        # Valid SourceRows always carry mapping-shaped row payloads; once the
+        # row enters the processor we treat the values as opaque objects.
+        source_input = cast(dict[str, object], source_row.row)
+        if self._source_plugin is not None:
+            try:
+                run_boundary_checks(
+                    inputs=BoundaryInputs(
+                        plugin=self._source_plugin,
+                        node_id=str(self._source_node_id),
+                        run_id=self._run_id,
+                        row_id=token.row_id,
+                        token_id=token.token_id,
+                        static_contract=self._source_plugin.declared_guaranteed_fields,
+                        row_data=source_input,
+                        row_contract=source_row.contract,
+                    ),
+                    outputs=BoundaryOutputs(),
+                )
+            except (
+                DeclarationContractViolation,
+                AggregateDeclarationContractViolation,
+                PluginContractViolation,
+            ) as violation:
+                self._record_source_boundary_failure(
+                    token=token,
+                    input_data=source_input,
+                    violation=violation,
+                )
+                raise
         return self._record_source_and_start_traversal(
             token=token,
             input_data=source_input,

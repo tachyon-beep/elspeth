@@ -136,7 +136,7 @@ class JSONSource(BaseSource):
 
     name = "json"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:d6e36969964d3c46"
+    source_file_hash: str | None = "sha256:793c6e2ffc3ed895"
     config_model = JSONSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
@@ -162,6 +162,7 @@ class JSONSource(BaseSource):
         # Store schema config for audit trail
         # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None
         self._schema_config = cfg.schema_config
+        self._initialize_declared_guaranteed_fields(self._schema_config)
 
         # Store normalization config for use when first row is seen
         self._field_mapping = cfg.field_mapping

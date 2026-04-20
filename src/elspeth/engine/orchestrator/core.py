@@ -1101,6 +1101,7 @@ class Orchestrator:
             run_id=run_id,
             source_node_id=source_id,
             source_on_success=config.source.on_success,
+            source_plugin=config.source,
             edge_map=edge_map,
             route_resolution_map=route_resolution_map,
             traversal=traversal,

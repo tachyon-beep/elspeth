@@ -84,6 +84,10 @@ class SourceContractTestBase(ABC):
         """Contract: Source MUST have a 'plugin_version' attribute."""
         assert isinstance(source.plugin_version, str)
 
+    def test_source_has_declared_guaranteed_fields(self, source: SourceProtocol) -> None:
+        """Contract: Source MUST expose runtime guaranteed-field declarations."""
+        assert isinstance(source.declared_guaranteed_fields, frozenset)
+
     # =========================================================================
     # load() Method Contracts
     # =========================================================================

@@ -295,16 +295,6 @@ allow_hits:
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BatchFlushOutputs.emitted_rows — identical pattern to RuntimeCheckOutputs/PostEmissionOutputs."
   safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:BoundaryInputs:__post_init__:fp=f90cac30a21dfe78
-  owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BoundaryInputs.rows — identical pattern to RuntimeCheckOutputs freeze guard."
-  safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
-  expires: null
-- key: contracts/declaration_contracts.py:R5:BoundaryInputs:__post_init__:fp=8f2455441c36f0a3
-  owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BoundaryInputs.rows — identical pattern to RuntimeCheckOutputs freeze guard."
-  safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
-  expires: null
 - key: contracts/declaration_contracts.py:R5:BoundaryOutputs:__post_init__:fp=446116d72fdba6f6
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BoundaryOutputs.rows — identical pattern to RuntimeCheckOutputs freeze guard."

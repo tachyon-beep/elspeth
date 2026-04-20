@@ -37,6 +37,7 @@ class TestSourceProtocol:
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
             on_success = "output"
+            declared_guaranteed_fields = frozenset()
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -90,6 +91,11 @@ class TestSourceProtocol:
 
         assert "plugin_version" in SourceProtocol.__protocol_attrs__  # type: ignore[attr-defined]
 
+    def test_source_has_declared_guaranteed_fields_attribute(self) -> None:
+        from elspeth.contracts import SourceProtocol
+
+        assert "declared_guaranteed_fields" in SourceProtocol.__protocol_attrs__  # type: ignore[attr-defined]
+
     def test_source_implementation_with_metadata(self) -> None:
         from collections.abc import Iterator
         from typing import Any
@@ -108,6 +114,7 @@ class TestSourceProtocol:
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
             on_success = "output"
+            declared_guaranteed_fields = frozenset()
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config

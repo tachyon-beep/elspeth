@@ -214,7 +214,14 @@ output_schema: type[PluginSchema]  # Schema of rows this source produces
 node_id: str | None                # Set by orchestrator after registration
 determinism: Determinism           # See Determinism Declaration section for all 6 levels
 plugin_version: str                # Semantic version for reproducibility
+declared_guaranteed_fields: frozenset[str]  # Runtime producer guarantee surface (ADR-016)
 ```
+
+`declared_guaranteed_fields` is the runtime declaration surface used by the
+source boundary contract. Sources derive it from their effective
+`SchemaConfig` after any source-specific schema rewrite. For example, the text
+source's observed-mode column heuristic must be reflected here, not only in the
+raw config dict.
 
 #### Required Configuration
 

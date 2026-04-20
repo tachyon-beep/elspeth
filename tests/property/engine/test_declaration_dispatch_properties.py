@@ -99,12 +99,10 @@ class _TestViolationB(DeclarationContractViolation):
 # =============================================================================
 #
 # Every strategy below is a plain ``st.builds(...)`` call. No ``assume()``
-# filter, no ``@st.composite`` workaround, no ``.filter(lambda x: x is not
-# None)``. If a future refactor widens any field to ``Optional[X]`` or
-# ``X | Y | None``, ``st.builds`` still works (None is a valid ``Any``) but the
-# N=1 reference-equality assertion (Property B) becomes flaky because
-# ``input_row=None`` is indistinguishable from "source boundary, no row."
-# That flakiness is itself the F-QA-5 structural-regression signal.
+# filter, no ``@st.composite`` workaround, no ``.filter(...)`` shrinker tax.
+# ``BoundaryInputs.row_contract`` is intentionally nullable in Phase 2C to
+# support failsink-enriched rows that have no corresponding primary contract;
+# the strategy models that optionality directly rather than by filtering.
 
 _IDENTITY_CHARS = st.characters(
     whitelist_categories=("Ll", "Lu", "Nd"),
@@ -193,8 +191,11 @@ def boundary_inputs_strategy() -> st.SearchStrategy[BoundaryInputs]:
         plugin=_plugin_strategy(),
         node_id=_IDENTITY_STR,
         run_id=_IDENTITY_STR,
+        row_id=_IDENTITY_STR,
+        token_id=_IDENTITY_STR,
         static_contract=_FIELD_SET,
-        rows=st.lists(_row_like_strategy(), max_size=4).map(tuple),
+        row_data=_row_like_strategy(),
+        row_contract=st.none() | st.builds(object),
     )
 
 
@@ -281,8 +282,11 @@ def _example_boundary() -> ExampleBundle:
                 plugin=object(),
                 node_id="n",
                 run_id="r",
+                row_id="rw",
+                token_id="t",
                 static_contract=frozenset(),
-                rows=(),
+                row_data={},
+                row_contract=None,
             ),
             BoundaryOutputs(rows=()),
         ),

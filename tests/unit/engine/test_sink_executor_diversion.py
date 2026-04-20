@@ -15,7 +15,7 @@ import pytest
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
-from elspeth.contracts.errors import AuditIntegrityError, PluginContractViolation
+from elspeth.contracts.errors import AuditIntegrityError, PluginContractViolation, SinkRequiredFieldsViolation
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.engine.executors.sink import SinkExecutor
 
@@ -46,6 +46,7 @@ def _make_sink(
     sink = MagicMock()
     sink.name = name
     sink.node_id = node_id
+    sink.declared_guaranteed_fields = frozenset()
     sink.declared_required_fields = frozenset()
     sink.write.return_value = SinkWriteResult(
         artifact=_make_artifact(),
@@ -60,6 +61,8 @@ def _make_failsink(name: str = "csv_failsink", node_id: str = "node-failsink") -
     failsink = MagicMock()
     failsink.name = name
     failsink.node_id = node_id
+    failsink.declared_guaranteed_fields = frozenset()
+    failsink.declared_required_fields = frozenset()
     failsink.write.return_value = SinkWriteResult(artifact=_make_artifact("/tmp/failsink"))
     failsink._reset_diversion_log = MagicMock()
     return failsink
@@ -229,6 +232,29 @@ class TestDiscardMode:
 
 class TestFailsinkMode:
     """on_write_failure=<sink_name> — diverted rows are written to failsink."""
+
+    def test_failsink_missing_required_field_raises_layer1_violation(self) -> None:
+        executor, _execution, _data_flow = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="invalid metadata", row_data={"doc": "hello"}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink.declared_required_fields = frozenset({"__diversion_reason", "missing_field"})
+        tokens = [_make_token("t0")]
+
+        with pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*missing_field"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,  # type: ignore[arg-type]
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+
+        failsink.write.assert_not_called()
 
     def test_failsink_write_called_with_enriched_rows(self) -> None:
         executor, _execution, _data_flow = _make_executor()

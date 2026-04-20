@@ -29,7 +29,7 @@ from elspeth.contracts.enums import (
     RoutingKind,
     TriggerType,
 )
-from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError
+from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, SourceGuaranteedFieldsViolation
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema import SchemaConfig
@@ -95,6 +95,7 @@ def _make_processor(
     run_id: str = "test-run",
     source_node_id: str = "source-0",
     source_on_success: str = "default",
+    source_plugin: Any | None = None,
     edge_map: dict[tuple[NodeID, str], str] | None = None,
     route_resolution_map: dict[tuple[NodeID, str], RouteDestination] | None = None,
     config_gates: list[GateSettings] | None = None,
@@ -151,6 +152,7 @@ def _make_processor(
         run_id=run_id,
         source_node_id=NodeID(source_node_id),
         source_on_success=source_on_success,
+        source_plugin=source_plugin,
         traversal=traversal,
         edge_map=edge_map,
         route_resolution_map=route_resolution_map,
@@ -443,6 +445,14 @@ class TestGetGateDestinations:
 class TestProcessRowNoTransforms:
     """Tests for process_row with an empty transform list."""
 
+    @staticmethod
+    def _source_plugin(*, declared_guaranteed_fields: frozenset[str]) -> Any:
+        plugin = type("ProcessorSourcePlugin", (), {})()
+        plugin.name = "processor-source"
+        plugin.node_id = "source-0"
+        plugin.declared_guaranteed_fields = declared_guaranteed_fields
+        return plugin
+
     def test_empty_pipeline_returns_completed(self) -> None:
         """Row through empty pipeline gets COMPLETED outcome."""
         _, factory = _make_factory()
@@ -510,6 +520,57 @@ class TestProcessRowNoTransforms:
         assert len(states) >= 1
         source_state = states[0]
         assert source_state.status == NodeStateStatus.COMPLETED
+
+    def test_source_boundary_violation_records_failed_outcome_and_failed_source_state(self) -> None:
+        """Tier-1 source boundary failures must still leave terminal audit evidence."""
+        db, factory = _make_factory()
+        processor = _make_processor(
+            factory,
+            source_plugin=self._source_plugin(declared_guaranteed_fields=frozenset({"customer_id"})),
+        )
+        source_row = _make_source_row({"value": 42})
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+
+        def _raise_source_boundary(*args: Any, **kwargs: Any) -> None:
+            violation = SourceGuaranteedFieldsViolation(
+                plugin="processor-source",
+                node_id="source-0",
+                run_id="test-run",
+                row_id="row_0",
+                token_id="token_0",
+                payload={
+                    "declared": ["customer_id"],
+                    "runtime_observed": [],
+                    "missing": ["customer_id"],
+                },
+                message="source boundary failed",
+            )
+            violation._attach_contract_name("source_guaranteed_fields")
+            raise violation
+
+        with (
+            patch("elspeth.engine.processor.run_boundary_checks", side_effect=_raise_source_boundary),
+            pytest.raises(SourceGuaranteedFieldsViolation),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import node_states_table, token_outcomes_table
+
+        with db.connection() as conn:
+            states = conn.execute(select(node_states_table).where(node_states_table.c.run_id == "test-run")).fetchall()
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == "test-run")).fetchall()
+
+        assert len(states) >= 1
+        assert states[0].status == NodeStateStatus.FAILED
+        assert len(outcomes) == 1
+        assert outcomes[0].outcome == RowOutcome.FAILED.value
 
 
 # =============================================================================

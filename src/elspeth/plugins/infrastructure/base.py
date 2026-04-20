@@ -850,6 +850,11 @@ class BaseSource(ABC):
     # All sources must set this - config-based sources get it from SourceDataConfig
     on_success: str
 
+    # Guaranteed-field enforcement (centralized in the source boundary contract).
+    # Sources set this from schema_config.get_effective_guaranteed_fields() at init.
+    # Empty frozenset = no guaranteed-field contract.
+    declared_guaranteed_fields: frozenset[str] = frozenset()
+
     # Schema contract for row validation
     _schema_contract: SchemaContract | None = None
 
@@ -861,6 +866,7 @@ class BaseSource(ABC):
         """
         self.config = config
         self._schema_contract = None
+        self.declared_guaranteed_fields = frozenset()
 
     @abstractmethod
     def load(self, ctx: SourceContext) -> Iterator[SourceRow]:
@@ -908,6 +914,15 @@ class BaseSource(ABC):
             contract: The schema contract to use for validation
         """
         self._schema_contract = contract
+
+    def _initialize_declared_guaranteed_fields(self, schema_config: SchemaConfig) -> None:
+        """Normalize the source's runtime guarantee declaration from SchemaConfig.
+
+        Call this after any source-specific schema rewrite so the runtime
+        contract surface matches the source's effective guarantees, not the
+        caller's raw config dict.
+        """
+        self.declared_guaranteed_fields = schema_config.get_effective_guaranteed_fields()
 
     # === Lifecycle Hooks ===
     # Call ordering: on_start -> load -> on_complete -> close

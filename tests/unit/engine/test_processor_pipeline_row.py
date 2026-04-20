@@ -1,7 +1,7 @@
 # tests/unit/engine/test_processor_pipeline_row.py
 """Tests for RowProcessor with PipelineRow support (Task 6)."""
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -73,6 +73,7 @@ class TestRowProcessorPipelineRow:
             run_id="run_001",
             source_node_id=NodeID("source_001"),
             source_on_success="default",
+            source_plugin=None,
             traversal=_empty_traversal(),
         )
 
@@ -203,3 +204,41 @@ class TestRowProcessorExistingRow:
         result = results[0]
         assert isinstance(result.token.row_data, PipelineRow)
         assert result.token.row_data.contract is contract
+
+    def test_process_existing_row_does_not_run_source_boundary_checks(self) -> None:
+        """Resume path reuses original source provenance and skips source boundary VAL."""
+        from elspeth.engine.processor import RowProcessor
+
+        contract = _make_contract()
+        factory = _make_mock_factory()
+        span_factory = _make_mock_span_factory()
+        source_plugin = type("ResumeSourcePlugin", (), {})()
+        source_plugin.name = "resume-source"
+        source_plugin.node_id = "source_001"
+        source_plugin.declared_guaranteed_fields = frozenset({"amount"})
+
+        processor = RowProcessor(
+            execution=factory.execution,
+            data_flow=factory.data_flow,
+            span_factory=span_factory,
+            run_id="run_001",
+            source_node_id=NodeID("source_001"),
+            source_on_success="default",
+            source_plugin=source_plugin,
+            traversal=_empty_traversal(),
+        )
+
+        row_data = make_row({"amount": 100}, contract=contract)
+        landscape_db = make_landscape_db()
+        landscape_factory = make_factory(landscape_db)
+        ctx = make_context(run_id="run_001", landscape=landscape_factory)
+
+        with patch("elspeth.engine.processor.run_boundary_checks") as boundary_check:
+            processor.process_existing_row(
+                row_id="existing_row_001",
+                row_data=row_data,
+                transforms=[],
+                ctx=ctx,
+            )
+
+        boundary_check.assert_not_called()

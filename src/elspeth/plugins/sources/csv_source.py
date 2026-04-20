@@ -76,7 +76,7 @@ class CSVSource(BaseSource):
 
     name = "csv"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:37a0a90adf0c1447"
+    source_file_hash: str | None = "sha256:df1b57f80f28aed2"
     config_model = CSVSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
@@ -99,6 +99,7 @@ class CSVSource(BaseSource):
 
         # Store schema config for audit trail (required by DataPluginConfig)
         self._schema_config = cfg.schema_config
+        self._initialize_declared_guaranteed_fields(self._schema_config)
 
         # Store quarantine routing destination
         self._on_validation_failure = cfg.on_validation_failure
