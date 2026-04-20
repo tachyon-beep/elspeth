@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from scripts.cicd.enforce_audit_evidence_nominal import scan_file
+
 
 def _run(extra_args: list[str]) -> subprocess.CompletedProcess[str]:
     """Invoke the enforcer via sys.executable with cwd set to the project root.
@@ -80,6 +82,19 @@ def test_scanner_flags_lambda_assignment(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "to_audit_dict" in result.stdout
     assert "LambdaMimic" in result.stdout
+
+
+def test_repo_errors_file_zero_emission_success_contract_violation_is_nominal() -> None:
+    """Regression test for the live repo: overriding ``to_audit_dict`` must come
+    with an explicit ``AuditEvidenceBase`` base so AEN1 can verify the contract
+    from syntax alone rather than relying on transitive inheritance.
+    """
+
+    root = Path("src/elspeth")
+    path = root / "contracts" / "errors.py"
+    findings = scan_file(path, root)
+    flagged = {finding.class_name for finding in findings}
+    assert "ZeroEmissionSuccessContractViolation" not in flagged
 
 
 def test_scanner_read_error_exits_nonzero(tmp_path: Path) -> None:

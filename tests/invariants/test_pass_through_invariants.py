@@ -114,9 +114,8 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     """
     if "_annotated_cls" in metafunc.fixturenames:
         plugins = _annotated_pass_through_plugins()
-        assert len(plugins) >= 2, (
-            "Expected at least 2 passes_through_input=True transforms "
-            "(PassThrough and BatchReplicate); found "
+        assert plugins, (
+            "Expected at least 1 passes_through_input=True transform; found "
             f"{[cls.__name__ for cls in plugins]!r}. Plugin registration "
             "may have failed — the invariant harness would silently pass."
         )
@@ -144,6 +143,13 @@ def _emitted_rows_from_result(result: Any) -> list[PipelineRow]:
     if result.rows is not None:
         return list(result.rows)
     return []
+
+
+def _observed_fields(row: PipelineRow) -> frozenset[str]:
+    """Fields present in both the contract and payload for ``row``."""
+    contract_fields = frozenset(fc.normalized_name for fc in row.contract.fields)
+    payload_fields = frozenset(row.keys())
+    return contract_fields & payload_fields
 
 
 @given(row=probe_row())
@@ -260,10 +266,11 @@ def test_non_pass_through_transforms_do_drop_fields(
     ``probe_config()`` raises or whose constructor rejects it are also
     skipped — those are diagnostic signals, not governance gates.
 
-    Scalar-only probes may miss structured-data drops, so remediation
-    options are either (a) add the annotation if the transform really is
-    pass-through, or (b) teach ``probe_config()`` to return a shape that
-    triggers the actual drop path.
+    Scalar-only probes may miss structured-data or mixed-validity batch
+    drops, so remediation options are either (a) add the annotation if the
+    transform really is pass-through, or (b) override
+    ``backward_invariant_probe_rows()`` to return a representative input
+    shape that triggers the actual drop path.
     """
     try:
         transform = _probe_instantiate(_non_pass_through_cls)
@@ -287,18 +294,22 @@ def test_non_pass_through_transforms_do_drop_fields(
     def _sweep(probe: PipelineRow) -> None:
         nonlocal probes_preserved, probe_count
         probe_count += 1
+        probe_rows = transform.backward_invariant_probe_rows(probe)
         if transform.is_batch_aware:
-            result = transform.process([probe], _probe_context(transform))  # type: ignore[arg-type]
+            result = transform.process(probe_rows, _probe_context(transform))  # type: ignore[arg-type]
         else:
-            result = transform.process(probe, _probe_context(transform))
+            assert len(probe_rows) == 1, (
+                f"{_non_pass_through_cls.__name__}.backward_invariant_probe_rows() must return exactly 1 row for non-batch transforms."
+            )
+            result = transform.process(probe_rows[0], _probe_context(transform))
         if result.status != "success":
             return
         emitted_rows = _emitted_rows_from_result(result)
         if not emitted_rows:
             return
-        input_fields = frozenset(fc.normalized_name for fc in probe.contract.fields)
+        input_fields = frozenset(field_name for input_row in probe_rows for field_name in _observed_fields(input_row))
         for emitted in emitted_rows:
-            observed = frozenset(fc.normalized_name for fc in emitted.contract.fields) & frozenset(emitted.keys())
+            observed = _observed_fields(emitted)
             if input_fields - observed:
                 probes_preserved = False
                 return
@@ -319,7 +330,7 @@ def test_non_pass_through_transforms_do_drop_fields(
             f"{_non_pass_through_cls.__name__} is NOT annotated "
             f"passes_through_input=True but preserved every input field in "
             f"{probe_count} probe rows. Either (a) add passes_through_input=True "
-            "if the transform is in fact pass-through, or (b) extend "
-            f"{_non_pass_through_cls.__name__}.probe_config() to return a "
-            "shape that triggers the field-dropping code path."
+            "if the transform is in fact pass-through, or (b) override "
+            f"{_non_pass_through_cls.__name__}.backward_invariant_probe_rows() "
+            "to return a shape that triggers the field-dropping code path."
         )

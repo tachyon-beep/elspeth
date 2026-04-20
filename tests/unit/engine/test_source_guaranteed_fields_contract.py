@@ -25,9 +25,12 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     SourceGuaranteedFieldsViolation,
 )
+from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
 from elspeth.engine.executors.source_guaranteed_fields import SourceGuaranteedFieldsContract
+from elspeth.plugins.infrastructure.base import BaseSource
 
 
 def _contract(fields: tuple[str, ...]) -> SchemaContract:
@@ -48,17 +51,40 @@ def _contract(fields: tuple[str, ...]) -> SchemaContract:
     )
 
 
+class _TestSourcePlugin(BaseSource):
+    name = "SourceGuaranteedFieldsSource"
+    output_schema = object
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        node_id: str | None,
+        declared_guaranteed_fields: frozenset[str],
+    ) -> None:
+        super().__init__({})
+        self.name = name
+        self.node_id = node_id
+        self.declared_guaranteed_fields = declared_guaranteed_fields
+
+    def load(self, ctx: PluginContext):
+        yield SourceRow.valid({"customer_id": "v"}, contract=_contract(("customer_id",)))
+
+    def close(self) -> None:
+        pass
+
+
 def _plugin(
     *,
     name: str = "SourceGuaranteedFieldsSource",
     node_id: str | None = "source-guaranteed-fields-node",
     declared_guaranteed_fields: frozenset[str] = frozenset({"customer_id", "account_id"}),
 ) -> Any:
-    plugin = type("SourceGuaranteedFieldsPlugin", (), {})()
-    plugin.name = name
-    plugin.node_id = node_id
-    plugin.declared_guaranteed_fields = declared_guaranteed_fields
-    return plugin
+    return _TestSourcePlugin(
+        name=name,
+        node_id=node_id,
+        declared_guaranteed_fields=declared_guaranteed_fields,
+    )
 
 
 class _SecondaryPayload(TypedDict):
@@ -120,6 +146,42 @@ def test_applies_to_on_plugin_missing_attribute_returns_false() -> None:
         pass
 
     assert contract.applies_to(_NoAttr()) is False
+
+
+def test_applies_to_true_for_inherited_declared_guaranteed_fields() -> None:
+    contract = SourceGuaranteedFieldsContract()
+
+    class _DeclaredSourceBase(BaseSource):
+        name = "declared-source-base"
+        output_schema = object
+        declared_guaranteed_fields = frozenset({"customer_id"})
+
+        def __init__(self) -> None:
+            # Unit test for contract role + MRO lookup only. We intentionally
+            # skip BaseSource.__init__ so the inherited class attribute remains
+            # visible and the test isolates applies_to() semantics.
+            self.config = {}
+            self.node_id = None
+
+        def load(self, ctx: PluginContext):
+            yield SourceRow.valid({"customer_id": "v"}, contract=_contract(("customer_id",)))
+
+        def close(self) -> None:
+            pass
+
+    class _InheritedDeclaredSource(_DeclaredSourceBase):
+        pass
+
+    assert contract.applies_to(_InheritedDeclaredSource()) is True
+
+
+def test_applies_to_false_for_wrong_plugin_role_even_when_attr_present() -> None:
+    contract = SourceGuaranteedFieldsContract()
+
+    class _NotASource:
+        declared_guaranteed_fields = frozenset({"customer_id"})
+
+    assert contract.applies_to(_NotASource()) is False
 
 
 def test_contract_claims_boundary_dispatch_site() -> None:

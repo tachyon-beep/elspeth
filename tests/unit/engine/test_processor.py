@@ -29,7 +29,12 @@ from elspeth.contracts.enums import (
     RoutingKind,
     TriggerType,
 )
-from elspeth.contracts.errors import MaxRetriesExceeded, OrchestrationInvariantError, SourceGuaranteedFieldsViolation
+from elspeth.contracts.errors import (
+    AuditIntegrityError,
+    MaxRetriesExceeded,
+    OrchestrationInvariantError,
+    SourceGuaranteedFieldsViolation,
+)
 from elspeth.contracts.results import GateResult
 from elspeth.contracts.routing import RoutingAction
 from elspeth.contracts.schema import SchemaConfig
@@ -551,6 +556,148 @@ class TestProcessRowNoTransforms:
         with (
             patch("elspeth.engine.processor.run_boundary_checks", side_effect=_raise_source_boundary),
             pytest.raises(SourceGuaranteedFieldsViolation),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import node_states_table, token_outcomes_table
+
+        with db.connection() as conn:
+            states = conn.execute(select(node_states_table).where(node_states_table.c.run_id == "test-run")).fetchall()
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == "test-run")).fetchall()
+
+        assert len(states) >= 1
+        assert states[0].status == NodeStateStatus.FAILED
+        assert len(outcomes) == 1
+        assert outcomes[0].outcome == RowOutcome.FAILED.value
+
+    def test_source_boundary_recorder_failure_raises_audit_integrity_error(self) -> None:
+        """Recorder failures on source-boundary cleanup must crash as Tier 1."""
+        _db, factory = _make_factory()
+        processor = _make_processor(
+            factory,
+            source_plugin=self._source_plugin(declared_guaranteed_fields=frozenset({"customer_id"})),
+        )
+        source_row = _make_source_row({"value": 42})
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+
+        def _raise_source_boundary(*args: Any, **kwargs: Any) -> None:
+            violation = SourceGuaranteedFieldsViolation(
+                plugin="processor-source",
+                node_id="source-0",
+                run_id="test-run",
+                row_id="row_0",
+                token_id="token_0",
+                payload={
+                    "declared": ["customer_id"],
+                    "runtime_observed": [],
+                    "missing": ["customer_id"],
+                },
+                message="source boundary failed",
+            )
+            violation._attach_contract_name("source_guaranteed_fields")
+            raise violation
+
+        with (
+            patch("elspeth.engine.processor.run_boundary_checks", side_effect=_raise_source_boundary),
+            patch.object(factory.data_flow, "record_token_outcome", side_effect=RuntimeError("token outcome DB down")),
+            pytest.raises(
+                AuditIntegrityError,
+                match=r"Failed to record SourceGuaranteedFieldsViolation FAILED outcome for token .* on source boundary",
+            ) as exc_info,
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert "Original violation: source boundary failed" in str(exc_info.value)
+
+    def test_source_boundary_state_recorder_failure_raises_audit_integrity_error(self) -> None:
+        """FAILED source-state writes on boundary cleanup must crash as Tier 1."""
+        _db, factory = _make_factory()
+        processor = _make_processor(
+            factory,
+            source_plugin=self._source_plugin(declared_guaranteed_fields=frozenset({"customer_id"})),
+        )
+        source_row = _make_source_row({"value": 42})
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+
+        def _raise_source_boundary(*args: Any, **kwargs: Any) -> None:
+            violation = SourceGuaranteedFieldsViolation(
+                plugin="processor-source",
+                node_id="source-0",
+                run_id="test-run",
+                row_id="row_0",
+                token_id="token_0",
+                payload={
+                    "declared": ["customer_id"],
+                    "runtime_observed": [],
+                    "missing": ["customer_id"],
+                },
+                message="source boundary failed",
+            )
+            violation._attach_contract_name("source_guaranteed_fields")
+            raise violation
+
+        with (
+            patch("elspeth.engine.processor.run_boundary_checks", side_effect=_raise_source_boundary),
+            patch.object(factory.execution, "complete_node_state", side_effect=RuntimeError("source state DB down")),
+            pytest.raises(
+                AuditIntegrityError,
+                match=r"Failed to record FAILED source node state for token .* on source boundary",
+            ) as exc_info,
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+        assert isinstance(exc_info.value.__cause__, RuntimeError)
+        assert "Original violation: source boundary failed" in str(exc_info.value)
+
+    def test_source_boundary_token_completed_telemetry_failure_does_not_interrupt_audit_recording(self) -> None:
+        """Best-effort telemetry must not break the FAILED-audit pair on source violations."""
+        db, factory = _make_factory()
+        processor = _make_processor(
+            factory,
+            source_plugin=self._source_plugin(declared_guaranteed_fields=frozenset({"customer_id"})),
+        )
+        source_row = _make_source_row({"value": 42})
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+
+        def _raise_source_boundary(*args: Any, **kwargs: Any) -> None:
+            violation = SourceGuaranteedFieldsViolation(
+                plugin="processor-source",
+                node_id="source-0",
+                run_id="test-run",
+                row_id="row_0",
+                token_id="token_0",
+                payload={
+                    "declared": ["customer_id"],
+                    "runtime_observed": [],
+                    "missing": ["customer_id"],
+                },
+                message="source boundary failed",
+            )
+            violation._attach_contract_name("source_guaranteed_fields")
+            raise violation
+
+        with (
+            patch("elspeth.engine.processor.run_boundary_checks", side_effect=_raise_source_boundary),
+            patch.object(processor, "_emit_token_completed", side_effect=RuntimeError("telemetry down")),
+            pytest.raises(SourceGuaranteedFieldsViolation, match="source boundary failed"),
         ):
             processor.process_row(
                 row_index=0,

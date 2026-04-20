@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from elspeth.contracts.errors import TIER_1_ERRORS
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts.freeze import freeze_fields
 
 slog = structlog.get_logger(__name__)
@@ -339,7 +339,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
     finally:
         try:
             db.close()
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise  # System bugs always crash through
         except Exception as close_exc:
             # db.close() failure must not mask the original pipeline exception.

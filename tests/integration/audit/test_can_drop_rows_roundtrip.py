@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypedDict
 
 from sqlalchemy import text
 
@@ -12,6 +12,7 @@ from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     BatchFlushInputs,
     BatchFlushOutputs,
+    DeclarationContractViolation,
     PostEmissionInputs,
     PostEmissionOutputs,
     _clear_registry_for_tests,
@@ -154,6 +155,14 @@ class _TestSchema(PluginSchema):
     pass
 
 
+class _SecretPayload(TypedDict):
+    marker: str
+
+
+class _SecretRoundTripViolation(DeclarationContractViolation):
+    payload_schema = _SecretPayload
+
+
 class _HonestFilterTransform(BaseTransform):
     name = "honest_filter_transform"
     input_schema: type[PluginSchema] = _TestSchema
@@ -257,6 +266,35 @@ class TestCanDropRowsRoundTrip:
         assert context["exception_type"] == "UnexpectedEmptyEmissionViolation"
         assert context["contract_name"] == "can_drop_rows"
         assert context["payload"]["emitted_count"] == 0
+
+    def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        run_id = "run-can-drop-rows-secret"
+        row_id = "row-can-drop-rows-secret"
+        token_id = "token-can-drop-rows-secret"
+        node_id = "node-can-drop-rows"
+        setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
+
+        violation = _SecretRoundTripViolation(
+            plugin="CanDropRowsTransform",
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+        violation._attach_contract_name("can_drop_rows_secret_roundtrip")
+
+        error = ExecutionError(
+            exception=str(violation),
+            exception_type=type(violation).__name__,
+            phase="executor_post_process",
+            context=violation.to_audit_dict(),
+        )
+
+        context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
+        assert "sk-abcdef" not in json.dumps(context)
+        assert context["payload"]["marker"] == "<redacted-secret>"
 
     def test_aggregate_round_trip_with_pass_through(self) -> None:
         register_declaration_contract(PassThroughDeclarationContract())

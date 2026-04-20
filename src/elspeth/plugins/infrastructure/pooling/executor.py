@@ -17,9 +17,10 @@ from dataclasses import dataclass
 from threading import Event, Lock, Semaphore
 from typing import Any
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import TransformErrorReason, TransformResult
 from elspeth.contracts.engine import BufferEntry
-from elspeth.contracts.errors import TIER_1_ERRORS, PluginRetryableError
+from elspeth.contracts.errors import PluginRetryableError
 from elspeth.contracts.freeze import freeze_fields
 from elspeth.plugins.infrastructure.pooling.config import PoolConfig
 from elspeth.plugins.infrastructure.pooling.errors import CapacityError
@@ -328,7 +329,7 @@ class PooledExecutor:
             buffer_idx = futures[future]
             try:
                 _returned_idx, result = future.result()
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise  # Tier 1 errors must crash — not row-level errors
             except Exception as exc:
                 # Complete the buffer slot with a deterministic error so the

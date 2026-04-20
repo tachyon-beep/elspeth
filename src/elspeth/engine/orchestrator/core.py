@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
     from elspeth.telemetry import TelemetryManager
 
+import elspeth.contracts.errors as contract_errors
 import elspeth.engine.executors.declaration_contract_bootstrap  # noqa: F401
 from elspeth import __version__ as ENGINE_VERSION
 from elspeth.contracts import (
@@ -822,12 +823,10 @@ class Orchestrator:
         cleanup_errors: list[str] = []
 
         def record_cleanup_error(hook: str, plugin_name: str, error: Exception) -> None:
-            from elspeth.contracts.errors import TIER_1_ERRORS
-
             # FrameworkBugError and AuditIntegrityError indicate system-level
             # corruption or bugs — Tier 1 violations that must crash immediately.
             # These must NOT be downgraded to cleanup warnings.
-            if isinstance(error, TIER_1_ERRORS):
+            if isinstance(error, contract_errors.TIER_1_ERRORS):
                 raise
 
             logger.warning(

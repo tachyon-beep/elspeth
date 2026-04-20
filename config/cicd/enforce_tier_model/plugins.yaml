@@ -210,42 +210,42 @@ allow_hits:
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=281f28276f1c2b45
+- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=8f58d0599dfaf961
   owner: bugfix
   reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
   safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
   expires: '2026-05-17'
-- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=490f29827f866cf3
+- key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=50feaf5319858c5d
   owner: architecture
   reason: Broad exception handling at external boundary with logging
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=256b06df909123e9
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=6e2904f0d83681f4
   owner: architecture
   reason: try/except KeyError with debug logging for expected ticket eviction race
   safety: KeyError from timeout-evicted ticket is expected concurrency behavior; logged at DEBUG
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=f37bf8208eca0a55
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_process_and_complete:fp=07ae4d70a25a6a78
   owner: architecture
   reason: try/except KeyError with debug logging for expected ticket eviction race
   safety: KeyError from timeout-evicted ticket is expected concurrency behavior; logged at DEBUG
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=aa0e7f45e675138a
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:_release_loop:fp=ff3bd097d4391879
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=b289fc3f96e46221
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=f5be642689f24a05
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=e2d3894a2ca091d4
+- key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:_release_loop:fp=52ed29f618ad0dc3
   owner: architecture
   reason: Silent recovery with explicit error handling path
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=9ec8b816c9b1da7a
+- key: plugins/infrastructure/batching/mixin.py:R9:BatchTransformMixin:evict_submission:fp=01424e958007e638
   owner: architecture
   reason: Cleanup/pop with default - key may not exist in race or optional scenarios
   safety: Code reviewed - legitimate pattern
@@ -270,7 +270,7 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=99e19e26199bfc73
+- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=60b6584101331f73
   owner: bugfix
   reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
   safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above

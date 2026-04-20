@@ -5000,8 +5000,11 @@ def _is_framework_audit_handler(handler: object) -> bool:
     if handler.type is None:
         return False
 
-    # Match: except TIER_1_ERRORS (fragile: won't match aliased imports like `as T1E`)
-    return isinstance(handler.type, ast.Name) and handler.type.id == "TIER_1_ERRORS"
+    # Match either the legacy bare name or the safer live-view module attribute:
+    # ``except TIER_1_ERRORS`` or ``except contract_errors.TIER_1_ERRORS``.
+    if isinstance(handler.type, ast.Name):
+        return handler.type.id == "TIER_1_ERRORS"
+    return isinstance(handler.type, ast.Attribute) and handler.type.attr == "TIER_1_ERRORS"
 
 
 # =============================================================================

@@ -66,17 +66,17 @@ per_file_rules:
   expires: null
   max_hits: 2
 allow_hits:
-- key: engine/dependency_resolver.py:R1:_load_depends_on:fp=982376c81e3fc0d5
+- key: engine/dependency_resolver.py:R1:_load_depends_on:fp=c863276501dbaaa5
   owner: architecture
   reason: 'Tier 3 boundary: reads raw YAML from operator-authored settings files for cycle detection. depends_on is optional — absence means no dependencies.'
   safety: Returns empty list on missing key; only used for lightweight cycle detection, not config validation
   expires: null
-- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=a56f683525216d0d
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=3ba17dbe0c7fd5a8
   owner: architecture
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate structure before use'
   safety: Raises ValueError with file path and type info on malformed input
   expires: null
-- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=07d449ea7db2ee15
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=d5f0130e6d858b93
   owner: architecture
   reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
   safety: Raises ValueError with index and type info on malformed entry
@@ -91,27 +91,27 @@ allow_hits:
   reason: Best-effort cleanup of OPEN branch node_states after merge failure — broad catch prevents cleanup failure from masking original merge exception
   safety: Logs error with state_id and cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=083892e955407702
+- key: engine/executors/sink.py:R4:SinkExecutor:_best_effort_cleanup:fp=9f155598c141720b
   owner: architecture
   reason: Best-effort cleanup of OPEN node_states before system error crash — broad catch prevents cleanup failure from masking original FrameworkBugError/AuditIntegrityError
   safety: Logs warning with cleanup exception details; always re-raises the original system error
   expires: null
-- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=9b0598e545f295fd
+- key: engine/executors/sink.py:R4:SinkExecutor:write:fp=412d31ef7f8654be
   owner: architecture
   reason: Cleanup of OPEN pre-phase states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=4081df34f541ef02
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=b2d3c3927e3611c5
   owner: bugfix
   reason: Offensive isinstance — validates sink.write() returns SinkWriteResult, not a bare ArtifactDescriptor or other type
   safety: Crashes immediately with PluginContractViolation identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=f076aaf1230562d9
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=819fbfab4bb9501f
   owner: bugfix
   reason: Offensive isinstance — validates plugin return type to crash with PluginContractViolation instead of opaque AttributeError
   safety: Crashes immediately with clear error identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=bd2dec73da075348
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=a8add71cde9922e9
   owner: bugfix
   reason: Offensive isinstance — validates failsink return type to crash with PluginContractViolation instead of opaque AttributeError
   safety: Crashes immediately with clear error identifying the buggy failsink plugin
@@ -121,6 +121,11 @@ allow_hits:
   reason: TYPE_CHECKING import of TelemetryManager — RowProcessor emits telemetry events
   safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
   expires: null
+- key: engine/processor.py:R4:RowProcessor:_record_source_boundary_failure:fp=aa98293522b1abd7
+  owner: architecture
+  reason: Best-effort TokenCompleted telemetry after source-boundary audit completion must not mask the original Tier-1 boundary violation
+  safety: Telemetry runs only after both FAILED audit writes succeed; failures are logged and the original violation continues to propagate
+  expires: '2026-07-10'
 - key: engine/commencement.py:R5:evaluate_commencement_gates:fp=18ca009ccd49b5e0
   owner: architecture
   reason: Offensive isinstance check — gate results must be bool before recording in audit trail. Non-boolean results from expression evaluation are a config bug, not data to coerce.
@@ -136,67 +141,67 @@ allow_hits:
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_emit_phase_error:fp=6cffb14150fdba06
+- key: engine/orchestrator/core.py:R4:Orchestrator:_emit_phase_error:fp=c6614b6152ca9135
   owner: architecture
   reason: Best-effort PhaseError emission — event-bus handler bugs must not mask the original pipeline exception
   safety: Catches and logs; original exception always re-raised by caller
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=e4d10fc556f7f8b9
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f01844882f665775
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=cf498d8f58f030f6
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=2e1851ead5476558
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=40806ae1c0e6ef40
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=62a6062f53e1c8bc
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=62e4cd1aa25f5049
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=29b76bce404b90fe
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=306ea95c519b5a05
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=926bece7f5e25d90
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f3332e44982903d8
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=c1a385776562c927
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_export_phase:fp=14ad2913d1004565
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_export_phase:fp=b5039ca3c4d1591e
   owner: architecture
   reason: Best-effort export status recording — must not mask original export exception
   safety: Catches and logs; original export exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=7e8c95dd95c140af
+- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=c2bff95418c4c901
   owner: architecture
   reason: Best-effort interrupted ceremony — GracefulShutdownError must not be masked by ceremony failure
   safety: Catches and logs; original shutdown exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=0495089fb4b0fecf
+- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=f1f8262b82f4824d
   owner: architecture
   reason: Best-effort failure ceremony — original pipeline exception must not be masked
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=211b21bf2898aaa6
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=fe34c503ec93989b
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=e917f3948a17c445
+- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=e76936664b5c1f66
   owner: architecture
   reason: Best-effort interrupted ceremony on resume — must not mask original shutdown exception
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=48a4ff0313987ab8
+- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=ec91c688592698e6
   owner: architecture
   reason: Best-effort failure ceremony on resume — must not mask original exception
   safety: Catches and logs; original exception always re-raised
@@ -226,7 +231,7 @@ allow_hits:
   reason: First-seen original name fallback - not all fields have explicit mapping in fallback dict
   safety: Falls back to normalized_name when original name unknown
   expires: '2026-05-12'
-- key: engine/executors/state_guard.py:R5:NodeStateGuard:__exit__:fp=4317dceb2faa6558
+- key: engine/executors/state_guard.py:R5:NodeStateGuard:__exit__:fp=63487623de5ce8df
   owner: architecture
   reason: 'ADR-010 Decision 1 nominal isinstance check -- discriminates AuditEvidenceBase subclasses so NodeStateGuard can populate ExecutionError.context from to_audit_dict(). Nominal inheritance (not structural Protocol) is deliberate: see ADR-010 Alternative 3 for the accidental-match spoofing rationale. The exception always propagates; only structured audit context is conditionally added.'
   safety: 'The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug; broken to_audit_dict() surfaces via the existing (TypeError, AttributeError, KeyError, NameError) re-raise path.'

@@ -35,7 +35,7 @@ from elspeth.contracts.declaration_contracts import (
     implements_dispatch_site,
     register_declaration_contract,
 )
-from elspeth.engine.executors.declaration_dispatch import run_post_emission_checks
+from elspeth.engine.executors.declaration_dispatch import _serialize_plugin_name, run_post_emission_checks
 
 
 class _Payload(TypedDict):
@@ -51,8 +51,10 @@ class _TestViolationB(DeclarationContractViolation):
 
 
 def _inputs() -> PostEmissionInputs:
+    plugin = type("NamedPlugin", (), {})()
+    plugin.name = "named-plugin"
     return PostEmissionInputs(
-        plugin=object(),
+        plugin=plugin,
         node_id="n",
         run_id="r",
         row_id="rw",
@@ -389,6 +391,14 @@ def test_multiple_violations_wrapped_in_aggregate() -> None:
     for child in aggregate.violations:
         if isinstance(child, DeclarationContractViolation):
             assert child.contract_name in {"raises_violation", "raises_second_violation"}
+
+
+def test_serialize_plugin_name_raises_when_plugin_name_missing() -> None:
+    class _NamelessPlugin:
+        pass
+
+    with pytest.raises(AttributeError):
+        _serialize_plugin_name(_NamelessPlugin())
 
 
 def test_aggregate_to_audit_dict_carries_children() -> None:

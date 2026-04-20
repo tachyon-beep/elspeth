@@ -149,15 +149,17 @@ def _register_tokens(processor: Any, tokens: list[TokenInfo]) -> None:
         )
 
 
-class TestPassThroughFalseIsNoOp:
-    def test_passes_through_false_skips_check(self) -> None:
-        """Cross-check is skipped entirely when passes_through_input is False."""
+class TestPassThroughFalseDoesNotFirePassThroughViolation:
+    def test_passes_through_false_does_not_raise_pass_through_violation(self) -> None:
+        """The pass-through contract stays quiet when the declaration is False."""
         processor = _make_processor()
         contract = _make_contract({"x": int})
         tokens = [_make_token(f"t{i}", {"x": i}, contract) for i in range(3)]
         transform = _make_flush_transform(passes_through_input=False)
         fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=OutputMode.PASSTHROUGH)
-        # Even with a drop-shaped result, no-op because passes_through_input=False.
+        # The processor still dispatches batch-flush contracts, but the
+        # pass-through contract itself does not apply when the declaration is
+        # false.
         result = TransformResult.success_multi(
             [PipelineRow({}, _make_contract({}))] * 3,
             success_reason={"action": "test"},

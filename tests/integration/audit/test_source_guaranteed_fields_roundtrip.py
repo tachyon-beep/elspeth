@@ -21,10 +21,13 @@ from elspeth.contracts.declaration_contracts import (
 )
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import ExecutionError, SourceGuaranteedFieldsViolation
+from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.lineage import explain
 from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
 from elspeth.engine.executors.source_guaranteed_fields import SourceGuaranteedFieldsContract
+from elspeth.plugins.infrastructure.base import BaseSource
 from tests.fixtures.landscape import make_recorder_with_run
 
 
@@ -91,17 +94,40 @@ def _contract(fields: tuple[str, ...]) -> SchemaContract:
     )
 
 
+class _TestSourcePlugin(BaseSource):
+    name = "SourceGuaranteedFieldsSource"
+    output_schema = object
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        node_id: str,
+        declared_guaranteed_fields: frozenset[str],
+    ) -> None:
+        super().__init__({})
+        self.name = name
+        self.node_id = node_id
+        self.declared_guaranteed_fields = declared_guaranteed_fields
+
+    def load(self, ctx: PluginContext):
+        yield SourceRow.valid({"customer_id": "v"}, contract=_contract(("customer_id",)))
+
+    def close(self) -> None:
+        pass
+
+
 def _plugin(
     *,
     name: str = "SourceGuaranteedFieldsSource",
     node_id: str = "source-guaranteed-fields-node",
     declared_guaranteed_fields: frozenset[str] = frozenset({"customer_id", "account_id"}),
 ) -> Any:
-    plugin = type("SourceGuaranteedFieldsPlugin", (), {})()
-    plugin.name = name
-    plugin.node_id = node_id
-    plugin.declared_guaranteed_fields = declared_guaranteed_fields
-    return plugin
+    return _TestSourcePlugin(
+        name=name,
+        node_id=node_id,
+        declared_guaranteed_fields=declared_guaranteed_fields,
+    )
 
 
 class _SecondaryPayload(TypedDict):
@@ -110,6 +136,14 @@ class _SecondaryPayload(TypedDict):
 
 class _SecondaryBoundaryViolation(DeclarationContractViolation):
     payload_schema = _SecondaryPayload
+
+
+class _SecretPayload(TypedDict):
+    marker: str
+
+
+class _SecretRoundTripViolation(DeclarationContractViolation):
+    payload_schema = _SecretPayload
 
 
 class _SecondaryBoundaryContract(DeclarationContract):
@@ -232,3 +266,32 @@ class TestSourceGuaranteedFieldsRoundTrip:
         assert context["is_aggregate"] is True
         child_types = {entry["exception_type"] for entry in context["violations"]}
         assert child_types == {"SourceGuaranteedFieldsViolation", "_SecondaryBoundaryViolation"}
+
+    def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        run_id = "run-source-guaranteed-fields-secret"
+        row_id = "row-source-guaranteed-fields-secret"
+        token_id = "token-source-guaranteed-fields-secret"
+        node_id = "source-guaranteed-fields-node"
+        setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
+
+        violation = _SecretRoundTripViolation(
+            plugin="SourceGuaranteedFieldsSource",
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+        violation._attach_contract_name("source_guaranteed_fields_secret_roundtrip")
+
+        error = ExecutionError(
+            exception=str(violation),
+            exception_type=type(violation).__name__,
+            phase="source_boundary_check",
+            context=violation.to_audit_dict(),
+        )
+
+        context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
+        assert "sk-abcdef" not in json.dumps(context)
+        assert context["payload"]["marker"] == "<redacted-secret>"

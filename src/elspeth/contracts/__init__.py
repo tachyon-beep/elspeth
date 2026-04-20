@@ -20,6 +20,8 @@ Import patterns:
     from elspeth.core.config import RetrySettings, ElspethSettings
 """
 
+from typing import TYPE_CHECKING
+
 from elspeth.contracts.aggregation_checkpoint import (
     AggregationCheckpointState,
     AggregationNodeCheckpoint,
@@ -156,7 +158,6 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import (
     # Tier 1 guard tuple — single source of truth for "never catch" exceptions
-    TIER_1_ERRORS,
     BatchPendingError,
     CoalesceFailureReason,
     CommencementGateFailedError,
@@ -287,6 +288,18 @@ from elspeth.contracts.url import (
     SanitizedDatabaseUrl,
     SanitizedWebhookUrl,
 )
+
+if TYPE_CHECKING:
+    TIER_1_ERRORS: tuple[type[Exception], ...]
+
+
+def __getattr__(name: str) -> tuple[type[Exception], ...]:
+    if name == "TIER_1_ERRORS":
+        from elspeth.contracts import errors as errors_mod
+
+        return errors_mod.TIER_1_ERRORS
+    raise AttributeError(name)
+
 
 __all__ = [  # Grouped by category for readability
     # audit

@@ -11,12 +11,14 @@ Coordinates:
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import deque
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, cast
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformResult
 from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.freeze import deep_freeze
@@ -77,6 +79,7 @@ from elspeth.plugins.infrastructure.pooling import CapacityError
 
 # Iteration guard to prevent infinite loops from bugs
 MAX_WORK_QUEUE_ITERATIONS = 10_000
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,8 +315,9 @@ class RowProcessor:
         self._node_step_map: Mapping[NodeID, int] = traversal.node_step_map
         self._step_resolver: StepResolver = make_step_resolver(traversal.node_step_map, source_node_id)
         self._node_to_plugin: Mapping[NodeID, RowPlugin | GateSettings] = traversal.node_to_plugin
-        source_plugin_candidate = source_plugin if source_plugin is not None else self._node_to_plugin[source_node_id]
-        self._source_plugin: SourceProtocol | None = cast(SourceProtocol | None, source_plugin_candidate)
+        # Traversal metadata intentionally excludes the source node. Callers
+        # that want source-boundary checks must pass the concrete source plugin.
+        self._source_plugin: SourceProtocol | None = source_plugin
         self._first_transform_node_id: NodeID | None = traversal.first_transform_node_id
         self._node_to_next: Mapping[NodeID, NodeID | None] = traversal.node_to_next
         self._retry_manager = retry_manager
@@ -675,7 +679,7 @@ class RowProcessor:
         fctx: _FlushContext,
         result: TransformResult,
     ) -> None:
-        """Runtime cross-check for ``passes_through_input`` at flush time.
+        """Batch-flush declaration dispatch before any terminal emissions.
 
         ADR-009 §Clause 2 — this closes the gap ADR-008 left open. The batch
         aggregation flush path previously trusted the static annotation; a
@@ -730,8 +734,6 @@ class RowProcessor:
                 emitted_count=len(emitted),
                 used_success_empty=used_success_empty,
             )
-            if not fctx.transform.passes_through_input:
-                return
 
             # _FlushContext.__post_init__ guarantees buffered_tokens is non-empty;
             # no defensive emptiness guard (CLAUDE.md: defensive programming
@@ -739,7 +741,7 @@ class RowProcessor:
             for i, token in enumerate(fctx.buffered_tokens):
                 if token.row_data.contract is None:
                     raise FrameworkBugError(
-                        f"Pass-through batch flush: buffered token {i} "
+                        f"Batch flush: buffered token {i} "
                         f"(token_id={token.token_id!r}) has no contract "
                         f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
                         "Framework invariant violated."
@@ -1508,28 +1510,69 @@ class RowProcessor:
         can use the real row/token identity. Because the failure happens before
         DAG traversal begins, the processor must record BOTH the terminal token
         outcome and the FAILED source node state before re-raising the Tier 1
-        exception.
+        exception. If either audit write fails, raise ``AuditIntegrityError`` so
+        the recorder failure outranks the original declaration violation.
+
+        ``TokenCompleted`` telemetry is emitted only after both audit writes
+        succeed. Telemetry is operational visibility, not part of the
+        source-boundary audit pair; telemetry failures are logged and never
+        outrank the original violation or a recorder failure.
         """
         audit_context = violation.to_audit_dict()
         error_hash = hashlib.sha256(f"{type(violation).__name__}:{self._source_node_id}".encode()).hexdigest()[:16]
-        self._data_flow.record_token_outcome(
-            ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
-            outcome=RowOutcome.FAILED,
-            error_hash=error_hash,
-            context=audit_context,
-        )
-        self._emit_token_completed(token, RowOutcome.FAILED)
-        self._record_source_node_state(
-            token=token,
-            input_data=input_data,
-            status=NodeStateStatus.FAILED,
-            error=ExecutionError(
-                exception=str(violation),
-                exception_type=type(violation).__name__,
-                phase="source_boundary_check",
+        try:
+            self._data_flow.record_token_outcome(
+                ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
                 context=audit_context,
-            ),
-        )
+            )
+        except contract_errors.TIER_1_ERRORS:
+            raise
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise
+        except Exception as record_failure:
+            raise AuditIntegrityError(
+                f"Failed to record {type(violation).__name__} FAILED outcome for token {token.token_id!r} "
+                f"on source boundary (node={self._source_node_id!r}). Audit trail is INCOMPLETE — "
+                f"the FAILED token outcome may be missing. Recorder failure: "
+                f"{type(record_failure).__name__}: {record_failure}. Original violation: {violation!s}"
+            ) from record_failure
+        try:
+            self._record_source_node_state(
+                token=token,
+                input_data=input_data,
+                status=NodeStateStatus.FAILED,
+                error=ExecutionError(
+                    exception=str(violation),
+                    exception_type=type(violation).__name__,
+                    phase="source_boundary_check",
+                    context=audit_context,
+                ),
+            )
+        except contract_errors.TIER_1_ERRORS:
+            raise
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise
+        except Exception as record_failure:
+            raise AuditIntegrityError(
+                f"Failed to record FAILED source node state for token {token.token_id!r} "
+                f"on source boundary (node={self._source_node_id!r}). Audit trail is INCOMPLETE — "
+                f"the FAILED source node state may be missing. Recorder failure: "
+                f"{type(record_failure).__name__}: {record_failure}. Original violation: {violation!s}"
+            ) from record_failure
+        try:
+            self._emit_token_completed(token, RowOutcome.FAILED)
+        except Exception as telemetry_failure:
+            logger.exception(
+                "TokenCompleted telemetry failed after source-boundary audit completion; preserving original source-boundary violation",
+                extra={
+                    "run_id": self._run_id,
+                    "token_id": token.token_id,
+                    "source_node_id": self._source_node_id,
+                    "telemetry_error_type": type(telemetry_failure).__name__,
+                },
+            )
 
     def _record_source_and_start_traversal(
         self,

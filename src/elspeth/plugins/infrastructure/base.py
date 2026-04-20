@@ -318,6 +318,16 @@ class BaseTransform(ABC):
             "instantiate in isolation. Implement probe_config() or remove the annotation."
         )
 
+    def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Return representative input rows for ADR-009's backward invariant.
+
+        The default harness drives non-pass-through transforms with a single
+        scalar ``probe`` row. Batch-aware transforms whose non-pass-through
+        semantics only appear under mixed-validity batches can override this
+        to supply a more representative shape.
+        """
+        return [probe]
+
     @staticmethod
     def _create_schemas(
         schema_config: Any,

@@ -13,9 +13,10 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import CallStatus, CallType
 from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
-from elspeth.contracts.errors import TIER_1_ERRORS, PluginRetryableError
+from elspeth.contracts.errors import PluginRetryableError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.freeze import deep_freeze
 from elspeth.contracts.token_usage import TokenUsage
@@ -351,7 +352,7 @@ class AuditedLLMClient(AuditedClientBase):
                         token_usage=None,
                     )
                 )
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise  # System bugs and audit integrity violations must crash
             except Exception as tel_err:
                 if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
@@ -576,7 +577,7 @@ class AuditedLLMClient(AuditedClientBase):
                             token_usage=usage if usage.has_data else None,
                         )
                     )
-                except TIER_1_ERRORS:
+                except contract_errors.TIER_1_ERRORS:
                     raise  # System bugs and audit integrity violations must crash
                 except Exception as tel_err:
                     if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
@@ -694,7 +695,7 @@ class AuditedLLMClient(AuditedClientBase):
                     token_usage=usage_snapshot,
                 )
             )
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise  # System bugs and audit integrity violations must crash
         except Exception as tel_err:
             if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):

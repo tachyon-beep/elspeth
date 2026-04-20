@@ -18,7 +18,8 @@ from typing import TYPE_CHECKING
 
 import structlog
 
-from elspeth.contracts.errors import TIER_1_ERRORS, FrameworkBugError
+import elspeth.contracts.errors as contract_errors
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.plugins.infrastructure.batching.ports import OutputPort
 from elspeth.plugins.infrastructure.batching.row_reorder_buffer import (
     RowReorderBuffer,
@@ -254,7 +255,7 @@ class BatchTransformMixin:
 
         try:
             result = processor(row, ctx)
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise  # Tier 1 errors must crash immediately — never wrap
         except Exception as e:
             # Plugin bug - wrap exception for propagation to orchestrator
@@ -348,7 +349,7 @@ class BatchTransformMixin:
                     # Emit exception result so waiter can re-raise in orchestrator thread
                     # state_id is from the current entry (captured above before exception)
                     self._batch_output.emit(token, exception_result, state_id)
-                except TIER_1_ERRORS:
+                except contract_errors.TIER_1_ERRORS:
                     raise  # Tier 1 errors must crash immediately
                 except Exception as emit_err:
                     # Port is completely broken — crash the release thread.

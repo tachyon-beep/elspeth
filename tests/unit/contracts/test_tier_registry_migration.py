@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 
 def test_all_four_pre_migration_members_remain_tier_1() -> None:
     from elspeth.contracts.errors import (
@@ -73,3 +76,25 @@ def test_tier_1_reason_is_non_empty_for_all_members() -> None:
     for cls in TIER_1_ERRORS:
         reason = tier_1_reason(cls)
         assert reason and reason.strip(), f"{cls.__name__} registered without meaningful reason"
+
+
+def test_repo_uses_live_tier_1_error_attribute_access_not_from_import_snapshots() -> None:
+    """Repo code must not snapshot ``TIER_1_ERRORS`` via ``from ... import``."""
+    forbidden_imports: list[str] = []
+    src_root = Path("src/elspeth")
+
+    for py_file in sorted(src_root.rglob("*.py")):
+        tree = ast.parse(py_file.read_text(), filename=str(py_file))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module not in {"elspeth.contracts", "elspeth.contracts.errors"}:
+                continue
+            if not any(alias.name == "TIER_1_ERRORS" for alias in node.names):
+                continue
+            forbidden_imports.append(f"{py_file}:{node.lineno}: from {node.module} import TIER_1_ERRORS")
+
+    assert not forbidden_imports, (
+        "TIER_1_ERRORS must be accessed via module attribute (for example, "
+        "`errors.TIER_1_ERRORS`) so callers see the live registry.\n" + "\n".join(forbidden_imports)
+    )

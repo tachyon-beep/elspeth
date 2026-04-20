@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, TypedDict
 
 from elspeth.contracts import NodeStateFailed, NodeType
 from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     BatchFlushInputs,
     BatchFlushOutputs,
+    DeclarationContractViolation,
     PostEmissionInputs,
     PostEmissionOutputs,
     _clear_registry_for_tests,
@@ -146,6 +147,14 @@ def _plugin(
     return plugin
 
 
+class _SecretPayload(TypedDict):
+    marker: str
+
+
+class _SecretRoundTripViolation(DeclarationContractViolation):
+    payload_schema = _SecretPayload
+
+
 class TestSchemaConfigModeRoundTrip:
     def setup_method(self) -> None:
         self._snapshot = _snapshot_registry_for_tests()
@@ -253,3 +262,32 @@ class TestSchemaConfigModeRoundTrip:
 
         pass_through_child = next(entry for entry in context["violations"] if entry["exception_type"] == "PassThroughContractViolation")
         assert pass_through_child["divergence_set"] == ["carry"]
+
+    def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        run_id = "run-schema-config-mode-secret"
+        row_id = "row-schema-config-mode-secret"
+        token_id = "token-schema-config-mode-secret"
+        node_id = "node-schema-config-mode"
+        setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
+
+        violation = _SecretRoundTripViolation(
+            plugin="SchemaConfigModeTransform",
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+        violation._attach_contract_name("schema_config_mode_secret_roundtrip")
+
+        error = ExecutionError(
+            exception=str(violation),
+            exception_type=type(violation).__name__,
+            phase="executor_post_process",
+            context=violation.to_audit_dict(),
+        )
+
+        context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
+        assert "sk-abcdef" not in json.dumps(context)
+        assert context["payload"]["marker"] == "<redacted-secret>"

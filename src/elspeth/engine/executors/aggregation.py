@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import structlog
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import (
     BatchPendingError,
     BatchTransformProtocol,
@@ -26,7 +27,6 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import (
-    TIER_1_ERRORS,
     AuditIntegrityError,
     OrchestrationInvariantError,
     PluginContractViolation,
@@ -412,7 +412,7 @@ class AggregationExecutor:
                         # Re-raise for orchestrator to schedule retry.
                         # The batch remains in "executing" status, checkpoint is preserved.
                         raise
-                    except TIER_1_ERRORS:
+                    except contract_errors.TIER_1_ERRORS:
                         raise  # Tier 1 errors must crash — never record as row FAILED
                     except Exception as e:
                         duration_ms = (time.perf_counter() - start) * 1000
@@ -513,7 +513,7 @@ class AggregationExecutor:
 
             except BatchPendingError:
                 raise  # Already handled above, just propagate
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise  # Tier 1 errors must crash — skip batch cleanup
             except Exception:
                 if batch_pending:
@@ -536,7 +536,7 @@ class AggregationExecutor:
                             trigger_type=trigger_type,
                             state_id=guard.state_id,
                         )
-                    except TIER_1_ERRORS:
+                    except contract_errors.TIER_1_ERRORS:
                         raise  # Tier 1 errors must crash immediately
                     except (TypeError, AttributeError, KeyError, NameError):
                         raise  # Programming errors in recorder — crash to surface the bug

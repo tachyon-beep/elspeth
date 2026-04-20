@@ -21,6 +21,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Literal
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import BatchPendingError
 
 if TYPE_CHECKING:
@@ -167,8 +168,6 @@ def track_operation(
                 duration_ms=duration_ms,
             )
         except Exception as db_error:
-            from elspeth.contracts.errors import TIER_1_ERRORS
-
             # Audit integrity: if we can't record the operation, the run must fail.
             # A successful operation with missing audit record violates Tier-1 trust.
             logger.critical(
@@ -185,7 +184,7 @@ def track_operation(
             # must ALWAYS propagate regardless of whether there was an original
             # exception — audit corruption is categorically worse than any
             # operation-level error.
-            if isinstance(db_error, TIER_1_ERRORS):
+            if isinstance(db_error, contract_errors.TIER_1_ERRORS):
                 raise db_error from original_exception
             # If there was an original exception, let it propagate (DB error is logged).
             # If the operation succeeded but audit failed, we MUST raise the DB error.

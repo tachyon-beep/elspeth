@@ -18,11 +18,11 @@ from collections.abc import Mapping
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import ExecutionError, NodeStateOpen
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import (
-    TIER_1_ERRORS,
     AuditIntegrityError,
     OrchestrationInvariantError,
 )
@@ -137,7 +137,7 @@ class NodeStateGuard:
                     duration_ms=duration_ms,
                     error=error,
                 )
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise  # Tier 1 errors must crash immediately
             except Exception as db_err:
                 raise AuditIntegrityError(
@@ -175,7 +175,7 @@ class NodeStateGuard:
                 duration_ms=duration_ms,
                 error=exc_error,
             )
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise  # Tier 1 errors must crash immediately
         except (TypeError, AttributeError, KeyError, NameError):
             raise  # Programming errors in recorder — crash to surface the bug

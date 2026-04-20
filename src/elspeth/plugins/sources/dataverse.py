@@ -19,11 +19,12 @@ from typing import Any, ClassVar, Self
 import structlog
 from pydantic import Field, ValidationError, field_validator, model_validator
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import CallStatus, CallType, Determinism, PluginSchema, SourceRow
 from elspeth.contracts.call_data import RawCallPayload
 from elspeth.contracts.contexts import LifecycleContext, SourceContext
 from elspeth.contracts.contract_builder import ContractBuilder
-from elspeth.contracts.errors import TIER_1_ERRORS, AuditIntegrityError
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.core.canonical import stable_hash
@@ -191,7 +192,7 @@ class DataverseSource(BaseSource):
 
     name = "dataverse"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:3b7175a3f4353053"
+    source_file_hash: str | None = "sha256:7fbcf803bb0f952d"
     determinism = Determinism.EXTERNAL_CALL  # Live REST API, not static file read
     config_model = DataverseSourceConfig
 
@@ -473,7 +474,7 @@ class DataverseSource(BaseSource):
                     response_payload=resp_payload,
                 )
             )
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise
         except Exception as tel_err:
             logger.warning(
@@ -523,7 +524,7 @@ class DataverseSource(BaseSource):
                     latency_ms=page.latency_ms,
                     provider="dataverse",
                 )
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise
             except Exception as exc:
                 raise AuditIntegrityError(
@@ -555,7 +556,7 @@ class DataverseSource(BaseSource):
                     latency_ms=error.latency_ms,
                     provider="dataverse",
                 )
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise
             except Exception as exc:
                 raise AuditIntegrityError(

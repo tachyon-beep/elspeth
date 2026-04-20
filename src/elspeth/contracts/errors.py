@@ -989,7 +989,8 @@ class PluginContractViolation(AuditEvidenceBase, RuntimeError):
         return {"exception_type": type(self).__name__, "message": str(self)}
 
 
-class ZeroEmissionSuccessContractViolation(PluginContractViolation):
+# TIER-2: Plugin success-empty misuse — row-level contract bug remains fully auditable and does not imply Tier-1 framework or audit-record corruption.
+class ZeroEmissionSuccessContractViolation(PluginContractViolation, AuditEvidenceBase):
     """Raised when ``success_empty()`` is used outside the filter declaration path.
 
     Tier 2 by design. The engine can still record a row-level FAILED outcome,

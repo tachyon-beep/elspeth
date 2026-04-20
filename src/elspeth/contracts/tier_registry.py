@@ -6,8 +6,10 @@ beyond the v0 design (see plan Revision History — Review v1):
 1. ``@tier_1_error(reason=...)`` is a factory — it requires a justification
    string. Auditors reviewing Tier-1 additions can grep for the reason.
 2. Module-prefix allowlist: only callers in ``elspeth.contracts.*``,
-   ``elspeth.engine.*``, or ``elspeth.core.*`` may register. Plugin modules
-   cannot elevate their own exceptions (reviewer B6/F-6).
+   ``elspeth.engine.*``, or ``elspeth.core.*`` may register during normal
+   runtime. Under pytest, ``tests.*`` is additionally allowed for test-only
+   fixtures. Plugin modules cannot elevate their own exceptions
+   (reviewer B6/F-6).
 3. ``freeze_tier_registry()`` is called at end of bootstrap. Registration
    after freeze raises ``FrameworkBugError`` (reviewer B5/F-2).
 
@@ -151,10 +153,10 @@ class _Tier1ErrorsView:
 
     Live view over ``_REGISTRY``. Unlike a snapshot tuple, membership tests
     (``__contains__``), iteration, and ``count`` always see the current registry
-    contents. Not a drop-in tuple replacement: ``len()``, indexing, and use in
-    ``except`` clauses are intentionally unsupported — use the ``errors.TIER_1_ERRORS``
-    module attribute (PEP 562 re-export added in Task 4) when tuple semantics
-    are required.
+    contents. Not a drop-in tuple replacement: ``len()`` is supported for test
+    assertions, but indexing and use in ``except`` clauses remain unsupported —
+    use the ``errors.TIER_1_ERRORS`` module attribute (PEP 562 re-export added
+    in Task 4) when tuple semantics are required.
     """
 
     def __contains__(self, item: object) -> bool:

@@ -20,13 +20,16 @@ from elspeth.contracts.declaration_contracts import (
     implements_dispatch_site,
     register_declaration_contract,
 )
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     SinkRequiredFieldsViolation,
 )
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
 from elspeth.engine.executors.sink_required_fields import SinkRequiredFieldsContract
+from elspeth.plugins.infrastructure.base import BaseSink
 
 
 def _contract(
@@ -58,17 +61,43 @@ def _contract(
     return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
+class _TestSinkPlugin(BaseSink):
+    name = "SinkRequiredFieldsSink"
+    input_schema = object
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        node_id: str | None,
+        declared_required_fields: frozenset[str],
+    ) -> None:
+        super().__init__({})
+        self.name = name
+        self.node_id = node_id
+        self.declared_required_fields = declared_required_fields
+
+    def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> SinkWriteResult:
+        raise NotImplementedError
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 def _plugin(
     *,
     name: str = "SinkRequiredFieldsSink",
     node_id: str | None = "sink-required-fields-node",
     declared_required_fields: frozenset[str] = frozenset({"customer_id", "amount"}),
 ) -> Any:
-    plugin = type("SinkRequiredFieldsPlugin", (), {})()
-    plugin.name = name
-    plugin.node_id = node_id
-    plugin.declared_required_fields = declared_required_fields
-    return plugin
+    return _TestSinkPlugin(
+        name=name,
+        node_id=node_id,
+        declared_required_fields=declared_required_fields,
+    )
 
 
 class _SecondaryPayload(TypedDict):
@@ -130,6 +159,42 @@ def test_applies_to_on_plugin_missing_attribute_returns_false() -> None:
         pass
 
     assert contract.applies_to(_NoAttr()) is False
+
+
+def test_applies_to_true_for_inherited_declared_required_fields() -> None:
+    contract = SinkRequiredFieldsContract()
+
+    class _DeclaredSinkBase(BaseSink):
+        name = "declared-sink-base"
+        input_schema = object
+        declared_required_fields = frozenset({"customer_id"})
+
+        def __init__(self) -> None:
+            self.config = {}
+            self.node_id = None
+
+        def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> SinkWriteResult:
+            raise NotImplementedError
+
+        def flush(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class _InheritedDeclaredSink(_DeclaredSinkBase):
+        pass
+
+    assert contract.applies_to(_InheritedDeclaredSink()) is True
+
+
+def test_applies_to_false_for_wrong_plugin_role_even_when_attr_present() -> None:
+    contract = SinkRequiredFieldsContract()
+
+    class _NotASink:
+        declared_required_fields = frozenset({"customer_id"})
+
+    assert contract.applies_to(_NotASink()) is False
 
 
 def test_contract_claims_boundary_dispatch_site() -> None:

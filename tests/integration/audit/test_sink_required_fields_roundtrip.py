@@ -19,12 +19,15 @@ from elspeth.contracts.declaration_contracts import (
     implements_dispatch_site,
     register_declaration_contract,
 )
+from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import ExecutionError, SinkRequiredFieldsViolation
+from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.core.landscape.lineage import explain
 from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
 from elspeth.engine.executors.sink_required_fields import SinkRequiredFieldsContract
+from elspeth.plugins.infrastructure.base import BaseSink
 from tests.fixtures.landscape import make_recorder_with_run, register_test_node
 
 
@@ -109,17 +112,43 @@ def _contract(
     return SchemaContract(mode="OBSERVED", fields=fields, locked=True)
 
 
+class _TestSinkPlugin(BaseSink):
+    name = "SinkRequiredFieldsSink"
+    input_schema = object
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        node_id: str,
+        declared_required_fields: frozenset[str],
+    ) -> None:
+        super().__init__({})
+        self.name = name
+        self.node_id = node_id
+        self.declared_required_fields = declared_required_fields
+
+    def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> SinkWriteResult:
+        raise NotImplementedError
+
+    def flush(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 def _plugin(
     *,
     name: str = "SinkRequiredFieldsSink",
     node_id: str = "sink-required-fields-node",
     declared_required_fields: frozenset[str] = frozenset({"customer_id", "amount"}),
 ) -> Any:
-    plugin = type("SinkRequiredFieldsPlugin", (), {})()
-    plugin.name = name
-    plugin.node_id = node_id
-    plugin.declared_required_fields = declared_required_fields
-    return plugin
+    return _TestSinkPlugin(
+        name=name,
+        node_id=node_id,
+        declared_required_fields=declared_required_fields,
+    )
 
 
 class _SecondaryPayload(TypedDict):
@@ -128,6 +157,14 @@ class _SecondaryPayload(TypedDict):
 
 class _SecondaryBoundaryViolation(DeclarationContractViolation):
     payload_schema = _SecondaryPayload
+
+
+class _SecretPayload(TypedDict):
+    marker: str
+
+
+class _SecretRoundTripViolation(DeclarationContractViolation):
+    payload_schema = _SecretPayload
 
 
 class _SecondaryBoundaryContract(DeclarationContract):
@@ -250,3 +287,32 @@ class TestSinkRequiredFieldsRoundTrip:
         assert context["is_aggregate"] is True
         child_types = {entry["exception_type"] for entry in context["violations"]}
         assert child_types == {"SinkRequiredFieldsViolation", "_SecondaryBoundaryViolation"}
+
+    def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        run_id = "run-sink-required-fields-secret"
+        row_id = "row-sink-required-fields-secret"
+        token_id = "token-sink-required-fields-secret"
+        node_id = "sink-required-fields-node"
+        setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
+
+        violation = _SecretRoundTripViolation(
+            plugin="SinkRequiredFieldsSink",
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+        violation._attach_contract_name("sink_required_fields_secret_roundtrip")
+
+        error = ExecutionError(
+            exception=str(violation),
+            exception_type=type(violation).__name__,
+            phase="sink_write",
+            context=violation.to_audit_dict(),
+        )
+
+        context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
+        assert "sk-abcdef" not in json.dumps(context)
+        assert context["payload"]["marker"] == "<redacted-secret>"

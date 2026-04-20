@@ -113,12 +113,20 @@ _FIELD_NAME = st.text(_IDENTITY_CHARS, min_size=1, max_size=16)
 _FIELD_SET = st.frozensets(_FIELD_NAME, max_size=6)
 
 
+def _named_plugin(name: str) -> Any:
+    plugin = type("PropertyPlugin", (), {})()
+    plugin.name = name
+    return plugin
+
+
 def _plugin_strategy() -> st.SearchStrategy[Any]:
-    """Arbitrary plugin-like objects. The dispatcher never reads attributes
-    on ``plugin`` — ``applies_to`` and the dispatch method decide what matters.
-    A fresh ``object()`` per example suffices; shrinking is uninteresting
-    because the strategy has no structure."""
-    return st.builds(object)
+    """Minimal plugin-like objects with the mandatory ``name`` attribute.
+
+    ADR-010 treats a missing ``plugin.name`` as a framework bug, so property
+    strategies that exercise the aggregate path must populate it explicitly.
+    Contracts under test still decide all other applicability semantics.
+    """
+    return st.builds(_named_plugin, _IDENTITY_STR)
 
 
 def _row_like_strategy() -> st.SearchStrategy[dict[str, Any]]:

@@ -58,6 +58,26 @@ def _empty_traversal(source_node_id: str = "source_001") -> DAGTraversalContext:
 class TestRowProcessorPipelineRow:
     """Tests for RowProcessor.process_row() with SourceRow."""
 
+    def test_constructor_allows_missing_source_plugin_when_traversal_omits_source(self) -> None:
+        """Traversal metadata excludes source nodes, so source_plugin may remain None."""
+        from elspeth.engine.processor import RowProcessor
+
+        factory = _make_mock_factory()
+        span_factory = _make_mock_span_factory()
+
+        processor = RowProcessor(
+            execution=factory.execution,
+            data_flow=factory.data_flow,
+            span_factory=span_factory,
+            run_id="run_001",
+            source_node_id=NodeID("source_001"),
+            source_on_success="default",
+            source_plugin=None,
+            traversal=_empty_traversal(),
+        )
+
+        assert processor._source_plugin is None
+
     def test_process_row_accepts_source_row(self) -> None:
         """process_row should accept SourceRow and pass it to create_initial_token."""
         from elspeth.engine.processor import RowProcessor

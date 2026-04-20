@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from pydantic import ValidationError
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import (
     Artifact,
     ExecutionError,
@@ -27,7 +28,6 @@ from elspeth.contracts.declaration_contracts import (
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import (
-    TIER_1_ERRORS,
     AuditIntegrityError,
     FrameworkBugError,
     OrchestrationInvariantError,
@@ -144,7 +144,7 @@ class SinkExecutor:
                 duration_ms=0.0,
                 error=cleanup_error,
             )
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise  # Audit corruption during cleanup is higher priority than original error
         except Exception as cleanup_exc:
             logger.warning(
@@ -200,7 +200,7 @@ class SinkExecutor:
             #
             #   * Layer 1 (pre-write contract, 2C): intent validation.
             #     Triage SQL: WHERE exception_type = 'SinkRequiredFieldsViolation'
-            #     (or whichever concrete subclass 2C introduces).
+            #     (the concrete 2C contract class).
             #   * Layer 2 (THIS check): transactional backstop.
             #     Triage SQL: WHERE exception_type = 'SinkTransactionalInvariantError'.
             #
@@ -379,7 +379,7 @@ class SinkExecutor:
             batch_contract = tokens[0].row_data.contract
             for token in tokens[1:]:
                 batch_contract = batch_contract.merge(token.row_data.contract)
-        except TIER_1_ERRORS:
+        except contract_errors.TIER_1_ERRORS:
             raise
         except Exception as e:
             merge_duration_ms = (time.perf_counter() - contract_merge_start) * 1000
@@ -406,7 +406,7 @@ class SinkExecutor:
                     input_data=input_dict,
                 )
                 all_states.append((token, state))
-        except TIER_1_ERRORS as e:
+        except contract_errors.TIER_1_ERRORS as e:
             if all_states:
                 self._best_effort_cleanup(all_states, e, "begin_node_state")
             raise
@@ -423,7 +423,7 @@ class SinkExecutor:
                         duration_ms=0.0,
                         error=begin_error,
                     )
-                except TIER_1_ERRORS:
+                except contract_errors.TIER_1_ERRORS:
                     raise  # Audit corruption during cleanup is higher priority than original error
                 except Exception as cleanup_exc:
                     logger.warning(
@@ -516,7 +516,7 @@ class SinkExecutor:
                 error=self._build_boundary_error(exc=e, phase="sink_write"),
             )
             raise
-        except TIER_1_ERRORS as e:
+        except contract_errors.TIER_1_ERRORS as e:
             self._best_effort_cleanup(all_states, e, "sink_write")
             raise
         except Exception as e:
@@ -592,7 +592,7 @@ class SinkExecutor:
                 for token, _ in primary_tokens:
                     try:
                         on_token_written(token)
-                    except TIER_1_ERRORS:
+                    except contract_errors.TIER_1_ERRORS:
                         raise
                     except Exception as exc:
                         raise AuditIntegrityError(
@@ -679,7 +679,7 @@ class SinkExecutor:
                         error=self._build_boundary_error(exc=e, phase="failsink_write"),
                     )
                     raise
-                except TIER_1_ERRORS:
+                except contract_errors.TIER_1_ERRORS:
                     raise
                 except Exception as e:
                     fs_write_error = ExecutionError(
@@ -723,7 +723,7 @@ class SinkExecutor:
                             input_data=input_dict,
                         )
                         failsink_states.append((token, state))
-                except TIER_1_ERRORS as e:
+                except contract_errors.TIER_1_ERRORS as e:
                     # Best-effort: close partially-opened failsink states + primary divert states
                     all_open = failsink_states + [(t, s) for t, _, s in primary_divert_states]
                     if all_open:
@@ -807,7 +807,7 @@ class SinkExecutor:
                             duration_ms=0.0,
                         )
                         completed_failsink_indices.add(loop_idx)
-                except TIER_1_ERRORS as e:
+                except contract_errors.TIER_1_ERRORS as e:
                     # Best-effort: close remaining OPEN states before crash.
                     remaining = [(t, s) for i, (t, _, s) in enumerate(primary_divert_states) if i not in completed_primary_indices] + [
                         (t, s) for i, (t, s) in enumerate(failsink_states) if i not in completed_failsink_indices
@@ -869,7 +869,7 @@ class SinkExecutor:
                     for token, _idx, _state in primary_divert_states:
                         try:
                             on_token_written(token)
-                        except TIER_1_ERRORS:
+                        except contract_errors.TIER_1_ERRORS:
                             raise
                         except Exception as exc:
                             raise AuditIntegrityError(
@@ -913,7 +913,7 @@ class SinkExecutor:
                     for token, _idx, _state in primary_divert_states:
                         try:
                             on_token_written(token)
-                        except TIER_1_ERRORS:
+                        except contract_errors.TIER_1_ERRORS:
                             raise
                         except Exception as exc:
                             raise AuditIntegrityError(

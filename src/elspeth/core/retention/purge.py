@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import structlog
 from sqlalchemy import ColumnElement, CompoundSelect, FromClause, and_, or_, select, union
 
-from elspeth.contracts.errors import TIER_1_ERRORS
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts.payload_store import PayloadStore
 from elspeth.core.landscape.reproducibility import update_grade_after_purge
 from elspeth.core.landscape.schema import (
@@ -400,7 +400,7 @@ class PurgeManager:
         for run_id in sorted(affected_run_ids):
             try:
                 update_grade_after_purge(self._db, run_id)
-            except TIER_1_ERRORS:
+            except contract_errors.TIER_1_ERRORS:
                 raise  # Tier 1 errors must crash — never swallow
             except Exception as exc:
                 logger.warning(

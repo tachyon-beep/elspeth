@@ -87,10 +87,7 @@ def _serialize_plugin_name(plugin: Any) -> str:
     framework bug per CLAUDE.md. Fallback to class name if the attribute
     is present-but-empty only, keeping the aggregate message informative.
     """
-    try:
-        name = plugin.name
-    except AttributeError:
-        return type(plugin).__name__
+    name = plugin.name
     return name if name else type(plugin).__name__
 
 

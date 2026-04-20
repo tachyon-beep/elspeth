@@ -267,9 +267,13 @@ class TestBatchFlushDispatcherRouting:
                 f"Expected effective_input_fields=frozenset({{'x'}}) for {token_id!r}, got {effective_input_fields!r}"
             )
 
-    def test_passes_through_false_skips_dispatcher(self) -> None:
-        """When ``passes_through_input=False``, the flush path short-circuits
-        before any dispatcher call.
+    def test_passes_through_false_still_dispatches_non_pass_through_contracts(self) -> None:
+        """Non-pass-through transforms still route through the batch dispatcher.
+
+        ``passes_through_input`` only controls whether the pass-through
+        contract applies. Other batch-flush contracts, such as
+        ``declared_output_fields`` and ``schema_config_mode``, still rely on
+        ``run_batch_flush_checks`` for non-pass-through transforms.
         """
         processor = _make_processor()
         contract = _make_contract({"x": int})
@@ -280,7 +284,10 @@ class TestBatchFlushDispatcherRouting:
         result = TransformResult.success_multi(rows, success_reason={"action": "noop"})
 
         processor._cross_check_flush_output(fctx, result)
-        assert _CountingContract.invocations == []
+        assert len(_CountingContract.invocations) == 1
+        token_id, effective_input_fields = _CountingContract.invocations[0]
+        assert token_id == "t1"
+        assert effective_input_fields == frozenset({"x"})
 
     def test_passthrough_zero_emission_still_hits_dispatcher(self) -> None:
         """Zero-emission passthrough has no 1:1 pairing, but governance still dispatches."""

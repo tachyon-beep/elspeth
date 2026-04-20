@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import ValidationError
 
+import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import (
     ExecutionError,
     TokenInfo,
@@ -21,7 +22,6 @@ from elspeth.contracts.enums import (
     RoutingMode,
 )
 from elspeth.contracts.errors import (
-    TIER_1_ERRORS,
     OrchestrationInvariantError,
     PluginContractViolation,
 )
@@ -357,7 +357,7 @@ class TransformExecutor:
                         result = transform.process(token.row_data, ctx)
 
                     duration_ms = (time.perf_counter() - start) * 1000
-                except TIER_1_ERRORS:
+                except contract_errors.TIER_1_ERRORS:
                     raise  # Tier 1 errors must crash — never record as row FAILED
                 except Exception as e:
                     duration_ms = (time.perf_counter() - start) * 1000

@@ -181,3 +181,15 @@ class SomeError(Exception):
         _, tde2 = scan_file(path, relative_path="sample.py")
         assert len(tde2) == 1
         assert tde2[0].canonical_key == f"sample.py:TDE2:{tde2[0].line}"
+
+
+def test_repo_errors_file_has_no_tde1_gap_for_zero_emission_success_contract_violation() -> None:
+    """Regression test for the live repo: Tier-2 plugin violations need an explicit
+    ``# TIER-2:`` marker immediately above the class so TDE1 can verify the tier
+    mechanically rather than inferring it from prose in the docstring.
+    """
+
+    path = Path("src/elspeth/contracts/errors.py")
+    tde1, _tde2 = scan_file(path, relative_path=str(path))
+    flagged = {finding.class_name for finding in tde1}
+    assert "ZeroEmissionSuccessContractViolation" not in flagged

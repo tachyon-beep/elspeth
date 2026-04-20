@@ -170,6 +170,32 @@ def test_run_boundary_checks_skips_sink_contract_for_source_plugin() -> None:
     )
 
 
+def test_run_boundary_checks_skips_contracts_when_plugin_lacks_declaration_attrs() -> None:
+    register_declaration_contract(SourceGuaranteedFieldsContract())
+    register_declaration_contract(SinkRequiredFieldsContract())
+
+    plugin = type("BareBoundaryPlugin", (), {})()
+    plugin.name = "bare"
+    plugin.node_id = "node-1"
+
+    assert (
+        run_boundary_checks(
+            inputs=BoundaryInputs(
+                plugin=plugin,
+                node_id="node-1",
+                run_id="run-1",
+                row_id="row-1",
+                token_id="token-1",
+                static_contract=frozenset(),
+                row_data={"value": 1},
+                row_contract=_contract(("value",)),
+            ),
+            outputs=BoundaryOutputs(),
+        )
+        is None
+    )
+
+
 def test_run_boundary_checks_skips_source_contract_for_sink_plugin() -> None:
     register_declaration_contract(SourceGuaranteedFieldsContract())
     register_declaration_contract(SinkRequiredFieldsContract())

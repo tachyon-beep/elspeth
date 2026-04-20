@@ -1186,10 +1186,10 @@ def _restore_registry_snapshot_for_tests(
 ) -> None:
     """Test-only: restore from a ``_snapshot_registry_for_tests`` tuple.
 
-    Not safe under concurrent reads (see 2A M2 note preserved verbatim —
-    the slice-assignment tightens the teardown window to a single bytecode
-    step relative to the prior clear()+extend() pair, but concurrent
-    iterators over the registry may still observe an inconsistent state).
+    Not safe under concurrent reads: the top-level registry restore uses slice
+    assignment, but the per-site map is still restored one site's list at a
+    time. Concurrent iterators over the registry may therefore observe a
+    partially restored test snapshot during teardown.
     """
     global _FROZEN
     _require_pytest_process("_restore_registry_snapshot_for_tests")

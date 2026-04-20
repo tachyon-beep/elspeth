@@ -40,6 +40,21 @@ from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
 
 
+class _CaptureMetafunc:
+    """Minimal ``pytest.Metafunc`` stand-in for parametrization assertions."""
+
+    def __init__(self, fixturenames: list[str]) -> None:
+        self.fixturenames = fixturenames
+        self.argnames: str | None = None
+        self.argvalues: list[object] | None = None
+        self.ids: Any = None
+
+    def parametrize(self, argnames: str, argvalues: list[object], ids: Any = None) -> None:
+        self.argnames = argnames
+        self.argvalues = argvalues
+        self.ids = ids
+
+
 class _DeliberatelyMisannotatedDropper(BaseTransform):
     """Test fixture: claims ``passes_through_input=True`` but drops a field.
 
@@ -159,3 +174,46 @@ def test_harness_iterates_registered_declaration_contracts() -> None:
     registered = {c.name for c in registered_declaration_contracts()}
     harnessed = {c.name for c in _iter_contracts_for_invariant_harness()}
     assert harnessed == registered, f"Harness-to-registry drift: harnessed={harnessed}, registered={registered}"
+
+
+def test_collection_guard_accepts_singleton_annotated_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A lone truthful pass-through transform must still be exercised.
+
+    Regression guard for commit ``08b6d4e2``: once ``BatchReplicate`` stopped
+    claiming unconditional pass-through, the live registry legitimately shrank
+    to a singleton ``[PassThrough]``. Collection must still parametrize the
+    forward invariant instead of crashing on a stale cardinality assumption.
+    """
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+    from elspeth.plugins.transforms.passthrough import PassThrough
+    from tests.invariants.test_pass_through_invariants import pytest_generate_tests
+
+    manager = get_shared_plugin_manager()
+    monkeypatch.setattr(manager, "get_transforms", lambda: [PassThrough])
+
+    metafunc = _CaptureMetafunc(["_annotated_cls"])
+    pytest_generate_tests(metafunc)
+
+    assert metafunc.argnames == "_annotated_cls"
+    assert metafunc.argvalues == [PassThrough]
+    assert metafunc.ids is not None
+    assert metafunc.ids(PassThrough) == "PassThrough"
+
+
+def test_backward_invariant_accepts_batch_replicate_mixed_validity_shape() -> None:
+    """BatchReplicate's non-pass-through reason must be visible to the live harness.
+
+    ``BatchReplicate`` is non-pass-through because mixed-validity batches can
+    quarantine some inputs while still succeeding for the rest. The backward
+    invariant must therefore be able to drive a representative batch shape
+    rather than only scalar single-row probes, or the live governance harness
+    will misclassify the plugin as preserving every input field.
+    """
+    from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+    from tests.invariants.test_pass_through_invariants import (
+        test_non_pass_through_transforms_do_drop_fields,
+    )
+
+    test_non_pass_through_transforms_do_drop_fields(
+        _non_pass_through_cls=BatchReplicate,
+    )
