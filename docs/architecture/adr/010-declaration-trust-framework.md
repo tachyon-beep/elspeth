@@ -8,6 +8,16 @@
 **Review date:** 2026-10-19 (six months from acceptance; ADR-010 §Consequences must be re-evaluated against observed 2B/2C experience by that date)
 **Filigree epic:** `elspeth-a3ac5d88c6` (Track 2 — Declaration-trust framework Phase 2B/2C; hard SLA 2026-07-18)
 
+---
+
+> **Amendment A1 — 2026-04-20 (issue `elspeth-3f320398f1` / M6).**
+> The Supersession-map row for **ADR-008 §Explicit scope boundary** (row at line 20 below) claims the 2A framework provides what each future declaration adopts. The accurate statement is narrower: the *scope* statement is preserved, but `static_check` was deferred entirely to Phase 2B's walker refactor (see §Decision 3). Under 2A the protocol carries only `runtime_check` — new declarations adopting the 2A framework land their runtime-VAL contract today; walker-side checks wait for the Phase 2B shape decision (issue `elspeth-425047a599` / H2). The original row stands for audit-trail purposes; readers should treat this banner as the authoritative reading of the ADR-008 scope-boundary row under 2A. Precedent: ADR-009 §Alternatives Considered #4.
+
+> **Amendment A2 — 2026-04-20 (issue `elspeth-3f320398f1` / M4).**
+> The reversibility claim in §Consequences §Neutral (line 87 below — "Reversibility: the framework is additive — removing it would require unpicking all decorator usages and re-introducing the hand-written `TIER_1_ERRORS` tuple. Non-trivial but not destructive.") is accurate at 2A's single-adopter state but becomes materially weaker as Phase 2B/2C adopters register. After six adopters land (four 2B transforms + two 2C boundaries), reversal requires a coordinated rollback of the six adopter modules, the dispatcher, the registry and its manifest (C2), the dispatch-site manifest (follow-up issue `elspeth-10dc0b747f`), and — if first-fire shadowing is fixed by then (issue `elspeth-60890a7388`) — the aggregate-violation machinery as well. Review date 2026-10-19 remains the formal reversibility checkpoint, but the practical window closes earlier: if reversal is being seriously considered it must happen before the first 2B adopter lands, not after. The original prose stands for audit-trail purposes; this banner is the authoritative reversibility reading as of the 2026-04-20 post-panel cleanup. Precedent: ADR-009 §Alternatives Considered #4.
+
+---
+
 ## Supersession map
 
 This ADR amends (not replaces) the single-declaration pattern from 007/008/009:

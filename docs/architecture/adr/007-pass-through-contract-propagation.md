@@ -5,6 +5,20 @@
 **Deciders:** Architecture Critic (SME agent), Systems Thinker (SME agent), Python Code Reviewer (SME agent), Quality Engineer (SME agent), Claude (synthesis/lead)
 **Tags:** dag, schema-contract, plugin-base, composer, propagation, validation
 
+> **Reader orientation (added 2026-04-20; issue `elspeth-3f320398f1` / M7).**
+> For the current authoritative framework governing **new** plugin declarations
+> (creates_tokens, declared_output_fields, source guaranteed_fields, sink
+> required_fields, etc.), start at [ADR-010](010-declaration-trust-framework.md).
+> ADR-010's `DeclarationContract` protocol, decorator registry, and dispatcher
+> generalise the pattern this ADR pioneered. This ADR (007) remains normative
+> for the single-declaration pattern on `passes_through_input` specifically —
+> `PassThroughDeclarationContract` is the concrete 2A registration — but new
+> declarations do NOT copy this ADR's structure and do NOT get their own
+> bespoke walker/executor/harness trio. They register under the ADR-010
+> framework. The pre-existing amendment banners below record the technical
+> supersession history; this banner exists to route readers to the right
+> starting point on the first encounter with the ADR series.
+
 > **Amended by [ADR-009](009-pass-through-pathway-fusion.md) on 2026-04-19.**
 > ADR-009 supersedes §Decision 1's "unconditional contract on every row"
 > language with an empty-emission carve-out (Clause 3), closes the
