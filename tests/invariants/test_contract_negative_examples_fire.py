@@ -42,6 +42,23 @@ def test_negative_example_fires_violation(contract) -> None:
     assert exc_info.value is not None, (
         f"Contract {contract.name!r}'s runtime_check did not raise on its own negative_example — VAL is dormant for this contract."
     )
+    violation = exc_info.value
+    if isinstance(violation, DeclarationContractViolation):
+        # C1 (plan-review B1-amended): reject bare-base raises for DCV-family
+        # contracts so triage SQL can filter by exception_type. The isinstance
+        # guard skips this check for pre-ADR-010 hierarchies (e.g.
+        # PassThroughContractViolation via PluginContractViolation) which have
+        # their own purpose-built subclass and carry no bare-base risk.
+        assert type(violation) is not DeclarationContractViolation, (
+            f"Contract {contract.name!r} raised the bare base "
+            f"DeclarationContractViolation rather than its declared subclass. "
+            f"Each contract MUST raise a purpose-built subclass of "
+            f"DeclarationContractViolation so triage SQL can filter by "
+            f"exception_type. Bare-base raises serialize to "
+            f"exception_type = 'DeclarationContractViolation', which is "
+            f"unfiltered in triage SQL and masks attribution at the audit "
+            f"boundary."
+        )
 
 
 @pytest.mark.parametrize(
