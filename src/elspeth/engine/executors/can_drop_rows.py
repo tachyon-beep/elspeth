@@ -30,6 +30,7 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     UnexpectedEmptyEmissionPayload,
     UnexpectedEmptyEmissionViolation,
+    ZeroEmissionSuccessContractViolation,
 )
 from elspeth.contracts.schema_contract import (
     FieldContract,
@@ -86,6 +87,49 @@ def verify_can_drop_rows(
             f"Transform {plugin_name!r} (node {node_id!r}) emitted zero rows for "
             f"row {row_id!r} but declares passes_through_input=True and "
             f"can_drop_rows=False."
+        ),
+    )
+
+
+def verify_zero_emission_declaration_path(
+    *,
+    plugin: Any,
+    plugin_name: str,
+    node_id: str,
+    run_id: str,
+    row_id: str,
+    token_id: str,
+    emitted_count: int,
+    used_success_empty: bool,
+) -> None:
+    """Reject ``success_empty()`` outside the explicit filter declaration path.
+
+    ADR-012 scopes ``can_drop_rows`` to pass-through filters. The dispatcher-
+    owned contract covers the ``passes_through_input=True`` / missing-opt-in
+    case; this inline guard closes the non-pass-through escape hatch so
+    ``success_empty()`` cannot silently route as ``DROPPED_BY_FILTER``.
+    """
+    if not used_success_empty:
+        return
+    if emitted_count != 0:
+        return
+    if cast(bool, plugin.passes_through_input):
+        return
+
+    raise ZeroEmissionSuccessContractViolation(
+        transform=plugin_name,
+        transform_node_id=node_id,
+        run_id=run_id,
+        row_id=row_id,
+        token_id=token_id,
+        passes_through_input=cast(bool, plugin.passes_through_input),
+        can_drop_rows=cast(bool, plugin.can_drop_rows),
+        emitted_count=emitted_count,
+        message=(
+            f"Transform {plugin_name!r} (node {node_id!r}) returned "
+            f"TransformResult.success_empty() for row {row_id!r}, but zero-"
+            f"emission success is reserved for pass-through filters declaring "
+            f"passes_through_input=True and can_drop_rows=True."
         ),
     )
 

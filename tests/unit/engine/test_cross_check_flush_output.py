@@ -19,6 +19,7 @@ from elspeth.contracts.enums import OutputMode
 from elspeth.contracts.errors import (
     PassThroughContractViolation,
     UnexpectedEmptyEmissionViolation,
+    ZeroEmissionSuccessContractViolation,
 )
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
@@ -249,6 +250,35 @@ class TestTransformModeIntersection:
 
 
 class TestEmptyEmissionGovernance:
+    @pytest.mark.parametrize(
+        ("output_mode", "can_drop_rows"),
+        [
+            (OutputMode.PASSTHROUGH, False),
+            (OutputMode.PASSTHROUGH, True),
+            (OutputMode.TRANSFORM, False),
+            (OutputMode.TRANSFORM, True),
+        ],
+    )
+    def test_zero_emission_non_pass_through_raises_plugin_violation(
+        self,
+        output_mode: OutputMode,
+        can_drop_rows: bool,
+    ) -> None:
+        processor = _make_processor()
+        contract = _make_contract({"x": int})
+        tokens = [_make_token(f"t{i}", {"x": i}, contract) for i in range(2)]
+        _register_tokens(processor, tokens)
+        transform = _make_flush_transform(passes_through_input=False, can_drop_rows=can_drop_rows)
+        fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=output_mode)
+        result = TransformResult.success_empty(success_reason={"action": "filtered"})
+
+        with pytest.raises(ZeroEmissionSuccessContractViolation) as exc_info:
+            processor._cross_check_flush_output(fctx, result)
+
+        assert exc_info.value.passes_through_input is False
+        assert exc_info.value.can_drop_rows is can_drop_rows
+        assert exc_info.value.emitted_count == 0
+
     def test_zero_emission_passthrough_raises_aggregate_when_can_drop_rows_false(self) -> None:
         processor = _make_processor()
         contract = _make_contract({"x": int})

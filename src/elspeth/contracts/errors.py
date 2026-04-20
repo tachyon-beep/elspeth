@@ -941,6 +941,51 @@ class PluginContractViolation(AuditEvidenceBase, RuntimeError):
         return {"exception_type": type(self).__name__, "message": str(self)}
 
 
+class ZeroEmissionSuccessContractViolation(PluginContractViolation):
+    """Raised when ``success_empty()`` is used outside the filter declaration path.
+
+    Tier 2 by design. The engine can still record a row-level FAILED outcome,
+    so this is a plugin contract bug rather than Tier-1 audit corruption.
+    """
+
+    def __init__(
+        self,
+        *,
+        transform: str,
+        transform_node_id: str,
+        run_id: str,
+        row_id: str,
+        token_id: str,
+        passes_through_input: bool,
+        can_drop_rows: bool,
+        emitted_count: int,
+        message: str,
+    ) -> None:
+        super().__init__(message)
+        self.transform = transform
+        self.transform_node_id = transform_node_id
+        self.run_id = run_id
+        self.row_id = row_id
+        self.token_id = token_id
+        self.passes_through_input = passes_through_input
+        self.can_drop_rows = can_drop_rows
+        self.emitted_count = emitted_count
+
+    def to_audit_dict(self) -> dict[str, Any]:
+        return {
+            "exception_type": "ZeroEmissionSuccessContractViolation",
+            "message": str(self),
+            "transform": self.transform,
+            "transform_node_id": self.transform_node_id,
+            "run_id": self.run_id,
+            "row_id": self.row_id,
+            "token_id": self.token_id,
+            "passes_through_input": self.passes_through_input,
+            "can_drop_rows": self.can_drop_rows,
+            "emitted_count": self.emitted_count,
+        }
+
+
 @tier_1_error(
     reason=(
         "ADR-010 F3 (elspeth-5fc876138d): sink transactional-boundary invariant "

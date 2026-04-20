@@ -30,6 +30,7 @@ from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
+from elspeth.engine.executors.can_drop_rows import verify_zero_emission_declaration_path
 from elspeth.engine.executors.declaration_dispatch import (
     run_post_emission_checks,
     run_pre_emission_checks,
@@ -400,6 +401,16 @@ class TransformExecutor:
                     emitted_rows = tuple(result.rows)
                 else:
                     emitted_rows = ()
+                verify_zero_emission_declaration_path(
+                    plugin=transform,
+                    plugin_name=transform.name,
+                    node_id=transform.node_id,
+                    run_id=ctx.run_id,
+                    row_id=token.row_id,
+                    token_id=token.token_id,
+                    emitted_count=len(emitted_rows),
+                    used_success_empty=result.rows is not None and len(result.rows) == 0,
+                )
                 run_post_emission_checks(
                     inputs=PostEmissionInputs(
                         plugin=transform,

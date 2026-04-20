@@ -82,6 +82,7 @@ from elspeth.contracts.errors import (
     PassThroughContractViolation,
     PluginContractViolation,
     TransformErrorReason,
+    ZeroEmissionSuccessContractViolation,
 )
 from elspeth.contracts.results import ArtifactDescriptor, GateResult
 from elspeth.contracts.routing import RouteDestination, RoutingAction
@@ -1051,6 +1052,22 @@ class TestTransformExecutor:
 
         with pytest.raises(RuntimeError, match="success but has no output data"):
             executor.execute_transform(transform, token, ctx)
+
+    @pytest.mark.parametrize("can_drop_rows", [False, True])
+    def test_success_empty_requires_pass_through_declaration(self, can_drop_rows: bool) -> None:
+        """``success_empty()`` is reserved for pass-through filters only."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+        transform = _make_transform(passes_through_input=False, can_drop_rows=can_drop_rows)
+        transform.process.return_value = TransformResult.success_empty(success_reason={"action": "filtered"})
+        token = _make_token()
+        ctx = make_context()
+
+        with pytest.raises(ZeroEmissionSuccessContractViolation) as exc_info:
+            executor.execute_transform(transform, token, ctx)
+
+        assert exc_info.value.passes_through_input is False
+        assert exc_info.value.can_drop_rows is can_drop_rows
 
 
 # =============================================================================

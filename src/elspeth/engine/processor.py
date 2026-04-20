@@ -49,6 +49,7 @@ from elspeth.contracts.errors import (
     MaxRetriesExceeded,
     OrchestrationInvariantError,
     PassThroughContractViolation,
+    PluginContractViolation,
     PluginRetryableError,
     TransformErrorCategory,
     TransformErrorReason,
@@ -64,6 +65,7 @@ from elspeth.engine.executors import (
     GateExecutor,
     TransformExecutor,
 )
+from elspeth.engine.executors.can_drop_rows import verify_zero_emission_declaration_path
 from elspeth.engine.executors.declaration_dispatch import run_batch_flush_checks
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
@@ -691,28 +693,11 @@ class RowProcessor:
 
         Raises:
             FrameworkBugError: A buffered token has no input contract.
-            DeclarationContractViolation | PassThroughContractViolation:
+            DeclarationContractViolation | PluginContractViolation:
                 Any batch-flush declaration contract fires.
                 ``_record_flush_violation`` writes per-token FAILED audit
                 entries before re-raising.
         """
-        if not fctx.transform.passes_through_input:
-            return
-
-        # _FlushContext.__post_init__ guarantees buffered_tokens is non-empty;
-        # no defensive emptiness guard (CLAUDE.md: defensive programming
-        # forbidden for internal paths).
-        for i, token in enumerate(fctx.buffered_tokens):
-            if token.row_data.contract is None:
-                raise FrameworkBugError(
-                    f"Pass-through batch flush: buffered token {i} "
-                    f"(token_id={token.token_id!r}) has no contract "
-                    f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
-                    "Framework invariant violated."
-                )
-
-        per_input_field_sets = [frozenset(fc.normalized_name for fc in token.row_data.contract.fields) for token in fctx.buffered_tokens]
-
         # Gather emitted rows uniformly across both output modes.
         if result.is_multi_row:
             emitted: list[PipelineRow] = list(result.rows) if result.rows is not None else []
@@ -720,16 +705,47 @@ class RowProcessor:
             emitted = [result.row]
         else:
             emitted = []
+        used_success_empty = result.rows is not None and len(result.rows) == 0
 
-        static_contract: frozenset[str] = (
-            fctx.transform._output_schema_config.get_effective_guaranteed_fields()
-            if fctx.transform._output_schema_config is not None
-            else frozenset()
-        )
-
+        identity_token = fctx.triggering_token or fctx.buffered_tokens[0]
         transform_node_id_str = str(fctx.node_id)
 
         try:
+            verify_zero_emission_declaration_path(
+                plugin=fctx.transform,
+                plugin_name=fctx.transform.name,
+                node_id=transform_node_id_str,
+                run_id=self._run_id,
+                row_id=identity_token.row_id,
+                token_id=identity_token.token_id,
+                emitted_count=len(emitted),
+                used_success_empty=used_success_empty,
+            )
+            if not fctx.transform.passes_through_input:
+                return
+
+            # _FlushContext.__post_init__ guarantees buffered_tokens is non-empty;
+            # no defensive emptiness guard (CLAUDE.md: defensive programming
+            # forbidden for internal paths).
+            for i, token in enumerate(fctx.buffered_tokens):
+                if token.row_data.contract is None:
+                    raise FrameworkBugError(
+                        f"Pass-through batch flush: buffered token {i} "
+                        f"(token_id={token.token_id!r}) has no contract "
+                        f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
+                        "Framework invariant violated."
+                    )
+
+            per_input_field_sets = [
+                frozenset(fc.normalized_name for fc in token.row_data.contract.fields) for token in fctx.buffered_tokens
+            ]
+
+            static_contract: frozenset[str] = (
+                fctx.transform._output_schema_config.get_effective_guaranteed_fields()
+                if fctx.transform._output_schema_config is not None
+                else frozenset()
+            )
+
             if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
                 # 1:1 pairing — routing enforces len(emitted) == len(buffered).
                 # Dispatch each pair through the audit-complete batch-flush
@@ -789,10 +805,6 @@ class RowProcessor:
                 # ``BatchFlushInputs.effective_input_fields`` (panel F1
                 # resolution: caller-computed; contracts don't re-derive).
                 input_fields = frozenset.intersection(*per_input_field_sets)
-                # Triggering token is None for timeout flushes — use the first
-                # buffered token's lineage as the identifying row for
-                # BatchFlushInputs and any raised violation.
-                identity_token = fctx.triggering_token or fctx.buffered_tokens[0]
                 run_batch_flush_checks(
                     inputs=BatchFlushInputs(
                         plugin=fctx.transform,
@@ -806,7 +818,7 @@ class RowProcessor:
                     ),
                     outputs=BatchFlushOutputs(emitted_rows=tuple(emitted)),
                 )
-        except PassThroughContractViolation as violation:
+        except PluginContractViolation as violation:
             self._record_flush_violation(fctx, violation)
             raise
         except DeclarationContractViolation as violation:
@@ -821,7 +833,7 @@ class RowProcessor:
     def _record_flush_violation(
         self,
         fctx: _FlushContext,
-        violation: DeclarationContractViolation | PassThroughContractViolation | AggregateDeclarationContractViolation,
+        violation: DeclarationContractViolation | PluginContractViolation | AggregateDeclarationContractViolation,
     ) -> None:
         """Record FAILED audit entries for every buffered token on flush failure.
 
