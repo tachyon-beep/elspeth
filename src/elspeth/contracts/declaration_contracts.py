@@ -530,10 +530,30 @@ def _restore_registry_snapshot_for_tests(
     """Test-only: restore the registry and freeze flag from a snapshot.
 
     Gated on ``pytest`` being imported. Production callers raise (issue
-    elspeth-cc511e7234)."""
+    elspeth-cc511e7234).
+
+    **Not safe under concurrent reads.** The registry rewrite is a single
+    slice-assignment (issue elspeth-a8bb70a40b / M2), which collapses the
+    teardown window to one Python bytecode step — tighter than the prior
+    ``clear()``+``extend()`` pair that allowed a reader to observe an
+    empty registry mid-teardown. The single slice-assign is still not
+    truly atomic across the CPython GIL's boundaries for list mutation
+    relative to concurrent iterators (another thread holding an iterator
+    over ``_REGISTRY`` at restore time may raise ``RuntimeError`` or see
+    an inconsistent state). Tests MUST NOT spawn reader threads that
+    iterate ``_REGISTRY`` during restore; if such a pattern ever becomes
+    necessary, upgrade to a reference-rebind scheme (rebuild the list
+    bound to a new name and swap the module binding atomically) or a
+    ``threading.RLock`` guard around every read and write. Neither is
+    warranted today: bootstrap is single-threaded and test fixtures
+    snapshot/restore between tests, not during."""
     global _FROZEN
     _require_pytest_process("_restore_registry_snapshot_for_tests")
     registry_copy, frozen_flag = snapshot
-    _REGISTRY.clear()
-    _REGISTRY.extend(registry_copy)
+    # M2 (issue elspeth-a8bb70a40b): slice-assignment replaces the prior
+    # clear()+extend() pair. A single ``_REGISTRY[:] = registry_copy`` step
+    # has no mid-teardown window where the list is observably empty; the
+    # prior two-step form allowed a concurrent reader (if any existed) to
+    # see the registry as empty between the two operations.
+    _REGISTRY[:] = registry_copy
     _FROZEN = frozen_flag
