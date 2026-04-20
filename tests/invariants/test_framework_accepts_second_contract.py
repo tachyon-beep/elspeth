@@ -19,16 +19,20 @@ import pytest
 import elspeth.engine.executors.pass_through  # noqa: F401  — side-effect: registers PassThroughDeclarationContract
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.declaration_contracts import (
+    DeclarationContract,
     DeclarationContractViolation,
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    DispatchSite,
+    ExampleBundle,
+    PostEmissionInputs,
+    PostEmissionOutputs,
     _clear_registry_for_tests,
     _restore_registry_snapshot_for_tests,
     _snapshot_registry_for_tests,
+    implements_dispatch_site,
     register_declaration_contract,
     registered_declaration_contracts,
 )
-from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+from elspeth.engine.executors.declaration_dispatch import run_post_emission_checks
 
 # ---------------------------------------------------------------------------
 # CreatesTokensViolation
@@ -67,35 +71,26 @@ class CreatesTokensViolation(DeclarationContractViolation):
 # ---------------------------------------------------------------------------
 
 
-class CreatesTokensContract:
+class CreatesTokensContract(DeclarationContract):
     """Declaration contract for transforms that set ``creates_tokens=True``.
 
     ``applies_to`` uses try/except AttributeError rather than hasattr (banned
-    by CLAUDE.md). ``creates_tokens`` may not yet be declared on all plugin
-    protocols (Phase 2B will add it to BaseTransform's protocol surface in the
-    type system). The pattern mirrors declaration_contracts.register_declaration_contract's
-    own attribute-access guard.
-
-    ``runtime_check`` uses direct attribute access on ``inputs.plugin`` —
-    no getattr defaults. Missing ``creates_tokens`` at this point is a
-    framework bug (BaseTransform always sets it); let it crash.
+    by CLAUDE.md). Post-H2 inherits the nominal ABC and decorates its
+    post-emission dispatch method with ``@implements_dispatch_site``.
     """
 
     name = "creates_tokens"
     payload_schema: type = CreatesTokensPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        # creates_tokens may not exist on all plugin protocols yet (Phase 2B
-        # will add it to BaseTransform with a default). Try/except matches the
-        # trust-boundary pattern used by register_declaration_contract's own
-        # attribute-access guards.
         try:
             flag = plugin.creates_tokens
         except AttributeError:
             return False
         return bool(flag)
 
-    def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
         """Verify that a creates_tokens=True transform emitted more than one row.
 
         A single-row emission from a creates_tokens=True transform indicates
@@ -131,7 +126,7 @@ class CreatesTokensContract:
             )
 
     @classmethod
-    def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+    def negative_example(cls) -> ExampleBundle:
         """A creates_tokens=True plugin that emits exactly 1 row — must raise."""
 
         class _MinimalCreatesTokensTransform:
@@ -139,7 +134,7 @@ class CreatesTokensContract:
             node_id = "ct-neg-1"
             creates_tokens = True
 
-        inputs = RuntimeCheckInputs(
+        inputs = PostEmissionInputs(
             plugin=_MinimalCreatesTokensTransform(),
             node_id="ct-neg-1",
             run_id="ct-neg-run",
@@ -147,24 +142,21 @@ class CreatesTokensContract:
             token_id="ct-neg-token",
             input_row=object(),
             static_contract=frozenset(),
+            effective_input_fields=frozenset(),
         )
-        # Exactly one emitted row — violates the contract.
-        outputs = RuntimeCheckOutputs(emitted_rows=(object(),))
-        return inputs, outputs
+        outputs = PostEmissionOutputs(emitted_rows=(object(),))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
     @classmethod
-    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
-        """A creates_tokens=False plugin — applies_to must return False.
-
-        N2 Layer A harness (issue elspeth-50509ed2bc) invariant.
-        """
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        """A creates_tokens=False plugin — applies_to must return False."""
 
         class _NonCreatesTokensTransform:
             name = "NonFireCreatesTokensExample"
             node_id = "ct-non-fire-1"
-            creates_tokens = False  # ← applies_to reads this
+            creates_tokens = False
 
-        inputs = RuntimeCheckInputs(
+        inputs = PostEmissionInputs(
             plugin=_NonCreatesTokensTransform(),
             node_id="ct-non-fire-1",
             run_id="ct-non-fire-run",
@@ -172,13 +164,10 @@ class CreatesTokensContract:
             token_id="ct-non-fire-token",
             input_row=object(),
             static_contract=frozenset(),
+            effective_input_fields=frozenset(),
         )
-        # Multi-row emission which this contract would flag on a creates_tokens=True
-        # plugin. Here applies_to returns False so the dispatcher never invokes
-        # runtime_check; belt-and-suspenders semantics mean the contract body
-        # tolerates this shape without raising.
-        outputs = RuntimeCheckOutputs(emitted_rows=(object(), object(), object()))
-        return inputs, outputs
+        outputs = PostEmissionOutputs(emitted_rows=(object(), object(), object()))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +224,7 @@ def test_registry_admits_creates_tokens_proof(proof_contract_registered: Any) ->
 
 
 def test_dispatcher_invokes_creates_tokens_proof(proof_contract_registered: Any) -> None:
-    """``run_runtime_checks`` invokes ``CreatesTokensContract.runtime_check``
+    """``run_post_emission_checks`` invokes ``CreatesTokensContract.post_emission_check``
     when the plugin has ``creates_tokens=True`` and emits >1 row (happy path).
 
     The dispatcher must NOT raise for a compliant plugin.
@@ -246,12 +235,11 @@ def test_dispatcher_invokes_creates_tokens_proof(proof_contract_registered: Any)
         node_id = "ct-ok-1"
         creates_tokens = True
         # PassThroughDeclarationContract.applies_to accesses this directly
-        # (no getattr default — a missing attribute is a framework bug per
-        # CLAUDE.md). The stub must carry all attributes that registered
-        # contracts will access on any plugin passed to run_runtime_checks.
+        # (no getattr default). The stub must carry every attribute that
+        # registered contracts' applies_to may read.
         passes_through_input = False
 
-    inputs = RuntimeCheckInputs(
+    inputs = PostEmissionInputs(
         plugin=_CompliantTransform(),
         node_id="ct-ok-1",
         run_id="disp-run",
@@ -259,12 +247,12 @@ def test_dispatcher_invokes_creates_tokens_proof(proof_contract_registered: Any)
         token_id="disp-token",
         input_row=object(),
         static_contract=frozenset(),
+        effective_input_fields=frozenset(),
     )
-    # Two rows emitted — compliant with creates_tokens=True.
-    outputs = RuntimeCheckOutputs(emitted_rows=(object(), object()))
+    outputs = PostEmissionOutputs(emitted_rows=(object(), object()))
 
     # Must not raise — happy path.
-    run_runtime_checks(inputs=inputs, outputs=outputs)
+    run_post_emission_checks(inputs=inputs, outputs=outputs)
 
 
 # ---------------------------------------------------------------------------
@@ -333,10 +321,11 @@ def test_negative_example_fires_violation(proof_contract_registered: Any) -> Non
     the proof contract explicitly.
     """
     contract = proof_contract_registered
-    inputs, outputs = type(contract).negative_example()
+    bundle = type(contract).negative_example()
+    method = getattr(contract, bundle.site.value)
 
     with pytest.raises(CreatesTokensViolation) as exc_info:
-        contract.runtime_check(inputs, outputs)
+        method(*bundle.args)
 
     assert exc_info.value is not None
     assert isinstance(exc_info.value, DeclarationContractViolation), (

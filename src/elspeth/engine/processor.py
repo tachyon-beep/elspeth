@@ -37,8 +37,9 @@ if TYPE_CHECKING:
 
 from elspeth.contracts import BatchTransformProtocol, TransformProtocol
 from elspeth.contracts.declaration_contracts import (
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    AggregateDeclarationContractViolation,
+    BatchFlushInputs,
+    BatchFlushOutputs,
 )
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import (
@@ -62,7 +63,7 @@ from elspeth.engine.executors import (
     GateExecutor,
     TransformExecutor,
 )
-from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+from elspeth.engine.executors.declaration_dispatch import run_batch_flush_checks
 from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
@@ -729,22 +730,29 @@ class RowProcessor:
         try:
             if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
                 # 1:1 pairing — routing enforces len(emitted) == len(buffered).
-                # Dispatch each pair through the declaration-contract registry
-                # (ADR-010 §Decision 3) so that all registered contracts that
-                # apply to this transform are evaluated per-pair.
+                # Dispatch each pair through the audit-complete batch-flush
+                # dispatcher (ADR-010 §Semantics amendment 2026-04-20). Each
+                # pair's effective_input_fields is derived per-token — the
+                # PASSTHROUGH carve-out preserves per-token identity.
                 if len(emitted) == len(fctx.buffered_tokens):
-                    for token, emitted_row in zip(fctx.buffered_tokens, emitted, strict=True):
-                        run_runtime_checks(
-                            inputs=RuntimeCheckInputs(
+                    for token, emitted_row, token_fields in zip(
+                        fctx.buffered_tokens,
+                        emitted,
+                        per_input_field_sets,
+                        strict=True,
+                    ):
+                        run_batch_flush_checks(
+                            inputs=BatchFlushInputs(
                                 plugin=fctx.transform,
                                 node_id=transform_node_id_str,
                                 run_id=self._run_id,
                                 row_id=token.row_id,
                                 token_id=token.token_id,
-                                input_row=token.row_data,
+                                buffered_tokens=(token,),
                                 static_contract=static_contract,
+                                effective_input_fields=token_fields,
                             ),
-                            outputs=RuntimeCheckOutputs(emitted_rows=(emitted_row,)),
+                            outputs=BatchFlushOutputs(emitted_rows=(emitted_row,)),
                         )
                 else:
                     # Count mismatch is ``_route_passthrough_results``'s
@@ -755,35 +763,47 @@ class RowProcessor:
                 # TRANSFORM mode: batch-homogeneous intersection (ADR-009 §Clause 2).
                 # Every emitted row must preserve the intersection of every
                 # buffered token's input contract — the weakest shared guarantee.
-                # Route through the ADR-010 dispatcher and carry that intersection
-                # via ``RuntimeCheckInputs.override_input_fields`` so
-                # ``PassThroughDeclarationContract.runtime_check`` and every other
-                # registered contract (future Phase 2B/2C adopters) all see the
-                # same caller-computed field set. Previously this branch called
-                # ``verify_pass_through`` directly, silently skipping every
-                # non-pass-through contract on the batch-flush TRANSFORM path —
-                # regressing ADR-010's "single source of truth for runtime VAL
-                # dispatch" claim (filigree issue elspeth-ef8d5d92ff).
+                # The batch-flush dispatcher surfaces the intersection via
+                # ``BatchFlushInputs.effective_input_fields`` (panel F1
+                # resolution: caller-computed; contracts don't re-derive).
                 input_fields = frozenset.intersection(*per_input_field_sets)
                 # Triggering token is None for timeout flushes — use the first
                 # buffered token's lineage as the identifying row for
-                # RuntimeCheckInputs and any raised violation.
+                # BatchFlushInputs and any raised violation.
                 identity_token = fctx.triggering_token or fctx.buffered_tokens[0]
-                run_runtime_checks(
-                    inputs=RuntimeCheckInputs(
+                run_batch_flush_checks(
+                    inputs=BatchFlushInputs(
                         plugin=fctx.transform,
                         node_id=transform_node_id_str,
                         run_id=self._run_id,
                         row_id=identity_token.row_id,
                         token_id=identity_token.token_id,
-                        input_row=identity_token.row_data,
+                        buffered_tokens=tuple(fctx.buffered_tokens),
                         static_contract=static_contract,
-                        override_input_fields=input_fields,
+                        effective_input_fields=input_fields,
                     ),
-                    outputs=RuntimeCheckOutputs(emitted_rows=tuple(emitted)),
+                    outputs=BatchFlushOutputs(emitted_rows=tuple(emitted)),
                 )
         except PassThroughContractViolation as violation:
+            # Single-violation fast path — unchanged triage SQL
+            # (exception_type='PassThroughContractViolation'). Per-token
+            # FAILED audit entries via _record_flush_violation.
             self._record_flush_violation(fctx, violation)
+            raise
+        except AggregateDeclarationContractViolation as aggregate:
+            # Audit-complete multi-fire case (N3 primary mitigation —
+            # ADR-010 §Semantics amendment). The dispatcher wrapped 2+
+            # child violations into the aggregate. For each
+            # PassThroughContractViolation child, replay the pre-existing
+            # per-token FAILED recording so triage SQL filtering on
+            # PassThroughContractViolation (inside the aggregate's
+            # violations list) still lights up; the aggregate itself
+            # propagates to NodeStateGuard.__exit__ which writes its
+            # to_audit_dict() (is_aggregate=True + violations list) into
+            # ExecutionError.context.
+            for child in aggregate.violations:
+                if isinstance(child, PassThroughContractViolation):
+                    self._record_flush_violation(fctx, child)
             raise
 
     def _record_flush_violation(

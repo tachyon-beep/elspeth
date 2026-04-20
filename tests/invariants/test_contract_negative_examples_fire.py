@@ -30,15 +30,23 @@ from elspeth.contracts.declaration_contracts import (
     ids=lambda c: c.name,
 )
 def test_negative_example_fires_violation(contract) -> None:
-    """Dormant-runtime_check invariant (ADR-010 §Decision 3 / reviewer B6/F-7).
+    """Dormant-dispatch-method invariant (ADR-010 §Decision 3 / reviewer B6/F-7).
 
-    If a registered contract's runtime_check silently returns None on its own
-    negative_example, the framework's runtime VAL is disabled for that contract
-    without any loud failure. This test is the last line of defence.
+    If a registered contract's decorated dispatch method silently returns
+    None on its own negative_example, the framework's runtime VAL is
+    disabled for that contract without any loud failure. This test is the
+    last line of defence.
+
+    Post-H2 (ADR-010 §Semantics amendment): the harness reads the
+    site-tagged ``ExampleBundle`` and invokes the method named by
+    ``bundle.site.value``. Catches AuditEvidenceBase to accommodate both
+    the DCV hierarchy AND pre-ADR-010 PluginContractViolation subclasses
+    (PassThroughContractViolation).
     """
-    inputs, outputs = type(contract).negative_example()
+    bundle = type(contract).negative_example()
+    method = getattr(contract, bundle.site.value)
     with pytest.raises((DeclarationContractViolation, RuntimeError)) as exc_info:
-        contract.runtime_check(inputs, outputs)
+        method(*bundle.args)
     assert exc_info.value is not None, (
         f"Contract {contract.name!r}'s runtime_check did not raise on its own negative_example — VAL is dormant for this contract."
     )
@@ -69,28 +77,14 @@ def test_negative_example_fires_violation(contract) -> None:
 def test_negative_example_payload_covers_required_schema_keys(contract) -> None:
     """Payload-representativeness invariant (issue elspeth-50509ed2bc / N2 Layer B).
 
-    The raised violation's payload MUST carry every key declared Required in
-    the contract's payload_schema. H5 Layer 1 already enforces this at
-    ``DeclarationContractViolation.__init__`` time, so a well-formed
-    violation cannot escape construction with a missing required key. This
-    test re-asserts the invariant at the harness level so:
-
-    1. A future bug that weakens H5 Layer 1 (e.g. a regression in
-       ``_validate_payload_against_schema``) is caught by the harness
-       before it ships.
-    2. A contract author writing ``negative_example`` is forced to
-       exercise every required payload key — an auditor reading the
-       Landscape record for a violation that fired in CI (via this
-       harness) sees a payload representative of what production
-       would persist, not a synthetic minimum.
+    Same site-tagged-bundle pattern as the dormant harness above; asserts
+    in addition that the raised DCV subclass's payload covers every
+    ``Required`` key declared on its ``payload_schema``.
     """
-    inputs, outputs = type(contract).negative_example()
-    # The existing dormant-runtime_check harness already asserts a violation
-    # is raised. Re-raising here mirrors that pattern so the failure message
-    # cleanly identifies a missing-violation regression vs. a payload-shape
-    # regression.
+    bundle = type(contract).negative_example()
+    method = getattr(contract, bundle.site.value)
     with pytest.raises((DeclarationContractViolation, RuntimeError)) as exc_info:
-        contract.runtime_check(inputs, outputs)
+        method(*bundle.args)
 
     violation = exc_info.value
     if not isinstance(violation, DeclarationContractViolation):

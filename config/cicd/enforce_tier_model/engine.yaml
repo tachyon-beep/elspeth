@@ -50,9 +50,9 @@ per_file_rules:
 - pattern: engine/processor.py
   rules:
   - R5
-  reason: Protocol dispatch (TransformProtocol vs GateSettings) and union narrowing
+  reason: Protocol dispatch (TransformProtocol vs GateSettings) and union narrowing; ADR-010 H2 (2026-04-20) added isinstance(child, PassThroughContractViolation) in the aggregate-flush catch so PassThroughContractViolation (pre-DCV hierarchy, inherits PluginContractViolation) still routes through _record_flush_violation when wrapped in an aggregate.
   expires: null
-  max_hits: 7
+  max_hits: 8
 - pattern: engine/tokens.py
   rules:
   - R5
@@ -235,4 +235,14 @@ allow_hits:
   owner: architecture
   reason: 'ADR-010 Decision 1 nominal isinstance check -- discriminates AuditEvidenceBase subclasses so NodeStateGuard can populate ExecutionError.context from to_audit_dict(). Nominal inheritance (not structural Protocol) is deliberate: see ADR-010 Alternative 3 for the accidental-match spoofing rationale. The exception always propagates; only structured audit context is conditionally added.'
   safety: 'The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug; broken to_audit_dict() surfaces via the existing (TypeError, AttributeError, KeyError, NameError) re-raise path.'
+  expires: null
+- key: engine/executors/declaration_dispatch.py:R6:_dispatch:fp=3b991a91617839d0
+  owner: architecture
+  reason: "ADR-010 §Semantics amendment (2026-04-20, comment #417 on H2) — the audit-complete dispatcher MUST catch DeclarationContractViolation, attach the authoritative contract_name via C4 closure, and continue iterating so every applicable contract's method runs. This is not silent swallowing: the collected violations are raised as the original (N=1 reference equality) or as AggregateDeclarationContractViolation (N>=2) at loop end. Catch-and-collect IS the audit-complete invariant."
+  safety: Every caught violation is either re-raised via the N=1 reference-equality fast path OR wrapped in AggregateDeclarationContractViolation and raised from the dispatcher boundary. No silent drops. See N3 §Acceptance + comment #417.
+  expires: null
+- key: engine/executors/declaration_dispatch.py:R6:_dispatch:fp=eaaceb67467655f7
+  owner: architecture
+  reason: "ADR-010 §Semantics amendment (2026-04-20) — catches PluginContractViolation so PassThroughContractViolation (which inherits PluginContractViolation, not DeclarationContractViolation, per ADR-010 §Consequences line 96-97) is subject to audit-complete aggregation rather than short-circuiting the dispatcher loop. Without this catch, a pass-through violation would shadow every later contract on the same row — regressing the audit-complete posture. Both caught classes are registered in TIER_1_ERRORS; the aggregate is also TIER_1_ERRORS, preserving Tier-1 propagation."
+  safety: The caught PluginContractViolation is appended to violations list and raised (singleton or aggregate) at loop end; no silent drops. AggregateDeclarationContractViolation is a Tier-1 class, preserving the propagation guarantee.
   expires: null

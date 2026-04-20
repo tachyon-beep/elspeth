@@ -24,16 +24,19 @@ import pytest
 # itself via its module-level side-effect before any benchmark runs.
 import elspeth.engine.executors.pass_through  # noqa: F401
 from elspeth.contracts.declaration_contracts import (
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    DeclarationContract,
+    ExampleBundle,
+    PostEmissionInputs,
+    PostEmissionOutputs,
     _clear_registry_for_tests,
     _restore_registry_snapshot_for_tests,
     _snapshot_registry_for_tests,
+    implements_dispatch_site,
     register_declaration_contract,
 )
 from elspeth.contracts.errors import PassThroughContractViolation
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
-from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+from elspeth.engine.executors.declaration_dispatch import run_post_emission_checks
 from elspeth.engine.executors.pass_through import (
     PassThroughDeclarationContract,
     verify_pass_through,
@@ -238,7 +241,8 @@ def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.Fix
     static_contract = frozenset(fc.normalized_name for fc in input_contract.fields)
 
     plugin = _PassThroughPlugin()
-    inputs = RuntimeCheckInputs(
+    effective_input_fields = frozenset(fc.normalized_name for fc in input_row.contract.fields)
+    inputs = PostEmissionInputs(
         plugin=plugin,
         node_id=plugin.node_id,
         run_id="bench_run",
@@ -246,11 +250,12 @@ def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.Fix
         token_id="bench_token",
         input_row=input_row,
         static_contract=static_contract,
+        effective_input_fields=effective_input_fields,
     )
-    outputs = RuntimeCheckOutputs(emitted_rows=(output_row,))
+    outputs = PostEmissionOutputs(emitted_rows=(output_row,))
 
     def run_dispatcher() -> None:
-        run_runtime_checks(inputs=inputs, outputs=outputs)
+        run_post_emission_checks(inputs=inputs, outputs=outputs)
 
     benchmark(run_dispatcher)
 
@@ -289,13 +294,13 @@ class _NoopPayload(TypedDict):
     reason: str
 
 
-class _NoopContract:
+class _NoopContract(DeclarationContract):
     """applies_to-returns-False stub for dispatcher scaling benchmarks.
 
-    Ties up one registry slot without contributing any runtime_check cost so
-    the benchmark isolates the per-registered-contract dispatch-loop cost
-    (tuple iteration + applies_to attribute read) from verify_pass_through's
-    O(fields) work.
+    Ties up one registry slot without contributing any post_emission_check
+    cost so the benchmark isolates the per-registered-contract dispatch-loop
+    cost (tuple iteration + applies_to attribute read) from
+    verify_pass_through's O(fields) work.
     """
 
     payload_schema: type = _NoopPayload
@@ -306,17 +311,22 @@ class _NoopContract:
     def applies_to(self, plugin: Any) -> bool:
         return False
 
-    def runtime_check(
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(
         self,
-        inputs: RuntimeCheckInputs,
-        outputs: RuntimeCheckOutputs,
+        inputs: PostEmissionInputs,
+        outputs: PostEmissionOutputs,
     ) -> None:
-        # Unreachable because applies_to is always False; kept for protocol
+        # Unreachable because applies_to is always False; kept for ABC
         # compliance.
         raise NotImplementedError
 
     @classmethod
-    def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+    def negative_example(cls) -> ExampleBundle:
+        raise NotImplementedError
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
         raise NotImplementedError
 
 
@@ -367,7 +377,8 @@ def test_dispatcher_overhead_scales_with_n(
     static_contract = frozenset(fc.normalized_name for fc in input_contract.fields)
 
     plugin = _PassThroughPlugin()
-    inputs = RuntimeCheckInputs(
+    effective_input_fields = frozenset(fc.normalized_name for fc in input_row.contract.fields)
+    inputs = PostEmissionInputs(
         plugin=plugin,
         node_id=plugin.node_id,
         run_id="bench_run",
@@ -375,24 +386,24 @@ def test_dispatcher_overhead_scales_with_n(
         token_id="bench_token",
         input_row=input_row,
         static_contract=static_contract,
+        effective_input_fields=effective_input_fields,
     )
-    outputs = RuntimeCheckOutputs(emitted_rows=(output_row,))
+    outputs = PostEmissionOutputs(emitted_rows=(output_row,))
 
     snapshot = _snapshot_registry_for_tests()
     try:
         _clear_registry_for_tests()
-        # Real pass-through contract — this is the one that applies + invokes
-        # runtime_check. The 200-field verify_pass_through dominates the
-        # measurement and anchors the N=1 baseline to the ADR-008 budget.
+        # Real pass-through contract — the one that applies + invokes
+        # post_emission_check. The 200-field verify_pass_through dominates
+        # the measurement and anchors the N=1 baseline.
         register_declaration_contract(PassThroughDeclarationContract())
-        # N-1 no-op contracts — these exercise only the applies_to short-
-        # circuit path. Names are distinct to satisfy the registry uniqueness
-        # guard.
+        # N-1 no-op contracts — exercise only the applies_to short-circuit
+        # path. Names are distinct to satisfy registry uniqueness.
         for i in range(n_contracts - 1):
             register_declaration_contract(_NoopContract(name=f"noop_scaling_{i}"))
 
         def run_dispatcher() -> None:
-            run_runtime_checks(inputs=inputs, outputs=outputs)
+            run_post_emission_checks(inputs=inputs, outputs=outputs)
 
         benchmark(run_dispatcher)
     finally:

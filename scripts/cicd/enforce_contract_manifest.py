@@ -62,9 +62,21 @@ import yaml
 
 RULE_ID_EXTRA = "MC1"
 RULE_ID_MISSING = "MC2"
+RULE_ID_MARKER_WITHOUT_MANIFEST = "MC3a"
+RULE_ID_MANIFEST_WITHOUT_MARKER = "MC3b"
+RULE_ID_TRIVIAL_BODY = "MC3c"
 
 _REGISTER_FUNC_NAME = "register_declaration_contract"
-_MANIFEST_SYMBOL = "EXPECTED_CONTRACTS"
+_MANIFEST_SYMBOL = "EXPECTED_CONTRACT_SITES"
+_DECORATOR_NAME = "implements_dispatch_site"
+_VALID_DISPATCH_SITES: frozenset[str] = frozenset(
+    {
+        "pre_emission_check",
+        "post_emission_check",
+        "batch_flush_check",
+        "boundary_check",
+    }
+)
 
 
 # =============================================================================
@@ -96,6 +108,11 @@ class RegistrationCall:
     line: int
     contract_name: str | None  # None if the call could not be statically resolved.
     detail: str  # Human-readable description for error messages / indeterminate cases.
+    # Per-site markers discovered by AST inspection of the contract's class
+    # body (H2 extension). None when contract_name is also None.
+    marker_sites: frozenset[str] | None = None
+    # Methods with trivial bodies keyed by site name — populated for MC3c.
+    trivial_body_sites: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -139,17 +156,20 @@ class Allowlist:
 # =============================================================================
 
 
-def extract_manifest(manifest_file: Path) -> tuple[dict[str, int], int]:
-    """Parse ``EXPECTED_CONTRACTS = frozenset({"a", "b"})`` from the manifest file.
+def extract_manifest(manifest_file: Path) -> tuple[dict[str, frozenset[str]], dict[str, int], int]:
+    """Parse ``EXPECTED_CONTRACT_SITES = MappingProxyType({...})`` from the
+    manifest file.
 
-    Returns ``(name_to_line, assign_line)`` where ``name_to_line`` maps each
-    manifest entry to the source line of its string literal and
-    ``assign_line`` is the ``EXPECTED_CONTRACTS =`` assignment line (used as
-    the anchor for MC2 findings).
+    Returns ``(name_to_sites, name_to_line, assign_line)`` where:
+      * ``name_to_sites`` — dict mapping contract name → frozenset of
+        dispatch-site names.
+      * ``name_to_line`` — dict mapping contract name → source line of its
+        key-string literal (for MC2 finding anchors).
+      * ``assign_line`` — the ``EXPECTED_CONTRACT_SITES =`` assignment line.
 
-    Crashes loudly if the symbol is missing, not a frozenset literal, or
-    contains non-string members — this scanner's correctness depends on the
-    manifest being statically analysable.
+    Crashes loudly if the symbol is missing, not a MappingProxyType(dict)
+    literal, or contains non-string members — the scanner's correctness
+    depends on the manifest being statically analysable.
     """
     try:
         source = manifest_file.read_text(encoding="utf-8")
@@ -163,8 +183,6 @@ def extract_manifest(manifest_file: Path) -> tuple[dict[str, int], int]:
         print(f"Fatal: SyntaxError in manifest {manifest_file}: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    # Find ``EXPECTED_CONTRACTS: frozenset[str] = frozenset({...})`` at module scope.
-    # Accept both annotated and bare assignments.
     for node in tree.body:
         target_names: list[str] = []
         value: ast.expr | None = None
@@ -187,55 +205,110 @@ def extract_manifest(manifest_file: Path) -> tuple[dict[str, int], int]:
     sys.exit(1)
 
 
-def _parse_manifest_value(value: ast.expr, manifest_file: Path, assign_line: int) -> tuple[dict[str, int], int]:
-    """Extract ``{name: line}`` from the RHS of ``EXPECTED_CONTRACTS = ...``.
-
-    Accepts ``frozenset({"a", "b"})`` and ``frozenset(("a", "b"))`` forms.
-    Rejects anything else — the scanner cannot introspect dynamic frozensets
-    and must not silently skip entries.
+def _parse_manifest_value(
+    value: ast.expr,
+    manifest_file: Path,
+    assign_line: int,
+) -> tuple[dict[str, frozenset[str]], dict[str, int], int]:
+    """Extract per-contract site claims from
+    ``EXPECTED_CONTRACT_SITES = MappingProxyType({name: frozenset({sites}),...})``.
     """
-    # Must be a Call to ``frozenset(...)``.
     if not isinstance(value, ast.Call):
-        _fatal_manifest_shape(manifest_file, "RHS must be a frozenset(...) call")
-    call: ast.Call = value
+        _fatal_manifest_shape(manifest_file, "RHS must be a MappingProxyType({...}) call")
+    proxy_call: ast.Call = value
 
-    func = call.func
+    func = proxy_call.func
     func_name = ""
     if isinstance(func, ast.Name):
         func_name = func.id
     elif isinstance(func, ast.Attribute):
         func_name = func.attr
-    if func_name != "frozenset":
-        _fatal_manifest_shape(manifest_file, f"RHS call must be frozenset(...), got {func_name}(...)")
-    if len(call.args) != 1:
-        _fatal_manifest_shape(manifest_file, "frozenset() must have exactly one positional argument")
-
-    inner = call.args[0]
-    # Accept Set, Tuple, or List literal of string constants.
-    if not isinstance(inner, (ast.Set, ast.Tuple, ast.List)):
+    if func_name != "MappingProxyType":
         _fatal_manifest_shape(
             manifest_file,
-            "frozenset() argument must be a set/tuple/list literal of string constants",
+            f"RHS call must be MappingProxyType(...), got {func_name}(...)",
         )
-    elements: list[ast.expr] = list(inner.elts)
+    if len(proxy_call.args) != 1:
+        _fatal_manifest_shape(
+            manifest_file,
+            "MappingProxyType() must have exactly one positional argument",
+        )
 
+    inner = proxy_call.args[0]
+    if not isinstance(inner, ast.Dict):
+        _fatal_manifest_shape(
+            manifest_file,
+            "MappingProxyType() argument must be a dict literal",
+        )
+
+    name_to_sites: dict[str, frozenset[str]] = {}
     name_to_line: dict[str, int] = {}
-    for elt in elements:
-        if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+    for key_node, value_node in zip(inner.keys, inner.values, strict=True):
+        if key_node is None:
             _fatal_manifest_shape(
                 manifest_file,
-                f"manifest member must be a string literal (got {ast.dump(elt)} at line {elt.lineno})",
+                f"dict unpacking (``**x``) is not supported (line {value_node.lineno})",
             )
-        literal_value: str = elt.value
-        if literal_value in name_to_line:
+        if not (isinstance(key_node, ast.Constant) and isinstance(key_node.value, str)):
+            _fatal_manifest_shape(
+                manifest_file,
+                f"manifest key must be a string literal (got {ast.dump(key_node)} at line {key_node.lineno})",
+            )
+        contract_name: str = key_node.value
+        if contract_name in name_to_sites:
             print(
-                f"Fatal: duplicate manifest entry {literal_value!r} at {manifest_file}:{elt.lineno}",
+                f"Fatal: duplicate manifest contract {contract_name!r} at {manifest_file}:{key_node.lineno}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        name_to_line[literal_value] = elt.lineno
 
-    return name_to_line, assign_line
+        # Parse the value — expected to be frozenset({"site1", "site2"}).
+        if not isinstance(value_node, ast.Call):
+            _fatal_manifest_shape(
+                manifest_file,
+                f"value for {contract_name!r} must be a frozenset(...) call (line {value_node.lineno})",
+            )
+        value_call: ast.Call = value_node
+        vc_func = value_call.func
+        vc_func_name = ""
+        if isinstance(vc_func, ast.Name):
+            vc_func_name = vc_func.id
+        elif isinstance(vc_func, ast.Attribute):
+            vc_func_name = vc_func.attr
+        if vc_func_name != "frozenset":
+            _fatal_manifest_shape(
+                manifest_file,
+                f"value call for {contract_name!r} must be frozenset(...), got {vc_func_name}(...)",
+            )
+        if len(value_call.args) != 1:
+            _fatal_manifest_shape(
+                manifest_file,
+                f"frozenset() for {contract_name!r} must have exactly one positional argument",
+            )
+        sites_node = value_call.args[0]
+        if not isinstance(sites_node, (ast.Set, ast.Tuple, ast.List)):
+            _fatal_manifest_shape(
+                manifest_file,
+                f"frozenset() argument for {contract_name!r} must be a set/tuple/list literal of string constants",
+            )
+
+        sites: set[str] = set()
+        for elt in sites_node.elts:
+            if not (isinstance(elt, ast.Constant) and isinstance(elt.value, str)):
+                _fatal_manifest_shape(
+                    manifest_file,
+                    f"dispatch-site member must be a string literal for {contract_name!r} (got {ast.dump(elt)} at line {elt.lineno})",
+                )
+            if elt.value not in _VALID_DISPATCH_SITES:
+                _fatal_manifest_shape(
+                    manifest_file,
+                    f"unknown dispatch site {elt.value!r} for contract {contract_name!r}; valid sites: {sorted(_VALID_DISPATCH_SITES)!r}",
+                )
+            sites.add(elt.value)
+        name_to_sites[contract_name] = frozenset(sites)
+        name_to_line[contract_name] = key_node.lineno
+
+    return name_to_sites, name_to_line, assign_line
 
 
 def _fatal_manifest_shape(manifest_file: Path, reason: str) -> NoReturn:
@@ -367,11 +440,14 @@ def _resolve_call(
                 contract_name=None,
                 detail=(f'class {class_name!r} has no statically-resolvable ``name = "..."`` class-level string attribute.'),
             )
+        marker_sites, trivial_sites = _extract_marker_sites_and_trivial_bodies(class_node)
         return RegistrationCall(
             file_path=relative_path,
             line=call_node.lineno,
             contract_name=contract_name,
             detail=f"class {class_name}",
+            marker_sites=marker_sites,
+            trivial_body_sites=trivial_sites,
         )
 
     # Case 2: register_declaration_contract(some_instance) — indirect reference.
@@ -422,26 +498,125 @@ def _extract_class_name_attribute(class_node: ast.ClassDef) -> str | None:
     return None
 
 
+def _extract_marker_sites_and_trivial_bodies(
+    class_node: ast.ClassDef,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Walk the class body collecting ``@implements_dispatch_site`` markers.
+
+    Returns ``(marker_sites, trivial_body_sites)`` where:
+      * ``marker_sites`` — sites the contract claims via the decorator.
+      * ``trivial_body_sites`` — a subset of ``marker_sites`` whose method
+        body is structurally trivial (MC3c).
+
+    Per the D1 correction (comment #418 on H2), this scanner only inspects
+    direct class body; mixin-inherited overrides are not resolved. Contracts
+    using mixin inheritance MUST carry the marker on the concrete class.
+    """
+    marker_sites: set[str] = set()
+    trivial_sites: set[str] = set()
+    for stmt in class_node.body:
+        if not isinstance(stmt, ast.FunctionDef):
+            continue
+        site_name: str | None = None
+        for decorator in stmt.decorator_list:
+            if not isinstance(decorator, ast.Call):
+                continue
+            func = decorator.func
+            func_name = ""
+            if isinstance(func, ast.Name):
+                func_name = func.id
+            elif isinstance(func, ast.Attribute):
+                func_name = func.attr
+            if func_name != _DECORATOR_NAME:
+                continue
+            if not decorator.args:
+                continue
+            site_arg = decorator.args[0]
+            if not (isinstance(site_arg, ast.Constant) and isinstance(site_arg.value, str)):
+                continue
+            site_name = site_arg.value
+            break
+        if site_name is None:
+            continue
+        marker_sites.add(site_name)
+        if _is_body_structurally_trivial(stmt.body):
+            trivial_sites.add(site_name)
+    return frozenset(marker_sites), frozenset(trivial_sites)
+
+
+def _is_body_structurally_trivial(body: list[ast.stmt]) -> bool:
+    """Return True iff the method body consists only of trivial statements.
+
+    MC3c trivial body definition (plan-review W5 + Security S2-003): body
+    consisting ONLY of any combination of:
+      * ``pass`` statements.
+      * ``return None`` / bare ``return``.
+      * ``...`` (Ellipsis literal — ``Expr(value=Constant(value=Ellipsis))``).
+      * Docstring — a LEADING ``Expr(value=Constant(value=<str>))`` (first
+        statement only); subsequent bare literal expressions are trivial.
+      * Bare literal expression statements (Constant values other than a
+        leading docstring).
+
+    A body is NON-trivial if it contains at least ONE:
+      * ``Raise``, ``Return`` with non-None-Constant value.
+      * ``Call`` (any function or method call).
+      * ``Attribute`` read on a non-self name.
+      * ``Assign`` / ``AugAssign`` / ``AnnAssign``.
+      * Control-flow (``If``, ``For``, ``While``, ``With``, ``Try``, ...).
+
+    Implemented by classifying each statement. The first statement may be a
+    docstring (permitted once); subsequent string-constants count as trivial
+    literal expressions, not docstrings.
+    """
+    if not body:
+        return True
+    for stmt in body:
+        if isinstance(stmt, ast.Pass):
+            continue
+        if isinstance(stmt, ast.Return):
+            # ``return`` (no value) and ``return None`` are trivial.
+            if stmt.value is None:
+                continue
+            if isinstance(stmt.value, ast.Constant) and stmt.value.value is None:
+                continue
+            return False
+        if isinstance(stmt, ast.Expr):
+            # Bare expression statement. Trivial iff it is a Constant literal.
+            if isinstance(stmt.value, ast.Constant):
+                continue
+            return False
+        return False
+    return True
+
+
 # =============================================================================
 # Finding Computation
 # =============================================================================
 
 
 def compute_findings(
-    manifest: dict[str, int],
+    manifest_sites: dict[str, frozenset[str]],
+    manifest_name_to_line: dict[str, int],
     registrations: list[RegistrationCall],
     manifest_file_rel: str,
     manifest_assign_line: int,
 ) -> list[Finding]:
-    """Produce MC1 (extra) and MC2 (missing) findings from the scan results."""
+    """Produce MC1 / MC2 / MC3a / MC3b / MC3c findings from the scan results.
+
+    - MC1 (extra): registration with no manifest entry.
+    - MC2 (missing): manifest entry with no registration.
+    - MC3a (marker without manifest): contract's @implements_dispatch_site
+      marker names a site NOT listed in the manifest.
+    - MC3b (manifest without marker): manifest names a site NOT marked on
+      the contract class.
+    - MC3c (trivial body): marked site's method body is structurally
+      trivial (pass / ... / bare literal / bare return).
+    """
     findings: list[Finding] = []
 
     registered_names_found: set[str] = set()
     for call in registrations:
         if call.contract_name is None:
-            # MC1: unresolved registration — treat as extra so CI blocks until
-            # the engineer either refactors to the canonical form or
-            # allowlists with justification.
             findings.append(
                 Finding(
                     rule_id=RULE_ID_EXTRA,
@@ -454,18 +629,79 @@ def compute_findings(
             continue
 
         registered_names_found.add(call.contract_name)
-        if call.contract_name not in manifest:
+        if call.contract_name not in manifest_sites:
             findings.append(
                 Finding(
                     rule_id=RULE_ID_EXTRA,
                     file_path=call.file_path,
                     line=call.line,
                     contract_name=call.contract_name,
-                    detail=(f"contract {call.contract_name!r} is registered but not listed in EXPECTED_CONTRACTS manifest."),
+                    detail=(f"contract {call.contract_name!r} is registered but not listed in EXPECTED_CONTRACT_SITES manifest."),
+                )
+            )
+            continue
+
+        # Per-site comparison (MC3a/b/c).
+        expected_sites = manifest_sites[call.contract_name]
+        marker_sites = call.marker_sites or frozenset()
+
+        # MC3a: marker without manifest entry.
+        for extra_site in sorted(marker_sites - expected_sites):
+            findings.append(
+                Finding(
+                    rule_id=RULE_ID_MARKER_WITHOUT_MANIFEST,
+                    file_path=call.file_path,
+                    line=call.line,
+                    contract_name=f"{call.contract_name}::{extra_site}",
+                    detail=(
+                        f"contract {call.contract_name!r} claims dispatch site "
+                        f"{extra_site!r} via @implements_dispatch_site, but the "
+                        f"site is NOT listed in EXPECTED_CONTRACT_SITES[{call.contract_name!r}]. "
+                        f"Either add the site to the manifest or remove the marker."
+                    ),
                 )
             )
 
-    for name, line in manifest.items():
+        # MC3b: manifest entry without marker.
+        for missing_site in sorted(expected_sites - marker_sites):
+            findings.append(
+                Finding(
+                    rule_id=RULE_ID_MANIFEST_WITHOUT_MARKER,
+                    file_path=call.file_path,
+                    line=call.line,
+                    contract_name=f"{call.contract_name}::{missing_site}",
+                    detail=(
+                        f"contract {call.contract_name!r} manifest names "
+                        f"dispatch site {missing_site!r}, but the contract "
+                        f"class has no @implements_dispatch_site({missing_site!r}) "
+                        f"marker on any method. Under multi-level inheritance the "
+                        f"marker MUST be on the concrete class "
+                        f"(per D1 correction, comment #418 on H2)."
+                    ),
+                )
+            )
+
+        # MC3c: trivial body on a marked site.
+        for trivial_site in sorted(call.trivial_body_sites & expected_sites):
+            findings.append(
+                Finding(
+                    rule_id=RULE_ID_TRIVIAL_BODY,
+                    file_path=call.file_path,
+                    line=call.line,
+                    contract_name=f"{call.contract_name}::{trivial_site}",
+                    detail=(
+                        f"contract {call.contract_name!r} method implementing "
+                        f"{trivial_site!r} has a structurally trivial body "
+                        f"(pass / ... / bare return / literal-only). An opt-in "
+                        f"without an implementation is an empty-body bypass "
+                        f"surface (Security S2-003) — the contract appears to "
+                        f"fire, audits as fired, and semantically did nothing."
+                    ),
+                )
+            )
+
+    # MC2: manifest entry with no registration call.
+    for name, line in manifest_name_to_line.items():
         if name not in registered_names_found:
             findings.append(
                 Finding(
@@ -642,14 +878,20 @@ def run_check(args: argparse.Namespace) -> int:
 
     allowlist = load_allowlist(allowlist_path)
 
-    manifest, assign_line = extract_manifest(manifest_file)
+    manifest_sites, manifest_name_to_line, assign_line = extract_manifest(manifest_file)
     try:
         manifest_file_rel = str(manifest_file.relative_to(repo_root))
     except ValueError:
         manifest_file_rel = manifest_file.name
 
     registrations = scan_source_tree(source_root, repo_root, manifest_file)
-    all_findings = compute_findings(manifest, registrations, manifest_file_rel, assign_line)
+    all_findings = compute_findings(
+        manifest_sites,
+        manifest_name_to_line,
+        registrations,
+        manifest_file_rel,
+        assign_line,
+    )
 
     violations: list[Finding] = []
     for finding in all_findings:
@@ -664,17 +906,28 @@ def run_check(args: argparse.Namespace) -> int:
     if violations:
         print(f"\n{'=' * 60}")
         print(f"CONTRACT MANIFEST DRIFT: {len(violations)} finding(s)")
-        print("MC1 = registration without manifest entry; MC2 = manifest entry without registration")
+        print(
+            "MC1 = registration without manifest entry; MC2 = manifest entry without registration;\n"
+            "MC3a = @implements_dispatch_site marker claims a site not in manifest;\n"
+            "MC3b = manifest names a site with no @implements_dispatch_site marker;\n"
+            "MC3c = marked dispatch site's method body is structurally trivial."
+        )
         print("=" * 60)
         for v in violations:
             print(format_finding(v))
         print()
         print(f"Manifest: {manifest_file_rel} ({_MANIFEST_SYMBOL})")
         print("Fix direction:")
-        print("  MC1 — either add the contract name to EXPECTED_CONTRACTS, or remove the")
-        print("        register_declaration_contract(...) call site.")
+        print("  MC1 — either add the contract name to EXPECTED_CONTRACT_SITES, or remove")
+        print("        the register_declaration_contract(...) call site.")
         print("  MC2 — either restore the register_declaration_contract(...) call site, or")
-        print("        remove the name from EXPECTED_CONTRACTS.")
+        print("        remove the name from EXPECTED_CONTRACT_SITES.")
+        print("  MC3a — either add the site to EXPECTED_CONTRACT_SITES or remove the marker.")
+        print("  MC3b — add @implements_dispatch_site(<site>) on the concrete class")
+        print("         (under multi-level inheritance the marker MUST be on the")
+        print("         concrete class; mixin-inherited overrides are not detected).")
+        print("  MC3c — replace the trivial body (pass / ... / bare return / literal) with a")
+        print("         non-trivial implementation, or drop the marker entirely.")
         print()
         print("To allowlist a transitional finding, add an entry to the allowlist directory:")
         print(f"  {allowlist_path}")
@@ -712,7 +965,12 @@ def run_check(args: argparse.Namespace) -> int:
         print("CHECK FAILED")
         print("=" * 60)
     else:
-        print(f"\nNo contract-manifest drift. Manifest has {len(manifest)} entries; all are registered. Check passed.")
+        total_site_claims = sum(len(sites) for sites in manifest_sites.values())
+        print(
+            f"\nNo contract-manifest drift. Manifest has {len(manifest_sites)} contract(s) "
+            f"with {total_site_claims} total dispatch-site claim(s); all registered and "
+            f"all markers match. Check passed."
+        )
 
     return 1 if has_errors else 0
 

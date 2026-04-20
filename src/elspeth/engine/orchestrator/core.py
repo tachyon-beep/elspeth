@@ -61,7 +61,8 @@ from elspeth.contracts import (
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.config import RuntimeRetryConfig
 from elspeth.contracts.declaration_contracts import (
-    EXPECTED_CONTRACTS,
+    EXPECTED_CONTRACT_SITES,
+    contract_sites,
     declaration_registry_is_frozen,
     freeze_declaration_registry,
     registered_declaration_contracts,
@@ -177,11 +178,16 @@ def prepare_for_run() -> None:
     prevent).
 
     Raises:
-        RuntimeError: the set of registered contract names does not exactly
-            equal ``EXPECTED_CONTRACTS``. The message names every missing and
-            every extra contract so the failure is self-diagnosing. Indicates
-            either an import-order bug (contract module not imported) or
-            manifest drift (contract registered without a manifest entry).
+        RuntimeError: every registered ``(contract_name, dispatch_site)``
+            pair does not exactly equal the pairs in
+            ``EXPECTED_CONTRACT_SITES`` (N1 per-site manifest extension,
+            ADR-010 §Semantics amendment 2026-04-20). The message names
+            every missing and every extra contract or site so the failure
+            is self-diagnosing. Indicates one of: an import-order bug
+            (contract module not imported), manifest drift (contract
+            registered without a manifest entry), or site drift
+            (contract's ``@implements_dispatch_site`` markers disagree
+            with the manifest).
     """
     # Short-circuit if the registry is already frozen — bootstrap already ran.
     # Idempotency is required because Orchestrator.run() can be called multiple
@@ -196,41 +202,79 @@ def prepare_for_run() -> None:
     if declaration_registry_is_frozen():
         return
 
-    # ADR-010 §Decision 3 + issue elspeth-b03c6112c0 (C2):
-    # Assert SET EQUALITY between registered contract names and the
-    # ``EXPECTED_CONTRACTS`` manifest BEFORE freezing. A bare non-empty check
-    # (``if not contracts``) would pass even when a specific contract's
-    # registration module was conditionally skipped — the registry would
-    # still contain other contracts, satisfying truthiness, while the
-    # conditionally-skipped contract's runtime VAL was silently disabled.
-    # The audit trail would then record plugin behaviour as "compliant"
-    # (no violation raised) when in truth the contract never ran. Set
-    # equality against a declared manifest closes this vector.
+    # ADR-010 §Decision 3 + issue elspeth-b03c6112c0 (C2) + N1 extension
+    # (issue elspeth-10dc0b747f — per-site manifest, H2 landing 2026-04-20):
+    # Assert SET EQUALITY between every registered (contract_name,
+    # dispatch_site) pair and every pair in ``EXPECTED_CONTRACT_SITES``
+    # BEFORE freezing. The original C2 closure checked contract-name
+    # equality; N1 tightens this to per-(name, site) equality so a
+    # contract registering for the wrong site (or silently no-opping at a
+    # site it claims to cover) is detected at bootstrap, not masked until
+    # first row.
+    #
+    # Every plugin behaviour recorded as "compliant" (no violation raised)
+    # must be evidence of every applicable contract's method having been
+    # invoked — under audit-complete semantics (ADR-010 §Semantics
+    # amendment, comment #417 on elspeth-425047a599) absence of violation
+    # means "checked and passed," which is only true if the dispatcher
+    # actually dispatched to the contract for its claimed sites. The N1
+    # manifest closes the (name, site) drift vector the C2 set-of-names
+    # manifest missed.
     contracts = registered_declaration_contracts()
-    registered_names = frozenset(c.name for c in contracts)
-    if registered_names != EXPECTED_CONTRACTS:
-        missing = EXPECTED_CONTRACTS - registered_names
-        extra = registered_names - EXPECTED_CONTRACTS
+    registered_sites: dict[str, frozenset[str]] = {c.name: frozenset(contract_sites(c)) for c in contracts}
+    expected_sites: dict[str, frozenset[str]] = {name: frozenset(sites) for name, sites in EXPECTED_CONTRACT_SITES.items()}
+    if registered_sites != expected_sites:
+        # Compose a self-diagnosing message naming every drifted (name, site)
+        # pair. Five mutually exclusive drift classes are surfaced:
+        #   * name missing (manifest claims, nothing registered)
+        #   * name extra (registered, manifest absent)
+        #   * per-name: sites missing (contract registered with fewer sites
+        #     than manifest declares)
+        #   * per-name: sites extra (contract registered with more sites
+        #     than manifest declares)
+        #   * per-name: site-set mismatch (disjoint)
+        expected_names = frozenset(expected_sites.keys())
+        registered_names = frozenset(registered_sites.keys())
+        missing_names = expected_names - registered_names
+        extra_names = registered_names - expected_names
+        site_drift_lines: list[str] = []
+        for name in sorted(expected_names & registered_names):
+            expected_for_name = expected_sites[name]
+            registered_for_name = registered_sites[name]
+            if expected_for_name == registered_for_name:
+                continue
+            missing_sites = expected_for_name - registered_for_name
+            extra_sites = registered_for_name - expected_for_name
+            site_drift_lines.append(
+                f"  {name!r}: expected_sites={sorted(expected_for_name)!r}, "
+                f"registered_sites={sorted(registered_for_name)!r}, "
+                f"missing={sorted(missing_sites)!r}, extra={sorted(extra_sites)!r}"
+            )
         raise RuntimeError(
-            "Declaration contract registry mismatch at orchestrator bootstrap.\n"
-            f"  Expected (manifest):  {sorted(EXPECTED_CONTRACTS)!r}\n"
-            f"  Registered:           {sorted(registered_names)!r}\n"
-            f"  Missing (not registered but in manifest): {sorted(missing)!r}\n"
-            f"  Extra   (registered but not in manifest): {sorted(extra)!r}\n"
+            "Declaration contract registry mismatch at orchestrator bootstrap "
+            "(N1 per-site manifest — ADR-010 §Decision 3 + issue elspeth-10dc0b747f).\n"
+            f"  Expected (manifest):  {sorted((n, sorted(s)) for n, s in expected_sites.items())!r}\n"
+            f"  Registered:           {sorted((n, sorted(s)) for n, s in registered_sites.items())!r}\n"
+            f"  Missing names (not registered but in manifest): {sorted(missing_names)!r}\n"
+            f"  Extra names  (registered but not in manifest): {sorted(extra_names)!r}\n"
+            "  Per-name site drift:\n" + ("\n".join(site_drift_lines) if site_drift_lines else "    (none)") + "\n"
             "\n"
             "If a name is missing: the contract's module-level "
-            "register_declaration_contract(...) call did not fire. Check for a "
-            "conditional import that skipped it, or an import-order bug where "
-            "the module was not imported before prepare_for_run(). The manifest "
-            "lives at src/elspeth/contracts/declaration_contracts.py "
-            "(EXPECTED_CONTRACTS).\n"
-            "If a name is extra: a contract was registered without being added "
-            "to EXPECTED_CONTRACTS. Update the manifest in the same commit as "
-            "the registration. scripts/cicd/enforce_contract_manifest.py is "
-            "the CI backstop that should have caught this.\n"
+            "register_declaration_contract(...) call did not fire. Check for "
+            "a conditional import that skipped it, or an import-order bug "
+            "where the module was not imported before prepare_for_run().\n"
+            "If a name is extra: a contract was registered without being "
+            "added to EXPECTED_CONTRACT_SITES. Update the manifest in the "
+            "same commit as the registration.\n"
+            "If per-name sites drift: the contract's "
+            "@implements_dispatch_site(...) markers disagree with "
+            "EXPECTED_CONTRACT_SITES. Either fix the markers or update the "
+            "manifest (and run scripts/cicd/enforce_contract_manifest.py to "
+            "confirm MC3a/b/c are clean).\n"
             "\n"
             "A silent runtime VAL disable is exactly the failure mode ADR-010 "
-            "was designed to prevent."
+            "was designed to prevent — extended to per-site coverage under "
+            "the §Semantics amendment (2026-04-20)."
         )
     freeze_declaration_registry()
     freeze_tier_registry()

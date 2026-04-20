@@ -1,7 +1,7 @@
 # ADR-010: Declaration-trust framework — generalized contract protocol for plugin declarations
 
 **Date:** 2026-04-19
-**Status:** Accepted
+**Status:** Accepted (amended 2026-04-20 — see Amendment A3 below for H2 cluster)
 **Deciders:** John Morrissey (author); five-reviewer panel (solution-architect, systems-thinker, python-engineer, quality-engineer, security-architect) per session `/home/john/.claude/plans/elspeth-track-2-phase-2a-declaration-framework.review.json`
 **Supersedes:** (partial, clause-level) — see "Supersession map" below
 **Tags:** framework, declaration-contract, audit-evidence, tier-1, registry, audit-integrity
@@ -9,6 +9,12 @@
 **Filigree epic:** `elspeth-a3ac5d88c6` (Track 2 — Declaration-trust framework Phase 2B/2C; hard SLA 2026-07-18)
 
 ---
+
+> **Amendment A3 — 2026-04-20 (H2 cluster: `elspeth-425047a599`, `elspeth-10dc0b747f`, `elspeth-60890a7388`, `elspeth-f52d7c5a47`, `elspeth-5fc876138d`, `elspeth-b513c01cff`, `elspeth-121b268aec`, `elspeth-5dae105959`).**
+>
+> **What changed.** The 2A single-site `DeclarationContract` Protocol is replaced by a nominal 4-site ABC (C+B′ synthesis per panel comment #408). The dispatcher adopts **audit-complete** semantics (comment #417 anchor — see §Semantics below). The `EXPECTED_CONTRACTS: frozenset[str]` manifest becomes `EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]]`; the CI scanner gains `MC3a`/`MC3b`/`MC3c` rules. A pre-emission dispatch site is added (F2). The inline sink check is reclassified as `SinkTransactionalInvariantError` (F3, distinct from the future `SinkRequiredFieldsContract`). Rule-of-three resets per dispatch site (F4, §Adoption State). Aggregate violation semantics (`AggregateDeclarationContractViolation`, N3) are adopted. See §Semantics + §Adoption State + §H2 landing scope below for details.
+>
+> **Banner authority.** The sections below (Semantics, Adoption State, H2 landing scope) supersede the original 2A framing where they overlap. The original prose is preserved verbatim for audit-trail purposes.
 
 > **Amendment A1 — 2026-04-20 (issue `elspeth-3f320398f1` / M6).**
 > The Supersession-map row for **ADR-008 §Explicit scope boundary** (row at line 20 below) claims the 2A framework provides what each future declaration adopts. The accurate statement is narrower: the *scope* statement is preserved, but `static_check` was deferred entirely to Phase 2B's walker refactor (see §Decision 3). Under 2A the protocol carries only `runtime_check` — new declarations adopting the 2A framework land their runtime-VAL contract today; walker-side checks wait for the Phase 2B shape decision (issue `elspeth-425047a599` / H2). The original row stands for audit-trail purposes; readers should treat this banner as the authoritative reading of the ADR-008 scope-boundary row under 2A. Precedent: ADR-009 §Alternatives Considered #4.
@@ -159,3 +165,155 @@ Considered seriously in review. Rejected because: (a) the nominal `AuditEvidence
 - Successor ADRs (Phase 2B/2C): each declaration gets its own ADR per §Supersession map ADR-008 reference
 - CLAUDE.md §Three-Tier Trust Model, §Plugin Ownership, §Frozen Dataclass Immutability, §Defensive Programming Forbidden
 - Track 2 filigree epic: `elspeth-a3ac5d88c6`; ADR-009 §Clause 3 SLA hard trigger 2026-07-18
+- H2 cluster landing (2026-04-20): `elspeth-425047a599` (H2), `elspeth-10dc0b747f` (N1), `elspeth-60890a7388` (N3), `elspeth-f52d7c5a47` (F2), `elspeth-5fc876138d` (F3), `elspeth-b513c01cff` (F4), `elspeth-121b268aec` (F5), `elspeth-5dae105959` (H1 amendment)
+- H2 design sketch: `docs/plans/2026-04-20-h2-amendment-design.md`
+- H2 decision anchor: comment #417 on `elspeth-425047a599` — ADR-010 §Semantics audit-complete decision record
+
+---
+
+## §Semantics — Audit-complete dispatch (Amendment A3 anchor)
+
+Added 2026-04-20 per comment #417 on `elspeth-425047a599`. This section is
+load-bearing for the H2 cluster's F2/F3/F4/N1/N3 acceptance bullets; every
+future reviewer who re-litigates "fail-fast vs audit-complete" MUST arrive
+at the same conclusion or file a new comment on H2 to document disagreement.
+
+**Decision.** The declaration-contract dispatcher adopts **audit-complete**
+semantics. On a row that would violate multiple registered contracts'
+invariants, the dispatcher continues iteration past a raised
+`DeclarationContractViolation` (or `PluginContractViolation` subclass, per
+the `PassThroughContractViolation` legacy), collects all violations
+applicable to a single (row, call-site) tuple, and raises
+`AggregateDeclarationContractViolation` when M > 1. Single-violation
+(M = 1) cases raise the original violation unchanged via reference equality
+(`raise violations[0]`).
+
+**Rationale (verbatim for audit-trail posterity).**
+
+> ELSPETH's CLAUDE.md "Auditability Standard" makes "I don't know what
+> happened" structurally impermissible for any output. Under fail-fast
+> first-fire semantics, the audit trail's silence on a second contract's
+> evaluation is indistinguishable from "checked and passed" — a Repudiation
+> surface (STRIDE) the auditor cannot resolve. Under audit-complete
+> semantics, every applicable contract's method runs; every violation is
+> recorded; absence-of-violation in the audit trail means "checked and
+> passed," not "skipped because an earlier contract fired." The
+> performance cost (M-applicable worst case) is bounded and quantified by
+> H1's amended NFR derivation; the audit-completeness benefit is
+> qualitative and load-bearing.
+>
+> A third option — fail-fast with pre-evaluation audit log — was
+> considered (Security Architect S2-004) and rejected: emitting a separate
+> audit record for "contracts evaluated" creates an attribution-confusion
+> vector (which record is authoritative?) that audit-complete avoids by
+> design. It also introduces a dual-write ordering problem: the
+> pre-evaluation record must land before evaluation, so a crash between
+> pre-record and evaluation leaves the audit trail permanently misleading.
+
+**Scope of this decision.**
+
+- Applies to all four dispatch sites named in the H2 cluster:
+  `pre_emission_check`, `post_emission_check`, `batch_flush_check`,
+  `boundary_check`. Each site uses the shared collect-then-raise helper
+  `_dispatch` in `src/elspeth/engine/executors/declaration_dispatch.py`.
+- F2 (pre-emission call site), F3 (sink-inline reclassification), F4
+  (rule-of-three per site), N1 (per-site manifest) inherit this posture.
+- `AggregateDeclarationContractViolation` is a **sibling** class of
+  `DeclarationContractViolation` on `(AuditEvidenceBase, RuntimeError)`,
+  **not a subclass**. Triage SQL: `WHERE is_aggregate = true`. Generic
+  `except DeclarationContractViolation` does NOT absorb aggregates by
+  design — see the catch-site survey in the H2 landing PR.
+
+**Registry-order shadowing — closed.** The 2A dispatcher raised the first
+violation immediately, terminating the loop. Under import-order changes,
+refactors, or conditional imports, the "first-registered" contract could
+silently vary, causing non-deterministic attribution of multi-violation
+rows. Audit-complete + per-site registry eliminates this class of bug:
+iteration order still exists, but every applicable contract's method runs
+before any violation raises, and the aggregate carries ALL violations
+regardless of registration order. (See `elspeth-60890a7388` / N3
+§Acceptance for the order-independence test `pytest -p no:randomly
+--forked`.)
+
+---
+
+## §Adoption State — per dispatch surface (Amendment A3, F4)
+
+Added 2026-04-20 per `elspeth-b513c01cff` (F4). The 2A rule-of-three
+criterion treated the single-site registry as one surface; under H2 each
+dispatch site is its own surface with its own rule-of-three gate. A
+contract's landing on a new surface does NOT reset the rule for sites
+that already counted; conversely, one boundary adopter does NOT prove the
+boundary subtype — see the paired-landing rule below.
+
+| Surface | Adopter count | Rule-of-three satisfied? | Adopters |
+|---------|:-------------:|:------------------------:|----------|
+| `pre_emission_check` | 0 | NO — 3 needed | first adopter: `DeclaredRequiredFieldsContract` in Phase 2B (`elspeth-2cc9b47132`, blocked on F2) |
+| `post_emission_check` | 1 | NO — 2 more needed | `PassThroughDeclarationContract` |
+| `batch_flush_check` | 1 | NO — 2 more needed | `PassThroughDeclarationContract` |
+| `boundary_check` | 0 | NO — 3 needed | paired adopters: `SourceGuaranteedFieldsContract` (`elspeth-48c8a9762b`) + `SinkRequiredFieldsContract` (`elspeth-ea5e9e4759`) — 2C |
+
+**Paired-landing rule (boundary subtype).** The boundary subtype lands
+with BOTH `SourceGuaranteedFieldsContract` AND `SinkRequiredFieldsContract`
+in a single commit/PR. Staggered landings of one boundary adopter without
+the other are rejected at review. Landing a single boundary adopter would
+validate the subtype's shape against exactly one example, which is too
+weak to satisfy the F4 sharpening (Security Architect).
+
+**Per-surface governance.** A new contract adopting an existing surface
+counts toward that surface's rule-of-three. A new contract introducing a
+new surface (not one of the four named above) would require an ADR
+amendment to name the surface, update `DispatchSite`, and restart the
+rule-of-three gate at that surface.
+
+---
+
+## §H2 landing scope (Amendment A3)
+
+The H2 cluster (comment #415 on `elspeth-425047a599`) landed as a single
+PR per H2 §Acceptance "ADR amendment landing manifest (H2-B)". W9 escape
+hatch not exercised — no reviewer objection warranted a split. Landing
+manifest:
+
+- **H2** (`elspeth-425047a599`): nominal ABC + 4 bundle types +
+  `@implements_dispatch_site` decorator (L0) + registry restructure.
+- **N1** (`elspeth-10dc0b747f`): `EXPECTED_CONTRACT_SITES` per-site
+  manifest + `MC3a`/`MC3b`/`MC3c` CI rules in
+  `scripts/cicd/enforce_contract_manifest.py`.
+- **N3** (`elspeth-60890a7388`): collect-then-raise dispatcher +
+  `AggregateDeclarationContractViolation` sibling class + catch-site
+  survey. Preserves triage SQL compatibility for the N=1 reference-
+  equality case.
+- **F2** (`elspeth-f52d7c5a47`): pre-emission dispatch site in
+  `TransformExecutor` between input validation and `transform.process()`.
+  Shared `_dispatch` helper, not parallel implementation.
+- **F3** (`elspeth-5fc876138d`): `SinkTransactionalInvariantError`
+  reclassification at `_validate_sink_input` — distinct from the future
+  Phase 2C `SinkRequiredFieldsContract`. Two-layer architecture
+  documented at the site.
+- **F4** (`elspeth-b513c01cff`): per-surface rule-of-three criteria (see
+  §Adoption State).
+- **F5** (`elspeth-121b268aec`): E2E Landscape round-trip acceptance
+  incorporated into each relevant ticket. Aggregate round-trip test
+  added at
+  `tests/integration/audit/test_declaration_contract_landscape_roundtrip.py`.
+- **H1 amendment** (`elspeth-5dae105959`): NFR derivation extended to
+  account for per-site dispatch (≤4 call sites × per-site N) — existing
+  parametrised benchmark unchanged, applies per site.
+
+**`override_input_fields` removal.** Panel F1 (comment #408) flagged the
+2A `RuntimeCheckInputs.override_input_fields: frozenset | None` as the
+B-antipattern in miniature. The H2 refactor replaces it with
+`effective_input_fields: frozenset[str]` on each bundle type; callers
+(TransformExecutor, `_cross_check_flush_output`) derive the set once
+via `derive_effective_input_fields` and pass it in. Contracts no longer
+re-derive — the fabrication surface is closed at the caller boundary.
+
+**Triage SQL compatibility.** A row where a single pass-through contract
+fires still produces `exception_type = 'PassThroughContractViolation'` in
+the audit table (N=1 reference-equality fast path). A row where multiple
+contracts fire produces `exception_type =
+'AggregateDeclarationContractViolation'` with `is_aggregate = true` and a
+`violations` list. Queries filtering on a specific contract's exception
+type must be updated to also match inside the aggregate's `violations`
+list when they want all occurrences.

@@ -137,16 +137,21 @@ class TestBeginRunRuntimeValManifest:
         names = {entry["name"] for entry in declaration_entries}
         assert "passes_through_input" in names
         for entry in declaration_entries:
-            assert set(entry.keys()) == {"name", "class_name", "class_module"}
+            # H2 per-site extension: entries carry dispatch_sites in addition
+            # to the 2A keys.
+            assert set(entry.keys()) == {"name", "class_name", "class_module", "dispatch_sites"}
             assert entry["class_module"].startswith("elspeth.")
+            assert isinstance(entry["dispatch_sites"], list)
+            assert len(entry["dispatch_sites"]) >= 1
 
-    def test_manifest_records_expected_contract_manifest(self) -> None:
-        """The EXPECTED_CONTRACTS closed-set manifest (C2) is captured verbatim."""
-        from elspeth.contracts.declaration_contracts import EXPECTED_CONTRACTS
+    def test_manifest_records_expected_contract_sites(self) -> None:
+        """The EXPECTED_CONTRACT_SITES per-site manifest (N1) is captured verbatim."""
+        from elspeth.contracts.declaration_contracts import EXPECTED_CONTRACT_SITES
 
         db, _ = _make_repo(run_id="m3-manifest")
         manifest = self._fetch_manifest(db, "m3-manifest")
-        assert set(manifest["expected_contract_manifest"]) == set(EXPECTED_CONTRACTS)
+        expected = {name: sorted(sites) for name, sites in EXPECTED_CONTRACT_SITES.items()}
+        assert manifest["expected_contract_sites"] == expected
 
     def test_manifest_records_tier_1_errors(self) -> None:
         """Every Tier-1 error class with its reason is in the manifest."""
@@ -201,7 +206,8 @@ class TestBeginRunRuntimeValManifest:
         # Expected-manifest (C2) is a module-level frozen constant, so it
         # is identical across both runs — this confirms the manifest and
         # the live registry are serialized independently.
-        assert baseline_manifest["expected_contract_manifest"] == patched_manifest["expected_contract_manifest"]
+        # H2: the frozen constant is now per-site (``expected_contract_sites``).
+        assert baseline_manifest["expected_contract_sites"] == patched_manifest["expected_contract_sites"]
 
 
 class TestFinalizeRunDirect:

@@ -1,4 +1,5 @@
-"""DeclarationContract protocol + registry + violation (ADR-010 §Decision 3)."""
+"""DeclarationContract ABC + registry + violation (ADR-010 §Decision 3 +
+§Semantics amendment 2026-04-20)."""
 
 from __future__ import annotations
 
@@ -8,11 +9,15 @@ from typing import NotRequired, TypedDict
 import pytest
 
 from elspeth.contracts.declaration_contracts import (
+    DeclarationContract,
     DeclarationContractViolation,
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    DispatchSite,
+    ExampleBundle,
+    PostEmissionInputs,
+    PostEmissionOutputs,
     _clear_registry_for_tests,
     freeze_declaration_registry,
+    implements_dispatch_site,
     register_declaration_contract,
     registered_declaration_contracts,
 )
@@ -56,7 +61,7 @@ class _TestViolation(DeclarationContractViolation):
     payload_schema = _TestPayload
 
 
-class _FakeContract:
+class _FakeContract(DeclarationContract):
     name = "fake_declaration"
     payload_schema: type = _FakePayload
 
@@ -64,15 +69,14 @@ class _FakeContract:
         # Direct attribute access — NOT getattr with default (CLAUDE.md).
         return plugin.__class__.__name__ == "_FakePlugin" and plugin.fake_flag
 
-    def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(
+        self,
+        inputs: PostEmissionInputs,
+        outputs: PostEmissionOutputs,
+    ) -> None:
         if inputs.plugin.fake_violate:
-            # C4 closure: ``contract_name`` is attached by the dispatcher from
-            # the registry entry; contracts MUST NOT supply it here.
-            #
-            # H5 Layer 1: the violation subclass must declare a payload_schema
-            # that covers every key in the payload. ``_TestViolation`` is
-            # defined at module scope and uses ``_TestPayload``, which lists
-            # ``reason`` as ``NotRequired[str]``.
+            # C4 closure: contract_name is attached by the dispatcher.
             raise _TestViolation(
                 plugin=type(inputs.plugin).__name__,
                 node_id=inputs.node_id,
@@ -84,39 +88,39 @@ class _FakeContract:
             )
 
     @classmethod
-    def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+    def negative_example(cls) -> ExampleBundle:
         plugin = _FakePlugin()
         plugin.fake_violate = True
-        return (
-            RuntimeCheckInputs(
-                plugin=plugin,
-                node_id="n",
-                run_id="r",
-                row_id="rw",
-                token_id="t",
-                input_row=object(),
-                static_contract=frozenset(),
-            ),
-            RuntimeCheckOutputs(emitted_rows=(object(),)),
+        inputs = PostEmissionInputs(
+            plugin=plugin,
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="t",
+            input_row=object(),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset(),
         )
+        outputs = PostEmissionOutputs(emitted_rows=(object(),))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
     @classmethod
-    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
         # fake_flag=False → applies_to returns False (N2 Layer A).
         plugin = _FakePlugin()
         plugin.fake_flag = False
-        return (
-            RuntimeCheckInputs(
-                plugin=plugin,
-                node_id="n",
-                run_id="r",
-                row_id="rw",
-                token_id="t",
-                input_row=object(),
-                static_contract=frozenset(),
-            ),
-            RuntimeCheckOutputs(emitted_rows=(object(),)),
+        inputs = PostEmissionInputs(
+            plugin=plugin,
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="t",
+            input_row=object(),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset(),
         )
+        outputs = PostEmissionOutputs(emitted_rows=(object(),))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
 
 class _FakePlugin:
@@ -149,14 +153,21 @@ def _isolate_registry():
     saved_registry = list(dc._REGISTRY)
     saved_frozen = dc._FROZEN
 
+    # Also snapshot the per-site map (H2 per-site registry extension).
+    saved_per_site = {site: list(lst) for site, lst in dc._REGISTRY_BY_SITE.items()}
+
     # Setup: clear by direct attribute mutation (bypasses the pytest gate).
     dc._REGISTRY.clear()
+    for lst in dc._REGISTRY_BY_SITE.values():
+        lst.clear()
     dc._FROZEN = False
     yield
 
     # Teardown: restore pre-test state by direct mutation.
     dc._REGISTRY.clear()
     dc._REGISTRY.extend(saved_registry)
+    for site, lst in saved_per_site.items():
+        dc._REGISTRY_BY_SITE[site][:] = lst
     dc._FROZEN = saved_frozen
 
 
@@ -172,67 +183,52 @@ def test_duplicate_name_raises() -> None:
         register_declaration_contract(_FakeContract())
 
 
-def test_contract_without_payload_schema_rejected() -> None:
-    class _NoSchema:
-        name = "no_schema"
+def test_non_abc_contract_rejected() -> None:
+    """Post-H2 (ADR-010 §Fix direction nominal ABC): a contract that does
+    NOT inherit ``DeclarationContract`` is rejected at registration — the
+    ABC is the authoritative type surface, not a structural Protocol."""
 
-        # payload_schema attribute missing
-        def applies_to(self, p):
-            return False
-
-        def runtime_check(self, i, o):
-            pass
-
-        @classmethod
-        def negative_example(cls):
-            raise NotImplementedError
-
-    with pytest.raises(TypeError, match="payload_schema"):
-        register_declaration_contract(_NoSchema())  # type: ignore[arg-type]
-
-
-def test_contract_without_negative_example_rejected() -> None:
-    class _NoNeg:
-        name = "no_neg"
+    class _BareDuckType:
+        name = "bare_duck"
         payload_schema = _FakePayload
 
         def applies_to(self, p):
             return False
 
-        def runtime_check(self, i, o):
-            pass
+        @classmethod
+        def negative_example(cls):
+            raise NotImplementedError
 
-        # negative_example missing
+        @classmethod
+        def positive_example_does_not_apply(cls):
+            raise NotImplementedError
 
-    with pytest.raises(TypeError, match="negative_example"):
-        register_declaration_contract(_NoNeg())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="DeclarationContract"):
+        register_declaration_contract(_BareDuckType())  # type: ignore[arg-type]
 
 
-def test_contract_without_positive_example_does_not_apply_rejected() -> None:
-    """N2 Layer A (issue elspeth-50509ed2bc): registration must reject a
-    contract missing ``positive_example_does_not_apply``. The harness at
-    tests/invariants/test_contract_non_fire.py iterates every registered
-    contract and exercises the non-fire invariant, so every adopter MUST
-    provide the classmethod at registration time."""
+def test_contract_claiming_no_dispatch_sites_rejected() -> None:
+    """H2 §Fix direction + N1: a contract that inherits the ABC but
+    decorates zero dispatch methods is non-functional — the dispatcher
+    would never invoke it. Registration rejects this."""
 
-    class _NoNonFire:
-        name = "no_non_fire"
+    class _NoSites(DeclarationContract):
+        name = "no_sites"
         payload_schema = _FakePayload
 
         def applies_to(self, p):
             return False
 
-        def runtime_check(self, i, o):
-            pass
-
         @classmethod
         def negative_example(cls):
             raise NotImplementedError
 
-        # positive_example_does_not_apply missing
+        @classmethod
+        def positive_example_does_not_apply(cls):
+            raise NotImplementedError
 
-    with pytest.raises(TypeError, match="positive_example_does_not_apply"):
-        register_declaration_contract(_NoNonFire())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="zero dispatch sites"):
+        register_declaration_contract(_NoSites())
 
 
 def test_registration_after_freeze_raises() -> None:
@@ -291,18 +287,17 @@ def test_violation_payload_secrets_scrubbed() -> None:
 
 def test_runtime_check_raises_violation() -> None:
     """Invoke the contract through the dispatcher so C4's contract_name
-    attribution path is exercised. The pre-C4 version of this test called
-    ``c.runtime_check`` directly and relied on the contract self-labelling;
-    after C4 the authoritative label comes from the registry via the
-    dispatcher, so driving the check end-to-end is the honest assertion."""
-    from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+    attribution path is exercised. Post-H2 renames to
+    ``run_post_emission_checks`` and the method name ``post_emission_check``.
+    """
+    from elspeth.engine.executors.declaration_dispatch import run_post_emission_checks
 
     c = _FakeContract()
     register_declaration_contract(c)
 
     plugin = _FakePlugin()
     plugin.fake_violate = True
-    inputs = RuntimeCheckInputs(
+    inputs = PostEmissionInputs(
         plugin=plugin,
         node_id="n",
         run_id="r",
@@ -310,16 +305,17 @@ def test_runtime_check_raises_violation() -> None:
         token_id="t",
         input_row=object(),
         static_contract=frozenset(),
+        effective_input_fields=frozenset(),
     )
-    outputs = RuntimeCheckOutputs(emitted_rows=(object(),))
+    outputs = PostEmissionOutputs(emitted_rows=(object(),))
 
     with pytest.raises(DeclarationContractViolation) as exc_info:
-        run_runtime_checks(inputs=inputs, outputs=outputs)
+        run_post_emission_checks(inputs=inputs, outputs=outputs)
     assert exc_info.value.contract_name == "fake_declaration"
 
 
 def test_emitted_rows_is_frozen_tuple() -> None:
-    outputs = RuntimeCheckOutputs(emitted_rows=[1, 2, 3])
+    outputs = PostEmissionOutputs(emitted_rows=[1, 2, 3])
     assert isinstance(outputs.emitted_rows, tuple)  # freeze guard converts list→tuple
 
 
@@ -340,15 +336,21 @@ def test_emitted_rows_non_list_non_tuple_raises() -> None:
             return self._items[i]
 
     with pytest.raises(TypeError, match="must be list or tuple"):
-        RuntimeCheckOutputs(emitted_rows=_LazySeq([1, 2, 3]))  # type: ignore[arg-type]
+        PostEmissionOutputs(emitted_rows=_LazySeq([1, 2, 3]))  # type: ignore[arg-type]
 
 
 def test_negative_example_fires_the_violation() -> None:
-    """This is the invariant every 2B/2C contract must satisfy."""
+    """This is the invariant every 2B/2C contract must satisfy.
+
+    Under the H2 ABC + site-tagged ExampleBundle, invoke the method named
+    by the bundle's site — not a fixed ``runtime_check`` — to accommodate
+    contracts that adopt other dispatch sites.
+    """
     c = _FakeContract()
-    inputs, outputs = c.negative_example()
+    bundle = c.negative_example()
+    method = getattr(c, bundle.site.value)
     with pytest.raises(DeclarationContractViolation):
-        c.runtime_check(inputs, outputs)
+        method(*bundle.args)
 
 
 def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
@@ -382,8 +384,13 @@ def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
     assert dump["row_id"] == "rw"
 
 
-def test_fake_contract_satisfies_declaration_contract_protocol() -> None:
-    """@runtime_checkable verification — _FakeContract satisfies the Protocol."""
+def test_fake_contract_inherits_declaration_contract_abc() -> None:
+    """Nominal ABC verification — _FakeContract inherits DeclarationContract.
+
+    Post-H2: the Protocol is replaced with an ABC (ADR-010 §Alternative 3
+    nominal-typing posture preserved). ``isinstance`` now confirms
+    inheritance at the nominal level, not structural conformance.
+    """
     from elspeth.contracts.declaration_contracts import DeclarationContract
 
     c = _FakeContract()
@@ -490,30 +497,22 @@ def test_violation_declares_slots() -> None:
 
 def test_dispatcher_attaches_contract_name_from_registry() -> None:
     """End-to-end C4 Part 1 acceptance: when a registered contract's
-    ``runtime_check`` raises a DeclarationContractViolation WITHOUT
-    supplying a name (new signature), the dispatcher attaches
-    ``contract.name`` from the registry before the violation propagates.
+    dispatch method raises a DeclarationContractViolation, the dispatcher
+    attaches ``contract.name`` from the registry before the violation
+    propagates.
     """
-    from elspeth.contracts.declaration_contracts import (
-        RuntimeCheckInputs,
-        RuntimeCheckOutputs,
-        register_declaration_contract,
-    )
-    from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+    from elspeth.engine.executors.declaration_dispatch import run_post_emission_checks
 
     class _AttackerPayload(TypedDict):
         reason: str
 
     class _AttackerViolation(DeclarationContractViolation):
-        """H5 Layer 1: every DeclarationContractViolation subclass declares
-        its own ``payload_schema``. Matches the contract's schema below."""
-
         payload_schema = _AttackerPayload
 
-    class _AttackerContract:
-        """A contract that attempts to fire — the dispatcher must label the
+    class _AttackerContract(DeclarationContract):
+        """Contract whose dispatch raises — the dispatcher must label the
         resulting violation with THIS contract's name, regardless of what the
-        runtime_check body thought it was producing."""
+        method body thought it was producing."""
 
         name = "authentic_contract_name"
         payload_schema: type = _AttackerPayload
@@ -521,7 +520,8 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
         def applies_to(self, plugin: object) -> bool:
             return True
 
-        def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
             raise _AttackerViolation(
                 plugin="P",
                 node_id="n",
@@ -533,22 +533,16 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
             )
 
         @classmethod
-        def negative_example(cls):  # type: ignore[override]
+        def negative_example(cls):
             raise NotImplementedError
 
         @classmethod
-        def positive_example_does_not_apply(cls):  # type: ignore[override]
-            # applies_to returns True unconditionally, so no non-fire scenario
-            # exists for this attacker fixture. N2 Layer A only requires the
-            # method to be present and callable; the harness runs against
-            # the production registry, which this test-scope contract never
-            # joins in a harness-visible way (the fixture registers inside the
-            # _isolate_registry fixture and is torn down before the harness).
+        def positive_example_does_not_apply(cls):
             raise NotImplementedError
 
     register_declaration_contract(_AttackerContract())
 
-    inputs = RuntimeCheckInputs(
+    inputs = PostEmissionInputs(
         plugin=_FakePlugin(),
         node_id="n",
         run_id="r",
@@ -556,11 +550,12 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
         token_id="tk",
         input_row=object(),
         static_contract=frozenset(),
+        effective_input_fields=frozenset(),
     )
-    outputs = RuntimeCheckOutputs(emitted_rows=(object(),))
+    outputs = PostEmissionOutputs(emitted_rows=(object(),))
 
     with pytest.raises(DeclarationContractViolation) as exc_info:
-        run_runtime_checks(inputs=inputs, outputs=outputs)
+        run_post_emission_checks(inputs=inputs, outputs=outputs)
     # Dispatcher wrote the authoritative name onto the violation.
     assert exc_info.value.contract_name == "authentic_contract_name"
 
@@ -798,4 +793,5 @@ def test_env_var_alone_does_not_unlock_restore_registry(monkeypatch) -> None:
     monkeypatch.setenv("ELSPETH_TESTING", "1")
     with pytest.raises(RuntimeError, match="pytest"):
         # Argument shape is irrelevant: the gate fires before any work.
-        _restore_registry_snapshot_for_tests(([], False))
+        # H2: snapshot is a 3-tuple (list, per-site map, frozen flag).
+        _restore_registry_snapshot_for_tests(([], {s: [] for s in DispatchSite}, False))

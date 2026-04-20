@@ -1,7 +1,11 @@
 """PassThroughDeclarationContract — behaviour parity with direct verify_pass_through.
 
-Also covers the single-token pre-assertions that reviewer B2 flagged as silently
-dropped in v0: input-row contract must exist, node_id must be set.
+Post-H2 (ADR-010 §Semantics amendment 2026-04-20): the contract inherits the
+nominal ``DeclarationContract`` ABC and claims ``post_emission_check`` +
+``batch_flush_check`` via ``@implements_dispatch_site`` markers. Dispatch
+bundles are ``PostEmissionInputs`` / ``PostEmissionOutputs``;
+``effective_input_fields`` is caller-derived (no ``override_input_fields``
+sentinel).
 """
 
 from __future__ import annotations
@@ -9,8 +13,9 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.declaration_contracts import (
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    PostEmissionInputs,
+    PostEmissionOutputs,
+    derive_effective_input_fields,
 )
 from elspeth.contracts.errors import (
     FrameworkBugError,
@@ -70,77 +75,116 @@ def test_applies_to_on_plugin_missing_attribute_crashes() -> None:
         c.applies_to(_NoAttr())
 
 
-def test_runtime_check_raises_on_divergence() -> None:
+def test_post_emission_check_raises_on_divergence() -> None:
     c = PassThroughDeclarationContract()
-    inputs = RuntimeCheckInputs(
+    input_row = _row(("a", "b", "c"))
+    inputs = PostEmissionInputs(
         plugin=_FakeTransform(),
         node_id="n-1",
         run_id="r",
         row_id="rw",
         token_id="t",
-        input_row=_row(("a", "b", "c")),
+        input_row=input_row,
         static_contract=frozenset({"a", "b", "c"}),
+        effective_input_fields=derive_effective_input_fields(input_row),
     )
-    outputs = RuntimeCheckOutputs(emitted_rows=(_row(("a", "c")),))
+    outputs = PostEmissionOutputs(emitted_rows=(_row(("a", "c")),))
     with pytest.raises(PassThroughContractViolation) as exc_info:
-        c.runtime_check(inputs, outputs)
+        c.post_emission_check(inputs, outputs)
     assert exc_info.value.divergence_set == frozenset({"b"})
 
 
-def test_runtime_check_empty_emission_is_noop() -> None:
+def test_post_emission_check_empty_emission_is_noop() -> None:
     c = PassThroughDeclarationContract()
-    inputs = RuntimeCheckInputs(
+    input_row = _row(("a",))
+    inputs = PostEmissionInputs(
         plugin=_FakeTransform(),
         node_id="n-1",
         run_id="r",
         row_id="rw",
         token_id="t",
-        input_row=_row(("a",)),
+        input_row=input_row,
         static_contract=frozenset(),
+        effective_input_fields=derive_effective_input_fields(input_row),
     )
-    c.runtime_check(inputs, RuntimeCheckOutputs(emitted_rows=()))
+    c.post_emission_check(inputs, PostEmissionOutputs(emitted_rows=()))
 
 
-def test_runtime_check_preserves_frameworkbugerror_on_missing_contract() -> None:
-    """B2 regression: input_row without contract must raise FrameworkBugError."""
-    c = PassThroughDeclarationContract()
+def test_derive_effective_input_fields_crashes_on_missing_contract() -> None:
+    """Post-H2 (panel F1): the CALLER derives ``effective_input_fields``
+    once and passes it in the bundle. A PipelineRow without a contract is
+    a framework bug that surfaces at ``derive_effective_input_fields`` —
+    not inside the contract's method body.
+
+    The B2 regression coverage moved to the caller-side helper, which
+    raises FrameworkBugError (Tier-1) with the same "input row has no
+    contract" message the inline check used pre-H2.
+    """
 
     class _BadRow:
         contract = None
 
-    inputs = RuntimeCheckInputs(
-        plugin=_FakeTransform(),
-        node_id="n-1",
-        run_id="r",
-        row_id="rw",
-        token_id="t",
-        input_row=_BadRow(),
-        static_contract=frozenset(),
-    )
-    with pytest.raises(FrameworkBugError):
-        c.runtime_check(inputs, RuntimeCheckOutputs(emitted_rows=(_row(("a",)),)))
+    with pytest.raises(FrameworkBugError, match="input row has no contract"):
+        derive_effective_input_fields(_BadRow())
 
 
-def test_runtime_check_preserves_orchestrationinvarianterror_on_missing_node_id() -> None:
+def test_post_emission_check_preserves_orchestrationinvarianterror_on_missing_node_id() -> None:
     """B2 regression: transform.node_id=None must raise OrchestrationInvariantError."""
     c = PassThroughDeclarationContract()
     plugin = _FakeTransform()
     plugin.node_id = None
-    inputs = RuntimeCheckInputs(
+    input_row = _row(("a",))
+    inputs = PostEmissionInputs(
         plugin=plugin,
         node_id="",
         run_id="r",
         row_id="rw",
         token_id="t",
-        input_row=_row(("a",)),
+        input_row=input_row,
         static_contract=frozenset(),
+        effective_input_fields=derive_effective_input_fields(input_row),
     )
     with pytest.raises(OrchestrationInvariantError):
-        c.runtime_check(inputs, RuntimeCheckOutputs(emitted_rows=(_row(("a",)),)))
+        c.post_emission_check(inputs, PostEmissionOutputs(emitted_rows=(_row(("a",)),)))
 
 
 def test_negative_example_fires_violation() -> None:
     c = PassThroughDeclarationContract()
-    inputs, outputs = c.negative_example()
+    bundle = c.negative_example()
+    method = getattr(c, bundle.site.value)
     with pytest.raises(PassThroughContractViolation):
-        c.runtime_check(inputs, outputs)
+        method(*bundle.args)
+
+
+def test_contract_claims_both_dispatch_sites() -> None:
+    """H2 regression: PassThroughDeclarationContract claims post_emission_check
+    AND batch_flush_check. Registered in EXPECTED_CONTRACT_SITES under both."""
+    from elspeth.contracts.declaration_contracts import contract_sites
+
+    c = PassThroughDeclarationContract()
+    sites = contract_sites(c)
+    assert sites == frozenset({"post_emission_check", "batch_flush_check"})
+
+
+def test_batch_flush_check_raises_on_divergence() -> None:
+    """The batch-flush site uses BatchFlushInputs; contract's logic parallels
+    post_emission_check but reads ``effective_input_fields`` as the caller-
+    computed intersection of every buffered token's contract."""
+    from elspeth.contracts.declaration_contracts import BatchFlushInputs, BatchFlushOutputs
+
+    c = PassThroughDeclarationContract()
+    token_row = _row(("a", "b", "c"))
+    inputs = BatchFlushInputs(
+        plugin=_FakeTransform(),
+        node_id="n-1",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        buffered_tokens=(token_row,),
+        static_contract=frozenset({"a", "b", "c"}),
+        effective_input_fields=frozenset({"a", "b", "c"}),
+    )
+    outputs = BatchFlushOutputs(emitted_rows=(_row(("a", "c")),))
+    with pytest.raises(PassThroughContractViolation) as exc_info:
+        c.batch_flush_check(inputs, outputs)
+    assert exc_info.value.divergence_set == frozenset({"b"})

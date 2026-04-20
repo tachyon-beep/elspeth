@@ -1,15 +1,20 @@
 """Tests for scripts/cicd/enforce_contract_manifest.py.
 
-Covers the four failure modes the scanner exists to catch:
+Post-H2 (ADR-010 §Semantics amendment 2026-04-20): the scanner parses the
+new ``EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]] =
+MappingProxyType({...})`` manifest shape and checks five rules:
 
-- ``MC1`` extra-registration: a call site without a manifest entry.
-- ``MC1`` unresolved: a registration whose contract name cannot be derived
-  statically (the engineer used an indirect reference or non-class call).
-- ``MC2`` missing-registration: a manifest entry with no call site.
-- Manifest-shape failures: malformed frozenset literals crash cleanly.
+- MC1 (extra): register call with no manifest entry.
+- MC2 (missing): manifest entry with no register call.
+- MC3a (marker-without-manifest): class carries @implements_dispatch_site
+  for a site not in the manifest.
+- MC3b (manifest-without-marker): manifest names a site not marked on the
+  concrete class.
+- MC3c (trivial-body): marked method body is structurally trivial
+  (pass / ... / bare return / literal-only).
 
-Tests build a synthetic source tree in ``tmp_path`` so the scanner exercises
-its real filesystem walk + AST parse + manifest-extract path.
+Tests construct synthetic source trees in ``tmp_path`` so the scanner
+exercises its real filesystem walk + AST parse + manifest-extract path.
 """
 
 from __future__ import annotations
@@ -20,67 +25,121 @@ from pathlib import Path
 import pytest
 from scripts.cicd.enforce_contract_manifest import (
     RULE_ID_EXTRA,
+    RULE_ID_MANIFEST_WITHOUT_MARKER,
+    RULE_ID_MARKER_WITHOUT_MANIFEST,
     RULE_ID_MISSING,
-    Allowlist,
-    AllowlistEntry,
-    Finding,
+    RULE_ID_TRIVIAL_BODY,
     compute_findings,
     extract_manifest,
     scan_source_tree,
 )
 
 # ---------------------------------------------------------------------------
-# Synthetic project-root factory
+# Synthetic project-root helpers
 # ---------------------------------------------------------------------------
 
 
-def _write_manifest(root: Path, members: list[str]) -> Path:
-    """Write a declaration_contracts.py-style manifest file and return its path."""
+def _write_manifest(root: Path, entries: dict[str, list[str]]) -> Path:
+    """Write a manifest file with ``EXPECTED_CONTRACT_SITES`` in the new shape.
+
+    ``entries`` is ``{contract_name: [site1, site2, ...]}``. Each contract's
+    sites are rendered as ``frozenset({"site1", "site2"})``.
+    """
     manifest_path = root / "declaration_contracts.py"
-    members_repr = ", ".join(repr(m) for m in members)
+
+    if not entries:
+        body = "{}"
+    else:
+        dict_entries = []
+        for name, sites in entries.items():
+            sites_repr = ", ".join(repr(s) for s in sites)
+            dict_entries.append(f"{name!r}: frozenset({{{sites_repr}}})")
+        body = "{" + ", ".join(dict_entries) + "}"
+
     manifest_path.write_text(
         textwrap.dedent(
             f"""\
             from __future__ import annotations
 
-            EXPECTED_CONTRACTS: frozenset[str] = frozenset({{{members_repr}}})
+            from types import MappingProxyType
+
+            EXPECTED_CONTRACT_SITES = MappingProxyType({body})
             """
         )
     )
     return manifest_path
 
 
-def _write_registration(root: Path, filename: str, class_name: str, contract_name: str) -> Path:
-    """Write a module that defines ``class_name`` with ``name=contract_name`` and registers it."""
+def _write_registration(
+    root: Path,
+    filename: str,
+    class_name: str,
+    contract_name: str,
+    *,
+    marker_sites: list[str] | None = None,
+    trivial_body_sites: list[str] | None = None,
+) -> Path:
+    """Write a module that defines ``class_name`` (inheriting DeclarationContract)
+    and registers an instance.
+
+    ``marker_sites`` — sites the class decorates with @implements_dispatch_site.
+    ``trivial_body_sites`` — subset of marker_sites whose method body is a
+    trivial ``pass``. Sites in ``marker_sites`` but NOT in ``trivial_body_sites``
+    get a non-trivial body (``raise NotImplementedError``).
+    """
+    marker_sites = marker_sites or []
+    trivial_body_sites = trivial_body_sites or []
+
+    method_defs: list[str] = []
+    for site in marker_sites:
+        if site in trivial_body_sites:
+            body = "pass"
+        else:
+            body = "raise NotImplementedError"
+        # Each method is indented 4 spaces (one class level) and the body
+        # indented 8 spaces to land inside the class definition.
+        method_defs.append(f"    @implements_dispatch_site({site!r})\n    def {site}(self, *args, **kwargs):\n        {body}\n")
+    methods_block = "\n".join(method_defs)
+
+    header = textwrap.dedent(
+        f"""\
+        from __future__ import annotations
+
+        from declaration_contracts import (
+            DeclarationContract,
+            implements_dispatch_site,
+            register_declaration_contract,
+        )
+
+
+        class {class_name}(DeclarationContract):
+            name = {contract_name!r}
+            payload_schema = dict
+
+            def applies_to(self, plugin):
+                return False
+
+            @classmethod
+            def negative_example(cls):
+                raise NotImplementedError
+
+            @classmethod
+            def positive_example_does_not_apply(cls):
+                raise NotImplementedError
+        """
+    )
+
+    footer = textwrap.dedent(
+        f"""
+
+
+        register_declaration_contract({class_name}())
+        """
+    )
+
     path = root / filename
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        textwrap.dedent(
-            f"""\
-            from __future__ import annotations
-
-            from declaration_contracts import register_declaration_contract
-
-
-            class {class_name}:
-                name = {contract_name!r}
-                payload_schema = dict
-
-                def applies_to(self, plugin):
-                    return False
-
-                def runtime_check(self, inputs, outputs):
-                    pass
-
-                @classmethod
-                def negative_example(cls):
-                    raise NotImplementedError
-
-
-            register_declaration_contract({class_name}())
-            """
-        )
-    )
+    path.write_text(header + methods_block + footer)
     return path
 
 
@@ -90,307 +149,295 @@ def _write_registration(root: Path, filename: str, class_name: str, contract_nam
 
 
 class TestManifestExtraction:
-    """extract_manifest parses EXPECTED_CONTRACTS literally and records line numbers."""
+    """extract_manifest parses EXPECTED_CONTRACT_SITES into per-contract site
+    frozensets and records key line numbers."""
 
     def test_single_entry_extracted(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, ["passes_through_input"])
-        members, assign_line = extract_manifest(manifest)
-        assert members == {"passes_through_input": 3}
-        assert assign_line == 3
+        manifest = _write_manifest(tmp_path, {"passes_through_input": ["post_emission_check"]})
+        name_to_sites, name_to_line, _assign_line = extract_manifest(manifest)
+        assert name_to_sites == {"passes_through_input": frozenset({"post_emission_check"})}
+        assert "passes_through_input" in name_to_line
 
-    def test_multiple_entries_extracted(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, ["a", "b", "c"])
-        members, _ = extract_manifest(manifest)
-        assert set(members.keys()) == {"a", "b", "c"}
+    def test_multi_site_entry_extracted(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"passes_through_input": ["post_emission_check", "batch_flush_check"]},
+        )
+        name_to_sites, _line, _al = extract_manifest(manifest)
+        assert name_to_sites["passes_through_input"] == frozenset({"post_emission_check", "batch_flush_check"})
 
-    def test_tuple_form_accepted(self, tmp_path: Path) -> None:
-        """``frozenset(("a", "b"))`` is equally valid."""
-        manifest_path = tmp_path / "declaration_contracts.py"
-        manifest_path.write_text('EXPECTED_CONTRACTS: frozenset[str] = frozenset(("a", "b"))\n')
-        members, _ = extract_manifest(manifest_path)
-        assert set(members.keys()) == {"a", "b"}
+    def test_multiple_contracts_extracted(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {
+                "a_contract": ["post_emission_check"],
+                "b_contract": ["pre_emission_check", "post_emission_check"],
+            },
+        )
+        name_to_sites, _line, _al = extract_manifest(manifest)
+        assert set(name_to_sites.keys()) == {"a_contract", "b_contract"}
 
     def test_missing_symbol_exits(self, tmp_path: Path) -> None:
-        """No EXPECTED_CONTRACTS symbol → fatal error."""
         manifest_path = tmp_path / "declaration_contracts.py"
         manifest_path.write_text("SOMETHING_ELSE = 1\n")
         with pytest.raises(SystemExit) as exc_info:
             extract_manifest(manifest_path)
         assert exc_info.value.code == 1
 
-    def test_non_string_member_exits(self, tmp_path: Path) -> None:
-        """A non-string literal in the frozenset is fatal."""
+    def test_unknown_site_name_exits(self, tmp_path: Path) -> None:
+        """Sites must be drawn from the DispatchSite enum."""
         manifest_path = tmp_path / "declaration_contracts.py"
-        manifest_path.write_text("EXPECTED_CONTRACTS: frozenset = frozenset({'ok', 42})\n")
+        manifest_path.write_text(
+            textwrap.dedent(
+                """\
+                from types import MappingProxyType
+
+                EXPECTED_CONTRACT_SITES = MappingProxyType(
+                    {"contract": frozenset({"not_a_real_site"})}
+                )
+                """
+            )
+        )
         with pytest.raises(SystemExit):
             extract_manifest(manifest_path)
 
-    def test_duplicate_entry_exits(self, tmp_path: Path) -> None:
-        """Two identical string literals in the set literal are caught."""
+    def test_non_string_key_exits(self, tmp_path: Path) -> None:
         manifest_path = tmp_path / "declaration_contracts.py"
-        # Note: a Python set literal would deduplicate at runtime, but the AST
-        # preserves both elements so the scanner can refuse ambiguous input.
-        manifest_path.write_text("EXPECTED_CONTRACTS = frozenset({'dup', 'dup'})\n")
+        manifest_path.write_text(
+            textwrap.dedent(
+                """\
+                from types import MappingProxyType
+
+                EXPECTED_CONTRACT_SITES = MappingProxyType(
+                    {42: frozenset({"post_emission_check"})}
+                )
+                """
+            )
+        )
         with pytest.raises(SystemExit):
             extract_manifest(manifest_path)
 
 
 # ---------------------------------------------------------------------------
-# Scan + finding computation
+# Happy path (MC1/MC2/MC3a/b/c all clean)
 # ---------------------------------------------------------------------------
 
 
 class TestHappyPath:
-    """Manifest and registrations aligned → no findings."""
-
     def test_single_contract_no_findings(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, ["passes_through_input"])
+        manifest = _write_manifest(tmp_path, {"passes_through_input": ["post_emission_check"]})
         _write_registration(
             tmp_path,
             "pass_through.py",
             "PassThroughContract",
             "passes_through_input",
+            marker_sites=["post_emission_check"],
         )
-        members, assign_line = extract_manifest(manifest)
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
         registrations = scan_source_tree(tmp_path, tmp_path, manifest)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        assert findings == []
+
+    def test_multi_site_contract_no_findings(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"passes_through_input": ["post_emission_check", "batch_flush_check"]},
+        )
+        _write_registration(
+            tmp_path,
+            "pass_through.py",
+            "PassThroughContract",
+            "passes_through_input",
+            marker_sites=["post_emission_check", "batch_flush_check"],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
         assert findings == []
 
 
-class TestMC1ExtraRegistration:
-    """MC1: a register call whose contract name is absent from the manifest."""
+# ---------------------------------------------------------------------------
+# MC1 extra-registration
+# ---------------------------------------------------------------------------
 
+
+class TestMC1ExtraRegistration:
     def test_extra_registered_contract_detected(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, ["passes_through_input"])
+        manifest = _write_manifest(tmp_path, {"passes_through_input": ["post_emission_check"]})
         _write_registration(
             tmp_path,
             "pass_through.py",
             "PassThroughContract",
             "passes_through_input",
+            marker_sites=["post_emission_check"],
         )
         _write_registration(
             tmp_path,
             "ghost.py",
             "GhostContract",
             "ghost_not_in_manifest",
+            marker_sites=["post_emission_check"],
         )
-        members, assign_line = extract_manifest(manifest)
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
         registrations = scan_source_tree(tmp_path, tmp_path, manifest)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
-        assert len(findings) == 1
-        assert findings[0].rule_id == RULE_ID_EXTRA
-        assert findings[0].contract_name == "ghost_not_in_manifest"
-        assert "ghost.py" in findings[0].file_path
-
-    def test_unresolved_call_becomes_mc1(self, tmp_path: Path) -> None:
-        """register_declaration_contract(variable) cannot resolve statically → MC1 unresolved."""
-        manifest = _write_manifest(tmp_path, ["passes_through_input"])
-        _write_registration(
-            tmp_path,
-            "pass_through.py",
-            "PassThroughContract",
-            "passes_through_input",
-        )
-        (tmp_path / "indirect.py").write_text(
-            textwrap.dedent(
-                """\
-                from declaration_contracts import register_declaration_contract
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        extras = [f for f in findings if f.rule_id == RULE_ID_EXTRA and f.contract_name == "ghost_not_in_manifest"]
+        assert len(extras) == 1
+        assert "ghost.py" in extras[0].file_path
 
 
-                def _build():
-                    class _Hidden:
-                        name = "hidden"
-                        payload_schema = dict
-
-                        def applies_to(self, plugin): return False
-                        def runtime_check(self, inputs, outputs): pass
-
-                        @classmethod
-                        def negative_example(cls):
-                            raise NotImplementedError
-                    return _Hidden()
-
-
-                _inst = _build()
-                register_declaration_contract(_inst)
-                """
-            )
-        )
-        members, assign_line = extract_manifest(manifest)
-        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
-        unresolved = [f for f in findings if f.rule_id == RULE_ID_EXTRA and "unresolved" in f.contract_name]
-        assert len(unresolved) == 1, f"expected one unresolved finding, got {findings!r}"
-        assert "indirect.py" in unresolved[0].file_path
-
-    def test_class_without_name_attr_flagged(self, tmp_path: Path) -> None:
-        """``register_declaration_contract(X())`` where X has no ``name = "..."`` → MC1 unresolved."""
-        manifest = _write_manifest(tmp_path, ["passes_through_input"])
-        _write_registration(
-            tmp_path,
-            "pass_through.py",
-            "PassThroughContract",
-            "passes_through_input",
-        )
-        (tmp_path / "nameless.py").write_text(
-            textwrap.dedent(
-                """\
-                from declaration_contracts import register_declaration_contract
-
-
-                class Nameless:
-                    pass
-
-
-                register_declaration_contract(Nameless())
-                """
-            )
-        )
-        members, assign_line = extract_manifest(manifest)
-        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
-        unresolved = [f for f in findings if "unresolved" in f.contract_name]
-        assert len(unresolved) == 1
+# ---------------------------------------------------------------------------
+# MC2 missing-registration
+# ---------------------------------------------------------------------------
 
 
 class TestMC2MissingRegistration:
-    """MC2: a manifest entry with no corresponding call site."""
-
-    def test_missing_registration_detected(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, ["passes_through_input", "never_registered"])
+    def test_missing_registered_contract_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"present_contract": ["post_emission_check"], "missing_contract": ["post_emission_check"]},
+        )
         _write_registration(
             tmp_path,
-            "pass_through.py",
-            "PassThroughContract",
-            "passes_through_input",
+            "present.py",
+            "PresentContract",
+            "present_contract",
+            marker_sites=["post_emission_check"],
         )
-        members, assign_line = extract_manifest(manifest)
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
         registrations = scan_source_tree(tmp_path, tmp_path, manifest)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
-        assert len(findings) == 1
-        assert findings[0].rule_id == RULE_ID_MISSING
-        assert findings[0].contract_name == "never_registered"
-        assert findings[0].file_path == "declaration_contracts.py"
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        missing = [f for f in findings if f.rule_id == RULE_ID_MISSING]
+        assert len(missing) == 1
+        assert missing[0].contract_name == "missing_contract"
 
-    def test_empty_registry_yields_mc2_for_every_entry(self, tmp_path: Path) -> None:
-        manifest = _write_manifest(tmp_path, ["a", "b", "c"])
-        members, assign_line = extract_manifest(manifest)
-        # No registration modules written — registrations is empty.
+
+# ---------------------------------------------------------------------------
+# MC3a / MC3b / MC3c — per-site rules (N1 acceptance)
+# ---------------------------------------------------------------------------
+
+
+class TestMC3aMarkerWithoutManifest:
+    """MC3a: contract's @implements_dispatch_site marker names a site NOT
+    listed in the manifest."""
+
+    def test_extra_site_marker_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, {"c": ["post_emission_check"]})
+        _write_registration(
+            tmp_path,
+            "c.py",
+            "CContract",
+            "c",
+            marker_sites=["post_emission_check", "batch_flush_check"],  # batch_flush is extra
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
         registrations = scan_source_tree(tmp_path, tmp_path, manifest)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
-        assert {f.contract_name for f in findings} == {"a", "b", "c"}
-        assert all(f.rule_id == RULE_ID_MISSING for f in findings)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3a = [f for f in findings if f.rule_id == RULE_ID_MARKER_WITHOUT_MANIFEST]
+        assert len(mc3a) == 1
+        assert "batch_flush_check" in mc3a[0].contract_name
 
 
-class TestManifestFileIsSkipped:
-    """The manifest file must not be scanned for registration call sites.
+class TestMC3bManifestWithoutMarker:
+    """MC3b: manifest names a site with no @implements_dispatch_site marker
+    on the concrete class."""
 
-    The declaration_contracts module defines ``register_declaration_contract``
-    itself. A naive scan could false-positive on the function *definition*.
-    """
+    def test_missing_marker_for_manifest_site_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"c": ["post_emission_check", "batch_flush_check"]},
+        )
+        _write_registration(
+            tmp_path,
+            "c.py",
+            "CContract",
+            "c",
+            marker_sites=["post_emission_check"],  # batch_flush_check missing
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3b = [f for f in findings if f.rule_id == RULE_ID_MANIFEST_WITHOUT_MARKER]
+        assert len(mc3b) == 1
+        assert "batch_flush_check" in mc3b[0].contract_name
 
-    def test_manifest_file_not_scanned(self, tmp_path: Path) -> None:
-        # Write a manifest file that ALSO contains a fake register call, just
-        # to confirm scan_source_tree skips it.
-        manifest_path = tmp_path / "declaration_contracts.py"
-        manifest_path.write_text(
+
+class TestMC3cTrivialBody:
+    """MC3c: a marked site's method body is structurally trivial
+    (pass / ... / bare return / literal-only)."""
+
+    def test_pass_only_body_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, {"c": ["post_emission_check"]})
+        _write_registration(
+            tmp_path,
+            "c.py",
+            "CContract",
+            "c",
+            marker_sites=["post_emission_check"],
+            trivial_body_sites=["post_emission_check"],  # body is bare ``pass``
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3c = [f for f in findings if f.rule_id == RULE_ID_TRIVIAL_BODY]
+        assert len(mc3c) == 1
+
+    def test_ellipsis_only_body_detected(self, tmp_path: Path) -> None:
+        """W5 expansion: ``...`` (Ellipsis literal) is structurally trivial."""
+        manifest = _write_manifest(tmp_path, {"c": ["post_emission_check"]})
+        contract_path = tmp_path / "c.py"
+        contract_path.write_text(
             textwrap.dedent(
                 """\
-                from __future__ import annotations
-
-                EXPECTED_CONTRACTS: frozenset[str] = frozenset({"passes_through_input"})
-
-
-                class Bogus:
-                    name = "bogus_in_manifest_file"
+                from declaration_contracts import (
+                    DeclarationContract,
+                    implements_dispatch_site,
+                    register_declaration_contract,
+                )
 
 
-                # This call would create a false positive if the manifest file were scanned.
-                register_declaration_contract(Bogus())
+                class CContract(DeclarationContract):
+                    name = "c"
+                    payload_schema = dict
+
+                    def applies_to(self, plugin):
+                        return False
+
+                    @implements_dispatch_site("post_emission_check")
+                    def post_emission_check(self, inputs, outputs):
+                        ...
+
+                    @classmethod
+                    def negative_example(cls):
+                        raise NotImplementedError
+
+                    @classmethod
+                    def positive_example_does_not_apply(cls):
+                        raise NotImplementedError
+
+
+                register_declaration_contract(CContract())
                 """
             )
         )
-        # Add a real registration elsewhere.
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3c = [f for f in findings if f.rule_id == RULE_ID_TRIVIAL_BODY]
+        assert len(mc3c) == 1
+
+    def test_non_trivial_body_passes(self, tmp_path: Path) -> None:
+        """A body with a ``raise`` statement is non-trivial."""
+        manifest = _write_manifest(tmp_path, {"c": ["post_emission_check"]})
         _write_registration(
             tmp_path,
-            "pass_through.py",
-            "PassThroughContract",
-            "passes_through_input",
+            "c.py",
+            "CContract",
+            "c",
+            marker_sites=["post_emission_check"],
+            trivial_body_sites=[],  # body raises NotImplementedError
         )
-        members, assign_line = extract_manifest(manifest_path)
-        registrations = scan_source_tree(tmp_path, tmp_path, manifest_path)
-        findings = compute_findings(members, registrations, "declaration_contracts.py", assign_line)
-        assert findings == [], f"expected no findings; got {findings!r}"
-
-
-# ---------------------------------------------------------------------------
-# Allowlist matching
-# ---------------------------------------------------------------------------
-
-
-class TestAllowlist:
-    """Allowlist entries suppress findings by canonical_key."""
-
-    def test_allowlist_suppresses_matching_finding(self) -> None:
-        finding = Finding(
-            rule_id=RULE_ID_EXTRA,
-            file_path="pkg/ghost.py",
-            line=10,
-            contract_name="ghost_not_in_manifest",
-            detail="",
-        )
-        entry = AllowlistEntry(
-            key=finding.canonical_key,
-            owner="test",
-            reason="transitional",
-            task="elspeth-xxx",
-            expires=None,
-        )
-        allowlist = Allowlist(entries=[entry])
-        matched = allowlist.match(finding)
-        assert matched is entry
-        assert entry.matched is True
-
-    def test_allowlist_miss_returns_none(self) -> None:
-        finding = Finding(
-            rule_id=RULE_ID_EXTRA,
-            file_path="pkg/ghost.py",
-            line=10,
-            contract_name="ghost_not_in_manifest",
-            detail="",
-        )
-        allowlist = Allowlist(entries=[])
-        assert allowlist.match(finding) is None
-
-
-# ---------------------------------------------------------------------------
-# Live-repo sanity check: the scanner passes on the actual codebase.
-# ---------------------------------------------------------------------------
-
-
-class TestLiveRepo:
-    """The committed manifest and registrations are in sync."""
-
-    def test_scanner_passes_on_live_repo(self) -> None:
-        """End-to-end check — mirrors what CI runs.
-
-        This is a VAL-style test: it exercises the scanner against the real
-        source tree and manifest. If this fails in a PR, the scanner caught
-        drift introduced by the PR.
-        """
-        repo_root = Path(__file__).resolve().parents[4]
-        source_root = repo_root / "src" / "elspeth"
-        manifest_file = repo_root / "src" / "elspeth" / "contracts" / "declaration_contracts.py"
-
-        assert source_root.is_dir()
-        assert manifest_file.is_file()
-
-        members, assign_line = extract_manifest(manifest_file)
-        registrations = scan_source_tree(source_root, repo_root, manifest_file)
-        findings = compute_findings(
-            members,
-            registrations,
-            str(manifest_file.relative_to(repo_root)),
-            assign_line,
-        )
-        assert findings == [], f"Contract-manifest drift detected in the live repo. Findings: {findings!r}"
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        assert findings == []

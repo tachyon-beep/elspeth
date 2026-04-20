@@ -41,8 +41,9 @@ def _isolate_both_registries():
     import elspeth.contracts.declaration_contracts as dc
     import elspeth.contracts.tier_registry as tr
 
-    # Snapshot current state
+    # Snapshot current state (H2: per-site map included).
     saved_dc_registry = list(dc._REGISTRY)
+    saved_dc_per_site = {site: list(lst) for site, lst in dc._REGISTRY_BY_SITE.items()}
     saved_dc_frozen = dc._FROZEN
     saved_tr_registry = list(tr._REGISTRY)
     saved_tr_reasons = dict(tr._REASONS)
@@ -53,6 +54,8 @@ def _isolate_both_registries():
     # Restore declaration_contracts state
     dc._REGISTRY.clear()
     dc._REGISTRY.extend(saved_dc_registry)
+    for site, lst in saved_dc_per_site.items():
+        dc._REGISTRY_BY_SITE[site][:] = lst
     dc._FROZEN = saved_dc_frozen
 
     # Restore tier_registry state
@@ -72,7 +75,7 @@ def test_bootstrap_asserts_registry_non_empty(_isolate_both_registries) -> None:
     failure visible immediately with an explicit missing-contract diff.
     """
     from elspeth.contracts.declaration_contracts import (
-        EXPECTED_CONTRACTS,
+        EXPECTED_CONTRACT_SITES,
         _clear_registry_for_tests,
     )
     from elspeth.engine.orchestrator import prepare_for_run
@@ -87,7 +90,7 @@ def test_bootstrap_asserts_registry_non_empty(_isolate_both_registries) -> None:
     message = str(exc_info.value)
     assert "declaration contract registry mismatch" in message.lower()
     # Every expected contract must be explicitly named in the diff.
-    for expected_name in EXPECTED_CONTRACTS:
+    for expected_name in EXPECTED_CONTRACT_SITES:
         assert repr(expected_name) in message or expected_name in message, (
             f"Error message must name missing contract {expected_name!r}; got: {message}"
         )
@@ -116,24 +119,28 @@ def test_bootstrap_fails_when_specific_contract_conditionally_skipped(_isolate_b
     class _DummyPayload(TypedDict):
         reason: str
 
-    class _UnexpectedContract:
+    from elspeth.contracts.declaration_contracts import (
+        DeclarationContract,
+        implements_dispatch_site,
+    )
+
+    class _UnexpectedContract(DeclarationContract):
         name = "unexpected_for_c2_test"
         payload_schema: type = _DummyPayload
 
         def applies_to(self, plugin: object) -> bool:
             return False
 
-        def runtime_check(self, inputs: object, outputs: object) -> None:
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: object, outputs: object) -> None:
             pass
 
         @classmethod
-        def negative_example(cls):  # type: ignore[override]
+        def negative_example(cls):
             raise NotImplementedError
 
         @classmethod
-        def positive_example_does_not_apply(cls):  # type: ignore[override]
-            # N2 Layer A: fixture registered only for this bootstrap test;
-            # never exercised by the invariant harness.
+        def positive_example_does_not_apply(cls):
             raise NotImplementedError
 
     # Clear registry, then register ONLY an unexpected contract — pass_through
@@ -170,24 +177,28 @@ def test_bootstrap_fails_when_extra_contract_registered(_isolate_both_registries
     class _DummyPayload(TypedDict):
         reason: str
 
-    class _UnexpectedContract:
+    from elspeth.contracts.declaration_contracts import (
+        DeclarationContract,
+        implements_dispatch_site,
+    )
+
+    class _UnexpectedContract(DeclarationContract):
         name = "extra_not_in_manifest"
         payload_schema: type = _DummyPayload
 
         def applies_to(self, plugin: object) -> bool:
             return False
 
-        def runtime_check(self, inputs: object, outputs: object) -> None:
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: object, outputs: object) -> None:
             pass
 
         @classmethod
-        def negative_example(cls):  # type: ignore[override]
+        def negative_example(cls):
             raise NotImplementedError
 
         @classmethod
-        def positive_example_does_not_apply(cls):  # type: ignore[override]
-            # N2 Layer A: fixture registered only for this bootstrap test;
-            # never exercised by the invariant harness.
+        def positive_example_does_not_apply(cls):
             raise NotImplementedError
 
     # Clear + re-register PassThrough so manifest is satisfied, then add an
@@ -262,24 +273,28 @@ def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> Non
     class _PostBootstrapPayload(TypedDict):
         reason: str
 
-    class _PostBootstrapContract:
+    from elspeth.contracts.declaration_contracts import (
+        DeclarationContract,
+        implements_dispatch_site,
+    )
+
+    class _PostBootstrapContract(DeclarationContract):
         name = "post_bootstrap_contract"
         payload_schema: type = _PostBootstrapPayload
 
         def applies_to(self, plugin: object) -> bool:
             return False
 
-        def runtime_check(self, inputs: object, outputs: object) -> None:
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: object, outputs: object) -> None:
             pass
 
         @classmethod
-        def negative_example(cls):  # type: ignore[override]
+        def negative_example(cls):
             raise NotImplementedError
 
         @classmethod
-        def positive_example_does_not_apply(cls):  # type: ignore[override]
-            # N2 Layer A: fixture registered only for this bootstrap test;
-            # never exercised by the invariant harness.
+        def positive_example_does_not_apply(cls):
             raise NotImplementedError
 
     with pytest.raises(FrameworkBugError):

@@ -847,6 +847,51 @@ class PluginContractViolation(AuditEvidenceBase, RuntimeError):
 
 
 @tier_1_error(
+    reason=(
+        "ADR-010 F3 (elspeth-5fc876138d): sink transactional-boundary invariant "
+        "distinct from pre-write VAL contract — must crash, never absorbed by on_error."
+    ),
+    caller_module=__name__,
+)
+class SinkTransactionalInvariantError(PluginContractViolation):
+    """Raised by a sink's inline commit-boundary check when state diverges
+    between contract evaluation and the transactional write.
+
+    **Two-layer sink invariant architecture** (ADR-010 F3,
+    issue elspeth-5fc876138d):
+
+    - **Layer 1 — pre-write declaration contract** (e.g. the Phase 2C
+      ``SinkRequiredFieldsContract``): dispatcher-owned, fires BEFORE
+      ``sink.write()``, raises a ``DeclarationContractViolation`` subclass
+      with a ``payload_schema``. Triage SQL:
+      ``WHERE exception_type = '<SubclassName>Violation'``.
+
+    - **Layer 2 — transactional backstop, THIS class**: catches the rare
+      case where row state diverges between contract evaluation and commit
+      (e.g. cross-token mutation during batch assembly, or a required field
+      deleted by a transformation layered between contract and commit that
+      the contract could not see). Raises ``SinkTransactionalInvariantError``
+      from the inline sink check. Triage SQL:
+      ``WHERE exception_type = 'SinkTransactionalInvariantError'``.
+
+    Before F3 (pre-ADR-010 §Semantics amendment, 2026-04-20) both layers
+    raised ``PluginContractViolation`` and the audit table conflated pre-
+    write contract failures with commit-boundary failures — the auditor
+    could not distinguish "intent validation failed" from "state diverged
+    mid-transaction" without reading the message text. The F3 amendment
+    separates the triage surfaces by exception class.
+
+    Inherits ``PluginContractViolation`` (not ``DeclarationContractViolation``)
+    because the backstop is NOT dispatcher-owned. It is an inline offensive
+    assertion at the sink's own commit boundary — plugin-level guarding,
+    not framework-level contract dispatch.
+
+    Registered in TIER_1_ERRORS via ``@tier_1_error`` so ``on_error``
+    routing cannot absorb it; the orchestrator must propagate.
+    """
+
+
+@tier_1_error(
     reason="ADR-008: pass-through annotation lie corrupts batch audit fields",
     caller_module=__name__,
 )

@@ -1,22 +1,16 @@
-"""Regression test for filigree issue elspeth-ef8d5d92ff (C1 dispatcher bypass).
+"""Batch-flush dispatcher routing regression (filigree issue elspeth-ef8d5d92ff).
 
-ADR-010 §Decision 3 makes ``run_runtime_checks`` the single source of truth
-for per-row declaration-contract enforcement. This file probes the wiring:
-a synthetic ``_CountingContract`` is registered for the duration of the
-test, and every per-row verification path must invoke it.
+Post-H2 (ADR-010 §Semantics amendment 2026-04-20): ``_cross_check_flush_output``
+calls ``run_batch_flush_checks`` on its own dispatch site (not the post-
+emission site). The counting contract below claims ``batch_flush_check``
+so every flush path fires it.
 
-Covered paths (all must fire the dispatcher):
-
-- Single-token transform (``TransformExecutor``) — already routed pre-fix.
-- Batch-flush PASSTHROUGH mode (``RowProcessor._cross_check_flush_output``) —
-  already routed pre-fix.
-- Batch-flush TRANSFORM mode (same method) — **the gap** this test
-  proves closed. Pre-fix the counter will stay at zero for this path.
-
-The test also asserts that the TRANSFORM-flush branch passes the batch-wide
-field intersection via ``RuntimeCheckInputs.override_input_fields`` (ADR-009
-§Clause 2 batch-homogeneous semantics) — that field is the vehicle the fix
-uses to express "use these fields, not the single input_row's contract."
+Under the H2 bundle redesign, the 2A ``override_input_fields`` sentinel is
+gone — ``effective_input_fields`` is always set by the caller. The
+TRANSFORM-flush path computes the batch-homogeneous intersection once and
+passes it in the bundle; the PASSTHROUGH-flush path passes each token's
+own field set. Both paths satisfy "the dispatcher receives a well-formed
+caller-derived field set."
 """
 
 from __future__ import annotations
@@ -28,11 +22,15 @@ import pytest
 
 from elspeth.contracts import TokenInfo, TransformProtocol, TransformResult
 from elspeth.contracts.declaration_contracts import (
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    BatchFlushInputs,
+    BatchFlushOutputs,
+    DeclarationContract,
+    DispatchSite,
+    ExampleBundle,
     _clear_registry_for_tests,
     _restore_registry_snapshot_for_tests,
     _snapshot_registry_for_tests,
+    implements_dispatch_site,
     register_declaration_contract,
 )
 from elspeth.contracts.enums import OutputMode
@@ -44,7 +42,9 @@ from elspeth.testing import make_contract, make_token_info
 from tests.fixtures.landscape import make_recorder_with_run
 
 # ---------------------------------------------------------------------------
-# Counting contract: records each invocation's (token_id, override_input_fields)
+# Counting contract: records each batch-flush dispatcher invocation's
+# (token_id, effective_input_fields). Inherits the nominal ABC and decorates
+# the batch_flush_check method with the dispatch-site marker.
 # ---------------------------------------------------------------------------
 
 
@@ -52,70 +52,45 @@ class _CountingPayload(TypedDict):
     token_id: str
 
 
-class _CountingContract:
-    """Minimal contract that records every dispatcher invocation.
-
-    Always applies. Never raises. Captures ``token_id`` and
-    ``override_input_fields`` so tests can assert both that the dispatcher
-    fired AND that the batch-flush TRANSFORM path passes the intersection
-    via the override channel.
-    """
-
+class _CountingContract(DeclarationContract):
     name = "counting_test_contract"
     payload_schema: type = _CountingPayload
-    # Shared class-level bucket — the ``_isolate_registry`` fixture resets it
-    # per test, so mutable class state here is intentional, not a leak.
-    invocations: ClassVar[list[tuple[str, frozenset[str] | None]]] = []
+    invocations: ClassVar[list[tuple[str, frozenset[str]]]] = []
 
     def applies_to(self, plugin: Any) -> bool:
         return True
 
-    def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
-        _CountingContract.invocations.append((inputs.token_id, inputs.override_input_fields))
+    @implements_dispatch_site("batch_flush_check")
+    def batch_flush_check(
+        self,
+        inputs: BatchFlushInputs,
+        outputs: BatchFlushOutputs,
+    ) -> None:
+        _CountingContract.invocations.append((inputs.token_id, inputs.effective_input_fields))
 
     @classmethod
-    def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
-        # Required by the DeclarationContract protocol. The registry validator
-        # checks that ``negative_example`` is callable; the invariant harness
-        # (tests/invariants/) verifies it triggers a violation for contracts
-        # registered at harness start. This counting contract is registered
-        # *inside* the isolation fixture and torn down before any invariant
-        # harness runs, so this trivial implementation is never executed by
-        # the invariant harness. We still return a well-formed pair.
-        return (
-            RuntimeCheckInputs(
-                plugin=object(),
-                node_id="n",
-                run_id="r",
-                row_id="rw",
-                token_id="t",
-                input_row=object(),
-                static_contract=frozenset(),
-            ),
-            RuntimeCheckOutputs(emitted_rows=(object(),)),
+    def negative_example(cls) -> ExampleBundle:
+        inputs = BatchFlushInputs(
+            plugin=object(),
+            node_id="n",
+            run_id="r",
+            row_id="rw",
+            token_id="t",
+            buffered_tokens=(object(),),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset(),
         )
+        outputs = BatchFlushOutputs(emitted_rows=(object(),))
+        return ExampleBundle(site=DispatchSite.BATCH_FLUSH, args=(inputs, outputs))
 
     @classmethod
-    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
-        # N2 Layer A: same commentary as negative_example above —
-        # registered inside the isolation fixture only. Well-formed pair
-        # returned to satisfy the registry validator's callability check.
-        return (
-            RuntimeCheckInputs(
-                plugin=object(),
-                node_id="n",
-                run_id="r",
-                row_id="rw",
-                token_id="t",
-                input_row=object(),
-                static_contract=frozenset(),
-            ),
-            RuntimeCheckOutputs(emitted_rows=(object(),)),
-        )
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        # Same bundle; registered only inside the isolation fixture.
+        return cls.negative_example()
 
 
 # ---------------------------------------------------------------------------
-# Processor / flush-context builders (mirror existing test file conventions)
+# Processor / flush-context builders
 # ---------------------------------------------------------------------------
 
 
@@ -205,39 +180,27 @@ def _make_processor() -> Any:
     )
 
 
-# ---------------------------------------------------------------------------
-# Registry isolation (snapshot + clear + restore)
-# ---------------------------------------------------------------------------
-
-
 @pytest.fixture(autouse=True)
 def _isolate_registry():
-    """Snapshot the registry so the test can register the counting contract
-    without leaking into sibling tests and without losing
-    PassThroughDeclarationContract's module-level self-registration."""
     snapshot = _snapshot_registry_for_tests()
     _clear_registry_for_tests()
     _CountingContract.invocations = []
-    # Register ONLY the counting contract for this test. We intentionally do
-    # not re-register PassThroughDeclarationContract — the dispatcher must
-    # fire the counting contract regardless of what else is registered, and
-    # keeping the registry minimal isolates the test's signal from
-    # pass-through's semantics.
     register_declaration_contract(_CountingContract())
     yield
     _restore_registry_snapshot_for_tests(snapshot)
 
 
 # ---------------------------------------------------------------------------
-# Tests — batch-flush routing
+# Tests
 # ---------------------------------------------------------------------------
 
 
 class TestBatchFlushDispatcherRouting:
-    """All four batch-flush scenarios must invoke the registered dispatcher."""
+    """All batch-flush scenarios must invoke the registered dispatcher on the
+    BATCH_FLUSH site."""
 
     def test_passthrough_mode_fires_dispatcher_per_token(self) -> None:
-        """PASSTHROUGH flush already routes through the dispatcher (regression guard)."""
+        """PASSTHROUGH flush routes per-token through run_batch_flush_checks."""
         processor = _make_processor()
         contract = _make_contract({"x": int})
         tokens = [_make_token(f"t{i}", {"x": i}, contract) for i in range(3)]
@@ -248,43 +211,37 @@ class TestBatchFlushDispatcherRouting:
 
         processor._cross_check_flush_output(fctx, result)
 
-        # Dispatcher fired once per token pair.
         assert len(_CountingContract.invocations) == 3
         seen_token_ids = {inv[0] for inv in _CountingContract.invocations}
         assert seen_token_ids == {"t0", "t1", "t2"}
-        # PASSTHROUGH mode uses the single input_row's contract, so override is None.
-        for _token_id, override in _CountingContract.invocations:
-            assert override is None, f"PASSTHROUGH must not set override, got {override!r}"
+        # PASSTHROUGH passes each token's own field set — every invocation
+        # sees frozenset({"x"}).
+        for _token_id, effective_input_fields in _CountingContract.invocations:
+            assert effective_input_fields == frozenset({"x"})
 
-    def test_transform_mode_fires_dispatcher_per_emitted_row(self) -> None:
-        """TRANSFORM-flush must route through the dispatcher (the C1 gap).
-
-        Pre-fix: ``_cross_check_flush_output`` calls ``verify_pass_through``
-        directly on this branch, so the counting contract never fires and
-        ``invocations`` stays empty. This assertion is the red/green marker
-        for the fix.
+    def test_transform_mode_fires_dispatcher_once(self) -> None:
+        """TRANSFORM-flush must route through run_batch_flush_checks (the C1 gap
+        closed by the prior fix; the dispatch site rename did not regress it).
         """
         processor = _make_processor()
         contract = _make_contract({"x": int, "y": int})
         tokens = [_make_token(f"t{i}", {"x": i, "y": i * 10}, contract) for i in range(3)]
         transform = _make_flush_transform()
         fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=OutputMode.TRANSFORM)
-        # 6 emitted rows (N:M expansion) all carrying the full input fields.
         rows = [PipelineRow({"x": i, "y": i * 10}, contract) for i in range(6)]
         result = TransformResult.success_multi(rows, success_reason={"action": "expand"})
 
         processor._cross_check_flush_output(fctx, result)
 
-        # Pre-fix: 0. Post-fix: 1 (TRANSFORM emits one dispatcher call per flush,
-        # batch-homogeneous semantics mean one check covers all emitted rows).
-        assert len(_CountingContract.invocations) >= 1, "TRANSFORM-flush bypassed dispatcher (C1 regression)"
+        assert len(_CountingContract.invocations) >= 1, "TRANSFORM-flush bypassed dispatcher"
 
-    def test_transform_mode_passes_batch_intersection_as_override(self) -> None:
-        """Batch intersection must reach the dispatcher via override_input_fields.
+    def test_transform_mode_passes_batch_intersection_as_effective_input_fields(self) -> None:
+        """Batch intersection reaches the dispatcher via ``effective_input_fields``.
 
         Heterogeneous batch: token t0 has {x, y}, token t1 has {x, z}.
-        The intersection is {x}; that is what every emitted row must preserve
-        under ADR-009 §Clause 2, so the dispatcher must receive it.
+        Intersection is {x}; under the H2 bundle design this IS
+        ``effective_input_fields`` (the 2A ``override_input_fields`` sentinel
+        is gone per panel F1 resolution).
         """
         processor = _make_processor()
         contract_xy = _make_contract({"x": int, "y": int})
@@ -295,26 +252,21 @@ class TestBatchFlushDispatcherRouting:
         ]
         transform = _make_flush_transform()
         fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=OutputMode.TRANSFORM)
-        # Rows carry full input fields; intersection check is about what the
-        # dispatcher receives, not about producing a violation.
         reduced = _make_contract({"x": int})
         rows = [PipelineRow({"x": 1}, reduced), PipelineRow({"x": 2}, reduced)]
         result = TransformResult.success_multi(rows, success_reason={"action": "intersect"})
 
         processor._cross_check_flush_output(fctx, result)
 
-        assert len(_CountingContract.invocations) >= 1, "TRANSFORM-flush bypassed dispatcher (C1 regression)"
-        # Every invocation on the TRANSFORM-flush branch must carry the batch
-        # intersection as override_input_fields.
-        for token_id, override in _CountingContract.invocations:
-            assert override == frozenset({"x"}), f"Expected override_input_fields=frozenset({{'x'}}) for {token_id!r}, got {override!r}"
+        assert len(_CountingContract.invocations) >= 1, "TRANSFORM-flush bypassed dispatcher"
+        for token_id, effective_input_fields in _CountingContract.invocations:
+            assert effective_input_fields == frozenset({"x"}), (
+                f"Expected effective_input_fields=frozenset({{'x'}}) for {token_id!r}, got {effective_input_fields!r}"
+            )
 
-    def test_passes_through_false_still_skips_all_contracts(self) -> None:
+    def test_passes_through_false_skips_dispatcher(self) -> None:
         """When ``passes_through_input=False``, the flush path short-circuits
-        before any dispatcher call. This preserves the existing semantics —
-        non-pass-through transforms don't trigger pass-through verification,
-        and other contracts would be invoked only if they apply to the
-        non-pass-through path (which is separate routing, not this method).
+        before any dispatcher call.
         """
         processor = _make_processor()
         contract = _make_contract({"x": int})
@@ -325,5 +277,4 @@ class TestBatchFlushDispatcherRouting:
         result = TransformResult.success_multi(rows, success_reason={"action": "noop"})
 
         processor._cross_check_flush_output(fctx, result)
-
-        assert _CountingContract.invocations == [], "Flush dispatcher fired despite passes_through_input=False"
+        assert _CountingContract.invocations == []

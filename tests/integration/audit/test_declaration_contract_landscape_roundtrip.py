@@ -253,3 +253,126 @@ class TestDeclarationContractViolationRoundTrip:
         # The raw secret must not appear anywhere in the serialized audit record.
         assert "sk-abcdef" not in json.dumps(context)
         assert context["payload"]["api_key"] == "<redacted-secret>"
+
+
+# H2/N3 aggregate E2E round-trip (F5 acceptance bullet from elspeth-121b268aec).
+# When two applicable contracts fire on one row, the dispatcher wraps their
+# violations into AggregateDeclarationContractViolation. An auditor querying
+# the Landscape must see is_aggregate=true and a violations array with every
+# child's to_audit_dict payload — proving the audit-complete posture from
+# comment #417 on H2 ends up in the legal record, not just the in-memory
+# exception.
+
+
+class _AggregateChildPayload(TypedDict):
+    reason: str
+
+
+class _AggregateChildViolationA(DeclarationContractViolation):
+    payload_schema = _AggregateChildPayload
+
+
+class _AggregateChildViolationB(DeclarationContractViolation):
+    payload_schema = _AggregateChildPayload
+
+
+class TestAggregateDeclarationContractViolationRoundTrip:
+    """N3 + F5: multi-violation aggregate survives Landscape serialisation."""
+
+    def test_aggregate_payload_survives_landscape_round_trip(self) -> None:
+        from elspeth.contracts.declaration_contracts import (
+            AggregateDeclarationContractViolation,
+        )
+
+        run_id = "run-aggregate"
+        row_id = "row-aggregate"
+        token_id = "tok-aggregate"
+        node_id = "n-aggregate"
+
+        setup = _setup_landscape(
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            node_id=node_id,
+        )
+
+        child_a = _AggregateChildViolationA(
+            plugin="FakeTransform",
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            payload={"reason": "child-a-triggered"},
+            message="first child violation",
+        )
+        child_a._attach_contract_name("contract_a")
+
+        child_b = _AggregateChildViolationB(
+            plugin="FakeTransform",
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            payload={"reason": "child-b-triggered"},
+            message="second child violation",
+        )
+        child_b._attach_contract_name("contract_b")
+
+        aggregate = AggregateDeclarationContractViolation(
+            plugin="FakeTransform",
+            violations=(child_a, child_b),
+            message="2 contracts fired on the row",
+        )
+        aggregate._attach_by_dispatcher()
+
+        audit_context = aggregate.to_audit_dict()
+        exc_error = ExecutionError(
+            exception=str(aggregate),
+            exception_type=type(aggregate).__name__,
+            phase="declaration_dispatch",
+            context=audit_context,
+        )
+
+        state = setup.factory.execution.begin_node_state(
+            token_id=token_id,
+            node_id=node_id,
+            run_id=run_id,
+            step_index=1,
+            input_data={"amount": "not_an_int"},
+        )
+        setup.factory.execution.complete_node_state(
+            state.state_id,
+            NodeStateStatus.FAILED,
+            duration_ms=1.0,
+            error=exc_error,
+        )
+
+        lineage = explain(
+            query=setup.factory.query,
+            data_flow=setup.factory.data_flow,
+            run_id=run_id,
+            token_id=token_id,
+        )
+        assert lineage is not None
+        failed_states = [ns for ns in lineage.node_states if isinstance(ns, NodeStateFailed)]
+        assert len(failed_states) == 1
+        assert failed_states[0].error_json is not None
+
+        error_record = json.loads(failed_states[0].error_json)
+        context = error_record["context"]
+
+        # Aggregate's to_audit_dict carries is_aggregate=True + violations list.
+        assert context["exception_type"] == "AggregateDeclarationContractViolation"
+        assert context["is_aggregate"] is True
+        assert "contract_name" not in context, "aggregate must NOT emit contract_name (C5/S2-001)"
+
+        violations = context["violations"]
+        assert len(violations) == 2
+        child_types = {v["exception_type"] for v in violations}
+        assert child_types == {"_AggregateChildViolationA", "_AggregateChildViolationB"}
+
+        child_names = {v["contract_name"] for v in violations}
+        assert child_names == {"contract_a", "contract_b"}
+
+        for child in violations:
+            assert child["payload"]["reason"].startswith("child-")

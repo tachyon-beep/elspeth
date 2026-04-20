@@ -1,37 +1,44 @@
 """Runtime verification of ``passes_through_input=True`` declarations.
 
-ADR-008 introduced the runtime cross-check for ``passes_through_input``
-transforms; ADR-009 §Clause 2 extracts it here so the single-token executor
-and the batch aggregation flush path share one verification implementation;
-ADR-010 §Decision 3 makes ``run_runtime_checks`` the single call site for
-per-row declaration-contract dispatch.
+ADR-008 introduced the runtime cross-check; ADR-009 §Clause 2 extracted the
+verifier so single-token and batch-flush paths share one implementation;
+ADR-010 §Decision 3 made the dispatcher the single call site for
+declaration-contract dispatch; the ADR-010 §Semantics amendment (2026-04-20)
+restructured dispatch into the 4-site audit-complete framework.
 
-The only caller of ``verify_pass_through`` is
-``PassThroughDeclarationContract.runtime_check`` in this module. Both the
-single-token path (``engine/executors/transform.py``) and the batch-flush
-path (``engine/processor.py::RowProcessor._cross_check_flush_output``) now
-reach it by way of ``run_runtime_checks`` — not by importing
-``verify_pass_through`` directly. The batch-flush TRANSFORM branch passes
-the batch-wide input intersection through
-``RuntimeCheckInputs.override_input_fields`` (ADR-009 §Clause 2
-batch-homogeneous semantics).
+This contract registers for TWO dispatch sites:
 
-The OpenTelemetry violation counter lives at module level so every
-invocation increments the same instrument. Cardinality is bounded by the
-annotated transform set (short, known at startup), so the
-``transform=<name>`` tag is safe.
+    * ``post_emission_check`` — single-token path from ``TransformExecutor``.
+    * ``batch_flush_check``   — batch-homogeneous path from
+                                ``RowProcessor._cross_check_flush_output``.
+
+Both share the ``verify_pass_through`` implementation. The site difference is
+the SHAPE of the input bundle (``PostEmissionInputs`` carries a single
+``input_row``; ``BatchFlushInputs`` carries a tuple of buffered tokens and a
+pre-computed ``effective_input_fields`` intersection). Both sites'
+decorated methods are thin adapters over ``verify_pass_through``.
+
+Counter cardinality is bounded by the annotated transform set (short, known
+at startup), so the ``transform=<name>`` tag is safe.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, TypedDict, cast
+from typing import Any, ClassVar, TypedDict, cast
 
 from opentelemetry import metrics
 
 from elspeth.contracts.declaration_contracts import (
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    BatchFlushInputs,
+    BatchFlushOutputs,
+    DeclarationContract,
+    DispatchSite,
+    ExampleBundle,
+    PostEmissionInputs,
+    PostEmissionOutputs,
+    PreEmissionInputs,
+    implements_dispatch_site,
     register_declaration_contract,
 )
 from elspeth.contracts.errors import (
@@ -42,9 +49,7 @@ from elspeth.contracts.errors import (
 from elspeth.contracts.schema_contract import PipelineRow
 
 # Module-level counter — both call sites import this module and share the
-# same instrument. Previously lived on the TransformExecutor instance; moving
-# it to module scope removes the need to pass it through the processor's
-# constructor when the batch-flush path joins in.
+# same instrument.
 _VIOLATIONS_COUNTER = metrics.get_meter(__name__).create_counter(
     "pass_through_cross_check_violations_total",
     description="Count of passes_through_input=True transforms that dropped input fields at runtime",
@@ -69,37 +74,11 @@ def verify_pass_through(
     independent references; reading either alone leaves a one-sided blind
     spot, so runtime observation is the intersection of both.
 
-    Raises :class:`PassThroughContractViolation` on the first row that drops
-    any input field. The violation is registered in ``TIER_1_ERRORS`` —
-    on_error routing cannot absorb it; the orchestrator must propagate.
-
-    Empty ``emitted_rows`` is a no-op under the ADR-009 §Clause 3
-    empty-emission carve-out (filter semantics are compatible with
-    ``passes_through_input=True``: emitting nothing drops nothing). Track 2
-    will introduce a separate ``can_drop_rows`` declaration to tighten this
-    case.
-
-    Args:
-        input_fields: Fields the input row(s) carry. For batch mode callers,
-            this is the intersection of all buffered input contracts
-            (ADR-007 table line 53, batch-homogeneous rule).
-        emitted_rows: Rows the transform produced.
-        static_contract: Fields the static validator computed for the
-            transform's output; surfaced in the violation for triage.
-        transform_name: Plugin name (for counter tag and message).
-        transform_node_id: DAG node identifier.
-        run_id: Current pipeline run.
-        row_id: Source row identifier (triggering token's row_id in batch
-            mode; the single token's row_id in single-token mode).
-        token_id: DAG token identifier (triggering token in batch mode).
-
-    Raises:
-        FrameworkBugError: Emitted row has no contract (framework invariant
-            violation — ``PipelineRow.__init__`` always sets one).
-        PassThroughContractViolation: Any emitted row drops a field named
-            in ``input_fields``. The violation carries the full divergence
-            set; callers are responsible for any audit recording that must
-            precede propagation.
+    Raises ``PassThroughContractViolation`` on the first row that drops any
+    input field (per-adopter semantics preserved from ADR-008 / ADR-009).
+    Under audit-complete dispatch the violation is caught by the
+    dispatcher's ``PluginContractViolation`` branch and aggregated with any
+    other contract's raise on the same row.
     """
     if not emitted_rows:
         return
@@ -112,8 +91,6 @@ def verify_pass_through(
         runtime_observed = runtime_contract_fields & runtime_payload_fields
         divergence = input_fields - runtime_observed
         if divergence:
-            # Increment BEFORE raising so the metric captures the event
-            # independently of downstream serialization outcome.
             _VIOLATIONS_COUNTER.add(1, {"transform": transform_name})
             raise PassThroughContractViolation(
                 transform=transform_name,
@@ -134,64 +111,56 @@ def verify_pass_through(
 
 class PassThroughPayload(TypedDict):
     """Shape of PassThroughContractViolation.divergence_set projected into
-    the DeclarationContractViolation payload. (PassThroughContractViolation
-    carries its own rich fields; this TypedDict is for the generic form used
-    when the contract is queried via payload_schema.)"""
+    the DeclarationContractViolation payload.
+
+    PassThroughContractViolation carries its own rich 9-key payload; this
+    TypedDict is consulted when the contract is queried via
+    ``payload_schema``. Under audit-complete aggregation, each child's
+    ``to_audit_dict`` surfaces independently — this schema is for harness
+    introspection only.
+    """
 
     divergence_set: list[str]
     static_contract: list[str]
     runtime_observed: list[str]
 
 
-class PassThroughDeclarationContract:
-    """ADR-007/008/009 pass-through contract, registered via the ADR-010 framework.
+class PassThroughDeclarationContract(DeclarationContract):
+    """ADR-007/008/009 pass-through contract — ADR-010 framework adopter.
 
-    The contract wraps the existing ``verify_pass_through`` function; it does
-    not duplicate its logic. ``applies_to`` uses direct attribute access on
-    the plugin per CLAUDE.md (offensive programming — a plugin missing
-    ``passes_through_input`` is a framework bug that must crash).
+    Inherits the nominal ABC. Claims TWO dispatch sites via
+    ``@implements_dispatch_site`` markers:
+    ``post_emission_check`` (single-token path) and ``batch_flush_check``
+    (batch-homogeneous intersection path). Both delegate to the shared
+    ``verify_pass_through`` implementation.
     """
 
-    name = "passes_through_input"
-    payload_schema: type = PassThroughPayload
+    name: ClassVar[str] = "passes_through_input"
+    payload_schema: ClassVar[type] = PassThroughPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        # Direct attribute access, NOT getattr with default (reviewer B13).
-        # A plugin missing passes_through_input is a framework bug — let it crash.
+        # Direct attribute access, NOT getattr with default (CLAUDE.md
+        # §Offensive Programming). A plugin missing passes_through_input
+        # is a framework bug — let it crash.
         return cast(bool, plugin.passes_through_input)
 
-    def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None:
-        # Tier-1 pre-assertions (reviewer B2): input contract must exist and
-        # node_id must be set. These guards were previously in the now-deleted
-        # TransformExecutor._cross_check_pass_through; they now live here so
-        # the dispatcher path (ADR-010 §Decision 3) enforces the same invariants.
-        #
-        # ADR-009 §Clause 2 batch-homogeneous semantics: when the caller (the
-        # batch-flush TRANSFORM branch of RowProcessor._cross_check_flush_output)
-        # supplies ``override_input_fields``, the effective input-field set is
-        # the caller-computed intersection of every buffered token's contract,
-        # not any single row's. In that case we skip the
-        # ``input_row.contract`` derivation entirely — the caller has already
-        # done the work and the single ``input_row`` cannot represent the
-        # batch intersection. Single-token callers (TransformExecutor) pass
-        # ``None`` and keep the original per-row derivation.
-        if inputs.override_input_fields is not None:
-            input_fields = inputs.override_input_fields
-        else:
-            input_contract = inputs.input_row.contract
-            if input_contract is None:
-                raise FrameworkBugError(
-                    f"Transform {inputs.plugin.name!r} has passes_through_input=True "
-                    f"but input row has no contract. Framework invariant violated."
-                )
-            input_fields = frozenset(fc.normalized_name for fc in input_contract.fields)
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(
+        self,
+        inputs: PostEmissionInputs,
+        outputs: PostEmissionOutputs,
+    ) -> None:
+        """Single-token path (TransformExecutor).
 
+        ``inputs.effective_input_fields`` is caller-derived from
+        ``input_row.contract.fields`` — contracts do NOT re-derive
+        (panel F1 resolution).
+        """
         transform_node_id = inputs.plugin.node_id
         if transform_node_id is None:
             raise OrchestrationInvariantError(f"Transform {inputs.plugin.name!r} has no node_id set at cross-check time.")
-
         verify_pass_through(
-            input_fields=input_fields,
+            input_fields=inputs.effective_input_fields,
             emitted_rows=outputs.emitted_rows,
             static_contract=inputs.static_contract,
             transform_name=inputs.plugin.name,
@@ -201,10 +170,45 @@ class PassThroughDeclarationContract:
             token_id=inputs.token_id,
         )
 
+    @implements_dispatch_site("batch_flush_check")
+    def batch_flush_check(
+        self,
+        inputs: BatchFlushInputs,
+        outputs: BatchFlushOutputs,
+    ) -> None:
+        """Batch-flush TRANSFORM mode (ADR-009 §Clause 2).
+
+        ``inputs.effective_input_fields`` is the caller-computed INTERSECTION
+        of every buffered token's contract — the weakest shared guarantee
+        every emitted row must preserve.
+        """
+        transform_node_id = inputs.plugin.node_id
+        if transform_node_id is None:
+            raise OrchestrationInvariantError(f"Transform {inputs.plugin.name!r} has no node_id set at batch-flush cross-check time.")
+        verify_pass_through(
+            input_fields=inputs.effective_input_fields,
+            emitted_rows=outputs.emitted_rows,
+            static_contract=inputs.static_contract,
+            transform_name=inputs.plugin.name,
+            transform_node_id=transform_node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+        )
+
+    # pre_emission_check and boundary_check fall through to the ABC's default
+    # no-op bodies. The dispatcher never invokes them (no marker).
+
     @classmethod
-    def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
-        """Classmethod used by the invariant harness to prove runtime_check
-        actually raises on a known-bad input (reviewer B6/F-7)."""
+    def negative_example(cls) -> ExampleBundle:
+        """Classmethod used by the invariant harness to prove the contract
+        fires on a known-bad input.
+
+        Returns a site-tagged ``ExampleBundle`` for POST_EMISSION — the
+        single-token adopter site. The BATCH_FLUSH site delegates to the
+        same verify_pass_through body so the harness's positive-case
+        coverage is transitive.
+        """
         from elspeth.contracts.schema_contract import (
             FieldContract,
             PipelineRow,
@@ -235,7 +239,7 @@ class PassThroughDeclarationContract:
             passes_through_input = True
             _output_schema_config = None
 
-        inputs = RuntimeCheckInputs(
+        inputs = PostEmissionInputs(
             plugin=_MinimalTransform(),
             node_id="neg-1",
             run_id="neg-run",
@@ -243,24 +247,18 @@ class PassThroughDeclarationContract:
             token_id="neg-token",
             input_row=_row(("a", "b", "c")),
             static_contract=frozenset({"a", "b", "c"}),
+            effective_input_fields=frozenset({"a", "b", "c"}),
         )
-        outputs = RuntimeCheckOutputs(emitted_rows=(_row(("a", "c")),))
-        return inputs, outputs
+        outputs = PostEmissionOutputs(emitted_rows=(_row(("a", "c")),))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
     @classmethod
-    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
-        """Classmethod used by the N2 harness to prove ``applies_to`` returns
-        False on a plugin this contract was not designed to cover
-        (issue elspeth-50509ed2bc / ADR-010 N2 Layer A).
-
-        For ``PassThroughDeclarationContract`` the non-applying scenario is
-        trivially a transform with ``passes_through_input=False`` — the sole
-        discriminator ``applies_to`` reads. The scenario still carries
-        well-formed inputs/outputs so that if a future bug caused the
-        dispatcher to invoke ``runtime_check`` despite ``applies_to=False``,
-        the method's behaviour is observable by the harness's
-        belt-and-suspenders check (``runtime_check`` MUST NOT raise this
-        contract's violation on its own declared non-fire scenario).
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        """N2 Layer A non-fire scenario — ``passes_through_input=False``
+        plugin. ``applies_to`` must return False; even if the dispatcher
+        were to invoke ``post_emission_check`` anyway (impossible under the
+        registry's filter, but belt-and-suspenders), the rows preserve every
+        input field so no violation raises.
         """
         from elspeth.contracts.schema_contract import (
             FieldContract,
@@ -289,10 +287,10 @@ class PassThroughDeclarationContract:
         class _NonPassThroughTransform:
             name = "NonFireExample"
             node_id = "non-fire-1"
-            passes_through_input = False  # ← the discriminator applies_to reads
+            passes_through_input = False  # the discriminator applies_to reads
             _output_schema_config = None
 
-        inputs = RuntimeCheckInputs(
+        inputs = PostEmissionInputs(
             plugin=_NonPassThroughTransform(),
             node_id="non-fire-1",
             run_id="non-fire-run",
@@ -300,16 +298,16 @@ class PassThroughDeclarationContract:
             token_id="non-fire-token",
             input_row=_row(("a", "b", "c")),
             static_contract=frozenset({"a", "b", "c"}),
+            effective_input_fields=frozenset({"a", "b", "c"}),
         )
-        # Emitted rows preserve every input field — so even if runtime_check
-        # is invoked despite applies_to returning False, verify_pass_through
-        # would accept this case (no dropped fields). The harness's
-        # belt-and-suspenders assertion is then "no violation raised" rather
-        # than "no silent coercion".
-        outputs = RuntimeCheckOutputs(emitted_rows=(_row(("a", "b", "c")),))
-        return inputs, outputs
+        outputs = PostEmissionOutputs(emitted_rows=(_row(("a", "b", "c")),))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
 
 
 # Module import side-effect: register with the framework. Bootstrap asserts
-# (Task 5b) that this registration actually happened before any run begins.
+# the registration actually happened (orchestrator.core.prepare_for_run).
 register_declaration_contract(PassThroughDeclarationContract())
+
+# Unused import suppressed — ``PreEmissionInputs`` is imported so the type is
+# available for docstring references; the contract does not implement the site.
+_ = PreEmissionInputs

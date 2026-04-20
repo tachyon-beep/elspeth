@@ -36,7 +36,9 @@ from elspeth.contracts.declaration_contracts import (
 )
 def test_positive_example_does_not_apply_returns_non_applying_scenario(contract) -> None:
     """applies_to MUST return False on the contract's non-fire scenario."""
-    inputs, _outputs = type(contract).positive_example_does_not_apply()
+    bundle = type(contract).positive_example_does_not_apply()
+    # First positional arg of every bundle is the "inputs" carrying .plugin.
+    inputs = bundle.args[0]
     assert not contract.applies_to(inputs.plugin), (
         f"Contract {contract.name!r}'s positive_example_does_not_apply() "
         f"returned a scenario where applies_to() is True. The scenario MUST "
@@ -66,9 +68,10 @@ def test_runtime_check_does_not_fire_on_non_apply_scenario(contract) -> None:
     non-fire scenario is the explicit contract between contract author and
     harness that "this scenario should never cause me to fire."
     """
-    inputs, outputs = type(contract).positive_example_does_not_apply()
+    bundle = type(contract).positive_example_does_not_apply()
+    method = getattr(contract, bundle.site.value)
     try:
-        contract.runtime_check(inputs, outputs)
+        method(*bundle.args)
     except DeclarationContractViolation as exc:
         pytest.fail(
             f"Contract {contract.name!r}'s runtime_check raised "

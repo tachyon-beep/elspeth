@@ -11,8 +11,10 @@ from elspeth.contracts import (
     TransformProtocol,
 )
 from elspeth.contracts.declaration_contracts import (
-    RuntimeCheckInputs,
-    RuntimeCheckOutputs,
+    PostEmissionInputs,
+    PostEmissionOutputs,
+    PreEmissionInputs,
+    derive_effective_input_fields,
 )
 from elspeth.contracts.enums import (
     NodeStateStatus,
@@ -28,7 +30,10 @@ from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.execution_repository import ExecutionRepository
-from elspeth.engine.executors.declaration_dispatch import run_runtime_checks
+from elspeth.engine.executors.declaration_dispatch import (
+    run_post_emission_checks,
+    run_pre_emission_checks,
+)
 from elspeth.engine.executors.state_guard import NodeStateGuard
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.batching.mixin import BatchTransformMixin
@@ -252,6 +257,35 @@ class TransformExecutor:
                     f"Transform '{transform.name}' input validation failed: {e}. This indicates an upstream transform/source schema bug."
                 ) from e
 
+            # --- PRE-EMISSION DECLARATION-CONTRACT DISPATCH (ADR-010 §Decision 3 + F2) ---
+            # Fires BEFORE transform.process() so pre-emission adopters (Phase 2B's
+            # DeclaredRequiredFieldsContract) can validate input-row field presence
+            # before the transform crashes on a missing field — which would
+            # mis-attribute the failure to the transform's process() body rather
+            # than to the declaration violation.
+            #
+            # effective_input_fields is derived once here and reused by the
+            # post-emission call site (panel F1 resolution: contracts use the
+            # caller-derived set, not their own re-derivation).
+            effective_input_fields = derive_effective_input_fields(token.row_data)
+            static_contract: frozenset[str] = (
+                transform._output_schema_config.get_effective_guaranteed_fields()
+                if transform._output_schema_config is not None
+                else frozenset()
+            )
+            run_pre_emission_checks(
+                inputs=PreEmissionInputs(
+                    plugin=transform,
+                    node_id=transform.node_id or "",
+                    run_id=ctx.run_id,
+                    row_id=token.row_id,
+                    token_id=token.token_id,
+                    input_row=token.row_data,
+                    static_contract=static_contract,
+                    effective_input_fields=effective_input_fields,
+                ),
+            )
+
             # Set state_id and node_id on context for external call recording
             # and batch checkpoint lookup (node_id required for _batch_checkpoints keying)
             ctx.state_id = guard.state_id
@@ -353,28 +387,21 @@ class TransformExecutor:
             # If any of the following steps raise before guard.complete() is
             # called, the guard auto-completes the state as FAILED in __exit__.
 
-            # Declaration-contract runtime dispatch (ADR-010 §Decision 3).
-            # Iterates the registry; PassThroughDeclarationContract handles the
-            # passes_through_input case (applies_to returns True iff the flag is
-            # set). All contracts whose applies_to returns False are skipped.
-            # The guard condition mirrors the old passes_through_input check so
-            # the dispatch only fires on successful results where at least the
-            # pass-through contract is relevant — other registered contracts that
-            # apply unconditionally can add their own applies_to logic.
+            # Post-emission declaration-contract runtime dispatch
+            # (ADR-010 §Decision 3 + §Semantics amendment 2026-04-20).
+            # Uses the audit-complete collect-then-raise dispatcher.
+            # static_contract + effective_input_fields were derived above
+            # for the pre-emission call; reused here (panel F1 resolution —
+            # single caller-side derivation).
             if result.status == "success":
-                static_contract: frozenset[str] = (
-                    transform._output_schema_config.get_effective_guaranteed_fields()
-                    if transform._output_schema_config is not None
-                    else frozenset()
-                )
                 if result.row is not None:
                     emitted_rows: tuple[Any, ...] = (result.row,)
                 elif result.rows is not None:
                     emitted_rows = tuple(result.rows)
                 else:
                     emitted_rows = ()
-                run_runtime_checks(
-                    inputs=RuntimeCheckInputs(
+                run_post_emission_checks(
+                    inputs=PostEmissionInputs(
                         plugin=transform,
                         node_id=transform.node_id or "",
                         run_id=ctx.run_id,
@@ -382,8 +409,9 @@ class TransformExecutor:
                         token_id=token.token_id,
                         input_row=token.row_data,
                         static_contract=static_contract,
+                        effective_input_fields=effective_input_fields,
                     ),
-                    outputs=RuntimeCheckOutputs(emitted_rows=emitted_rows),
+                    outputs=PostEmissionOutputs(emitted_rows=emitted_rows),
                 )
 
             # Populate audit fields

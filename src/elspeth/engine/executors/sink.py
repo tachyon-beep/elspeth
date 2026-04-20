@@ -27,6 +27,7 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
     PluginContractViolation,
     SinkDiversionReason,
+    SinkTransactionalInvariantError,
 )
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import ArtifactDescriptor
@@ -181,6 +182,31 @@ class SinkExecutor:
                     ) from e
 
         if sink.declared_required_fields:
+            # TWO-LAYER SINK INVARIANT ARCHITECTURE (ADR-010 F3 —
+            # issue elspeth-5fc876138d, amendment 2026-04-20).
+            #
+            # This inline check is the TRANSACTIONAL BACKSTOP (Layer 2).
+            # It runs INSIDE the sink's commit boundary where the dispatcher-
+            # owned pre-write contract (Layer 1 — a future Phase 2C
+            # SinkRequiredFieldsContract) cannot see partial state. The two
+            # layers serve different audit purposes:
+            #
+            #   * Layer 1 (pre-write contract, 2C): intent validation.
+            #     Triage SQL: WHERE exception_type = 'SinkRequiredFieldsViolation'
+            #     (or whichever concrete subclass 2C introduces).
+            #   * Layer 2 (THIS check): transactional backstop.
+            #     Triage SQL: WHERE exception_type = 'SinkTransactionalInvariantError'.
+            #
+            # Before F3 both layers raised PluginContractViolation and the
+            # audit trail conflated pre-write contract failures with
+            # commit-boundary state-divergence failures. The reclassification
+            # to SinkTransactionalInvariantError separates the triage surfaces
+            # so auditors can distinguish "intent validation failed" from
+            # "state diverged mid-transaction".
+            #
+            # Both classes are in TIER_1_ERRORS (neither can be absorbed by
+            # on_error routing).
+            #
             # Caller invariant: when contracts is provided, len(contracts) == len(rows).
             # Both call sites build them from the same tokens iterable, so a desync
             # would be a refactor bug — assert it loudly rather than silently masking.
@@ -215,9 +241,16 @@ class SinkExecutor:
                             f"schema contract (likely from coalesce merge). "
                             f"Fix: ensure all branches produce these fields as required."
                         )
-                raise PluginContractViolation(
+                raise SinkTransactionalInvariantError(
                     f"Sink '{sink.name}' row {row_index} is missing required fields "
-                    f"{missing}. This indicates an upstream transform/schema bug.{contract_context}"
+                    f"{missing} at the transactional commit boundary. This is "
+                    f"the Layer 2 transactional backstop (ADR-010 F3); "
+                    f"if a Layer 1 pre-write SinkRequiredFieldsContract is "
+                    f"registered it should have fired first. If Layer 1 "
+                    f"passed and Layer 2 fired, row state diverged between "
+                    f"contract evaluation and commit — investigate "
+                    f"cross-token mutation or mid-batch field "
+                    f"removal.{contract_context}"
                 )
 
     def write(

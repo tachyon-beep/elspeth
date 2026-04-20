@@ -1,94 +1,428 @@
-"""DeclarationContract protocol + registry + violation base (ADR-010 §Decision 3).
+"""DeclarationContract framework (ADR-010 §Decision 3, amended 2026-04-20).
 
-Protocol shape in 2A:
+H2 landing (issue elspeth-425047a599): the 2A single-site protocol is extended
+to a 4-site nominal-ABC framework with collect-then-raise audit-complete
+dispatch (ADR-010 §Semantics, anchored at comment #417 on H2).
 
-- ``name: str`` — unique identifier.
-- ``applies_to(plugin) -> bool`` — gate for the dispatcher.
-- ``runtime_check(inputs, outputs) -> None`` — per-row verification.
-- ``payload_schema: type[TypedDict]`` — schema for the violation payload.
-- ``negative_example() -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]`` —
-  classmethod returning a scenario that MUST trigger runtime_check to raise
-  the contract's violation.
+## Public surface
 
-``static_check`` is intentionally absent in 2A (see plan Revision History —
-Review v1 B1/B11). The walker refactor stays in Phase 2B.
+- ``DispatchSite`` — StrEnum naming the four dispatch sites.
+- ``@implements_dispatch_site("site_name")`` — method decorator claiming a
+  dispatch site. The authoritative signal under multi-level inheritance
+  (AST scanner cannot reliably see mixin-inherited overrides). **Layer L0**
+  placement is mandatory per plan-review W4 — the CI scanner at L3 imports
+  it, and concrete contracts at L2/L3 apply it.
+- ``DeclarationContract`` — nominal ABC every contract inherits. Declares
+  four dispatch methods with default no-op bodies (decorate to claim).
+  Rejected Protocol alternative per ADR-010 §Alternative 3 (nominal closes
+  the spoofing vector).
+- Bundle types — ``PreEmissionInputs``, ``PostEmissionInputs`` /
+  ``PostEmissionOutputs``, ``BatchFlushInputs`` / ``BatchFlushOutputs``,
+  ``BoundaryInputs`` / ``BoundaryOutputs``. Per dispatch site. Every
+  bundle is a frozen slots dataclass; container fields are deep-frozen
+  in ``__post_init__`` per CLAUDE.md §Frozen Dataclass Immutability.
+- ``DeclarationContractViolation`` — per-contract audit-evidence-bearing
+  exception. Subclasses declare ``payload_schema`` (H5 Layer 1).
+- ``AggregateDeclarationContractViolation`` — SIBLING class (not subclass)
+  emitted by the dispatcher when M>1 applicable contracts fire on a single
+  (row, call-site) tuple. C5 closure: ``is_aggregate: True`` in the audit
+  payload; no ``contract_name`` field (sentinel-string-in-name-column is a
+  Spoofing surface per Security S2-001).
+- ``ExampleBundle`` — site-tagged return value for ``negative_example`` /
+  ``positive_example_does_not_apply``. Lets the harness dispatch per site.
 
-``DeclarationContractViolation`` inherits AuditEvidenceBase (nominal), carries
-a deep-frozen payload that is scrubbed for secrets before serialization.
+## Audit-complete semantics (comment #417, anchored)
 
-Registry freezes at end of orchestrator bootstrap (see Task 5b).
-``_clear_registry_for_tests`` is pytest-gated; production callers raise.
+The dispatcher iterates every applicable contract for a given dispatch site.
+Each applicable contract's method runs; raised violations are collected
+rather than short-circuiting. At loop end: 0 violations → return; 1 →
+raise ``violations[0]`` via reference equality (N6 regression invariant);
+>=2 → wrap in aggregate, raise. This closes the audit-trail silence that
+fail-fast first-fire would have made indistinguishable from "checked and
+passed" (STRIDE Repudiation).
+
+## Registry
+
+Contracts register via module-import side-effect. The registry stores each
+contract in the global list AND in a per-site map keyed by DispatchSite so
+the dispatcher filters in O(1) per site. Registration walks the contract's
+class hierarchy for ``@implements_dispatch_site`` markers to compute the
+per-site set.
+
+Registry freezes at end of orchestrator bootstrap (see
+``freeze_declaration_registry`` + ``prepare_for_run``).
+``_clear_registry_for_tests`` / ``_snapshot_registry_for_tests`` /
+``_restore_registry_snapshot_for_tests`` are pytest-gated; production
+callers raise.
 """
 
 from __future__ import annotations
 
 import sys
-from collections.abc import Mapping, Sequence
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, ClassVar, NotRequired, Protocol, Required, TypedDict, get_origin, get_type_hints, is_typeddict, runtime_checkable
+from enum import StrEnum
+from types import MappingProxyType
+from typing import (
+    Any,
+    ClassVar,
+    Literal,
+    NotRequired,
+    Required,
+    TypedDict,
+    TypeVar,
+    cast,
+    get_origin,
+    get_type_hints,
+    is_typeddict,
+)
 
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
 from elspeth.contracts.secret_scrub import scrub_payload_for_audit
-from elspeth.contracts.tier_registry import FrameworkBugError
+from elspeth.contracts.tier_registry import FrameworkBugError, tier_1_error
 
-# -----------------------------------------------------------------------------
+# =============================================================================
+# DispatchSite — the four named sites (H2 §Fix direction)
+# =============================================================================
+
+
+type DispatchSiteName = Literal[
+    "pre_emission_check",
+    "post_emission_check",
+    "batch_flush_check",
+    "boundary_check",
+]
+
+
+class DispatchSite(StrEnum):
+    """Named dispatch site. StrEnum so members are directly usable as method
+    names via ``getattr(contract, site.value)``."""
+
+    PRE_EMISSION = "pre_emission_check"
+    POST_EMISSION = "post_emission_check"
+    BATCH_FLUSH = "batch_flush_check"
+    BOUNDARY = "boundary_check"
+
+
+_DISPATCH_SITE_VALUES: frozenset[str] = frozenset(site.value for site in DispatchSite)
+
+
+# =============================================================================
+# @implements_dispatch_site decorator
+# =============================================================================
+
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+# Attribute name carried on decorated methods. The scanner + registry both read
+# this. Name is deliberately explicit-and-verbose — an accidental collision with
+# another decorator's metadata field would silently mis-classify a method.
+_DISPATCH_SITE_MARKER_ATTR: str = "_declaration_dispatch_site"
+
+
+def implements_dispatch_site(site_name: DispatchSiteName) -> Callable[[F], F]:
+    """Mark a method as implementing a named dispatch site.
+
+    Two purposes (H2 §Acceptance AST-detectability + D1 correction):
+
+    1. Runtime: ``register_declaration_contract`` inspects class methods for
+       this marker to build the per-site registration map. Methods without
+       the marker are NOT invoked by the dispatcher for any site, even if
+       their name happens to match a ``DispatchSite`` value.
+    2. Static: ``scripts/cicd/enforce_contract_manifest.py`` MC3a/b/c rules
+       AST-detect the decorator on concrete contract classes. Required for
+       multi-level-inheritance detection per the D1 correction on H2
+       (``subclass.__dict__`` does not see mixin-inherited overrides).
+
+    Validates ``site_name`` at decoration time against the DispatchSite enum.
+    A typo raises ``ValueError`` at module import rather than silently
+    mis-registering.
+
+    CLAUDE.md posture: direct membership check on the frozen set of valid
+    values. No ``getattr`` default, no silent pass-through.
+    """
+    if site_name not in _DISPATCH_SITE_VALUES:
+        raise ValueError(
+            f"@implements_dispatch_site({site_name!r}) — unknown dispatch site. Must be one of {sorted(_DISPATCH_SITE_VALUES)!r}."
+        )
+
+    def wrap(method: F) -> F:
+        setattr(method, _DISPATCH_SITE_MARKER_ATTR, site_name)
+        return method
+
+    return wrap
+
+
+# =============================================================================
+# Bundle types (per dispatch site, H2 §Fix direction)
+# =============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class PreEmissionInputs:
+    """Bundle passed to pre-emission contracts (runs BEFORE transform.process()).
+
+    No ``emitted_rows`` — emission hasn't happened. Pre-emission contracts
+    (e.g. ``DeclaredRequiredFieldsContract`` in Phase 2B) validate that
+    the input row carries every field the transform's declared_required_fields
+    names, before the transform runs and potentially crashes on a missing
+    field (which would mis-attribute the failure to the transform's
+    ``process()`` body rather than the declaration violation).
+
+    Panel F1 resolution (no ``override_input_fields`` sentinel): the caller
+    (``TransformExecutor``) derives ``effective_input_fields`` from
+    ``input_row.contract.fields`` once and passes it in. Contracts MUST use
+    ``effective_input_fields`` and MUST NOT derive it themselves — the
+    caller-side derivation prevents the B-antipattern where each contract
+    re-implements the derivation and they drift.
+
+    CLAUDE.md §Frozen Dataclass Immutability: ``frozenset`` is intrinsically
+    immutable; no ``__post_init__`` guard required. Scalars need no guard.
+    """
+
+    plugin: Any
+    node_id: str
+    run_id: str
+    row_id: str
+    token_id: str
+    input_row: Any
+    static_contract: frozenset[str]
+    effective_input_fields: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class PostEmissionInputs:
+    """Bundle passed to post-emission contracts (runs AFTER transform.process()).
+
+    Panel F1 resolution: the caller derives ``effective_input_fields`` once
+    and passes it in. Contracts reading field semantics use
+    ``effective_input_fields`` directly — no ``override_input_fields``
+    sentinel. The 2A-era nullable-override field is deleted.
+    """
+
+    plugin: Any
+    node_id: str
+    run_id: str
+    row_id: str
+    token_id: str
+    input_row: Any
+    static_contract: frozenset[str]
+    effective_input_fields: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class PostEmissionOutputs:
+    """Emitted-rows bundle for post-emission dispatch.
+
+    ``emitted_rows`` is normalised to a deep-frozen tuple in ``__post_init__``.
+    Non-list/non-tuple inputs crash offensively per CLAUDE.md §Offensive
+    Programming — arbitrary Sequence subtypes (lazy wrappers, generators)
+    cannot silently bypass the freeze guard.
+    """
+
+    emitted_rows: tuple[Any, ...]
+
+    def __post_init__(self) -> None:
+        value: object = self.emitted_rows
+        if isinstance(value, list):
+            object.__setattr__(
+                self,
+                "emitted_rows",
+                tuple(deep_freeze(item) for item in value),
+            )
+        elif isinstance(value, tuple):
+            freeze_fields(self, "emitted_rows")
+        else:
+            raise TypeError(f"PostEmissionOutputs.emitted_rows must be list or tuple, got {type(value).__name__!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class BatchFlushInputs:
+    """Bundle for batch-flush dispatch (ADR-009 §Clause 2 TRANSFORM mode).
+
+    Unlike post-emission's single ``input_row``, batch-flush carries a tuple
+    of buffered tokens. The identity fields (``row_id``, ``token_id``) anchor
+    the violation to the triggering token (or the first buffered token on
+    timeout flushes — the caller computes this choice and passes it in).
+
+    ``effective_input_fields`` is the INTERSECTION across every buffered
+    token's contract — the weakest shared guarantee. Caller computes this
+    once; contracts use it directly.
+    """
+
+    plugin: Any
+    node_id: str
+    run_id: str
+    row_id: str  # identity anchor
+    token_id: str  # identity anchor
+    buffered_tokens: tuple[Any, ...]
+    static_contract: frozenset[str]
+    effective_input_fields: frozenset[str]
+
+    def __post_init__(self) -> None:
+        # buffered_tokens may arrive as list; offensive guard.
+        value: object = self.buffered_tokens
+        if isinstance(value, list):
+            object.__setattr__(self, "buffered_tokens", tuple(value))
+        elif isinstance(value, tuple):
+            pass  # already canonical — items are TokenInfo dataclasses, considered frozen at the caller.
+        else:
+            raise TypeError(f"BatchFlushInputs.buffered_tokens must be list or tuple, got {type(value).__name__!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class BatchFlushOutputs:
+    """Emitted-rows bundle for batch-flush dispatch. Identical __post_init__
+    semantics to PostEmissionOutputs.
+    """
+
+    emitted_rows: tuple[Any, ...]
+
+    def __post_init__(self) -> None:
+        value: object = self.emitted_rows
+        if isinstance(value, list):
+            object.__setattr__(
+                self,
+                "emitted_rows",
+                tuple(deep_freeze(item) for item in value),
+            )
+        elif isinstance(value, tuple):
+            freeze_fields(self, "emitted_rows")
+        else:
+            raise TypeError(f"BatchFlushOutputs.emitted_rows must be list or tuple, got {type(value).__name__!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryInputs:
+    """Bundle for boundary dispatch (source emission / sink consumption — 2C).
+
+    Single ``rows`` tuple whose meaning is context-dependent:
+      * source-side adopter: ``rows`` = rows the source produced (plural).
+      * sink-side adopter: ``rows`` = rows the sink consumed (plural).
+
+    The contract's ``applies_to`` discriminates source-side vs sink-side
+    based on the plugin's concrete class. No singular ``input_row`` —
+    sources have none; sinks have plural inputs.
+
+    2C paired-landing (F4) will validate whether this unified bundle is
+    sufficient or whether sub-types are needed. Under this H2 landing the
+    site + bundle exist so the N1 manifest can record coverage; no 2C
+    adopter registers yet.
+    """
+
+    plugin: Any
+    node_id: str
+    run_id: str
+    static_contract: frozenset[str]
+    rows: tuple[Any, ...]
+
+    def __post_init__(self) -> None:
+        value: object = self.rows
+        if isinstance(value, list):
+            object.__setattr__(self, "rows", tuple(value))
+        elif isinstance(value, tuple):
+            pass
+        else:
+            raise TypeError(f"BoundaryInputs.rows must be list or tuple, got {type(value).__name__!r}")
+
+
+@dataclass(frozen=True, slots=True)
+class BoundaryOutputs:
+    """Outputs bundle for boundary dispatch.
+
+    For most boundary contracts this is vestigial (sources' emitted rows ARE
+    ``BoundaryInputs.rows``; sinks produce nothing). The bundle exists so
+    the dispatcher signature ``boundary_check(inputs, outputs)`` matches the
+    other three sites structurally. 2C may refine if necessary.
+    """
+
+    rows: tuple[Any, ...] = ()
+
+    def __post_init__(self) -> None:
+        value: object = self.rows
+        if isinstance(value, list):
+            object.__setattr__(self, "rows", tuple(value))
+        elif isinstance(value, tuple):
+            pass
+        else:
+            raise TypeError(f"BoundaryOutputs.rows must be list or tuple, got {type(value).__name__!r}")
+
+
+# =============================================================================
+# ExampleBundle — site-tagged harness example
+# =============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class ExampleBundle:
+    """Site-tagged bundle returned by ``negative_example`` /
+    ``positive_example_does_not_apply``.
+
+    Under the 4-method ABC the harness cannot know in advance which dispatch
+    method to invoke on a given contract. The tagged bundle lets the harness
+    dispatch per site:
+
+        bundle = type(contract).negative_example()
+        method = getattr(contract, bundle.site.value)
+        method(*bundle.args)
+
+    ``args`` shape by site:
+      * PRE_EMISSION: ``(PreEmissionInputs,)``
+      * POST_EMISSION: ``(PostEmissionInputs, PostEmissionOutputs)``
+      * BATCH_FLUSH: ``(BatchFlushInputs, BatchFlushOutputs)``
+      * BOUNDARY: ``(BoundaryInputs, BoundaryOutputs)``
+
+    Contracts implementing multiple sites return the bundle for whichever
+    site their negative_example primarily exercises. Phase 2B may refine
+    if per-site harness coverage needs formalising.
+    """
+
+    site: DispatchSite
+    args: tuple[Any, ...]
+
+
+# =============================================================================
 # H5 Layer 1 — deny-by-default payload_schema (issue elspeth-3956044fb7)
-# -----------------------------------------------------------------------------
+# =============================================================================
 #
-# The ADR-010 §Decision 3 protocol already declares ``payload_schema`` on each
-# contract. Layer 1 wires that schema onto the violation type so ``__init__``
-# validates caller-supplied payload keys before the payload is deep-frozen.
-# The base class inherits ``_EmptyPayload`` so the only legal base-class
-# payload is ``{}`` — any concrete violation MUST subclass and override
-# ``payload_schema`` with a purpose-built TypedDict.
+# The framework declares ``payload_schema`` on each contract; Layer 1 wires
+# that schema onto the violation type so ``__init__`` validates caller-
+# supplied payload keys before deep-freeze. The base class's empty default
+# means the only legal base-class payload is ``{}`` — concrete violations
+# MUST subclass and override ``payload_schema`` with a purpose-built
+# TypedDict.
 #
-# Why this matters: ``scrub_payload_for_audit`` is a closed-set defence
-# (patterns + key names) and cannot cover every secret format that might
-# appear in future contract payloads. The deny-by-default gate at
-# construction flips the posture — a contract carrying an undeclared key
-# cannot even be instantiated, so an unknown secret format cannot reach
-# the Landscape audit record at all.
+# Why this matters: ``scrub_payload_for_audit`` is a closed-set defence and
+# cannot cover every secret format that might appear in future contract
+# payloads. The deny-by-default gate at construction flips the posture — a
+# contract carrying an undeclared key cannot be instantiated, so an unknown
+# secret format cannot reach the Landscape audit record.
 
 
 class _EmptyPayload(TypedDict):
-    """Default ``DeclarationContractViolation.payload_schema``.
+    """Default ``DeclarationContractViolation.payload_schema`` — no keys.
 
-    Carries no keys. The only legal payload on the base class is ``{}``.
-    Every concrete violation MUST subclass ``DeclarationContractViolation``
-    and override ``payload_schema`` with a TypedDict that enumerates every
-    key the violation's payload carries — this is the Layer 1 deny-by-default
-    gate (issue elspeth-3956044fb7 / H5).
+    The only legal payload on the base class is ``{}``. Concrete violations
+    MUST subclass ``DeclarationContractViolation`` and override
+    ``payload_schema`` with a TypedDict that enumerates every key the
+    violation's payload carries.
     """
 
 
 def _resolve_typeddict_key_sets(schema: type) -> tuple[frozenset[str], frozenset[str]]:
     """Return ``(required, optional)`` frozensets for a TypedDict class.
 
-    Implemented via ``typing.get_type_hints(schema, include_extras=True)``
-    so ``NotRequired[...]`` / ``Required[...]`` wrappers survive even when
-    the defining module uses ``from __future__ import annotations``. Under
-    future annotations, TypedDict's own ``__required_keys__`` /
-    ``__optional_keys__`` metaclass-populated attributes are unreliable
-    because the class body's annotations are string literals the metaclass
-    cannot parse at class-definition time — it defaults every key to the
-    ``total`` flag's polarity and the Required/NotRequired wrappers are
-    silently dropped. ``get_type_hints`` resolves the strings and
-    ``typing.get_origin`` then yields the wrapper so author intent is
-    preserved regardless of the caller's syntax.
-
-    Each key is classified by:
-      * If its origin is ``Required`` → required.
-      * If its origin is ``NotRequired`` → optional.
-      * Otherwise → follow the schema's class-level ``total`` flag
-        (``total=True`` default → required; ``total=False`` → optional).
-
-    Caller is responsible for confirming ``is_typeddict(schema)`` first;
-    ``__total__`` access here would fail on non-TypedDict classes.
+    Implemented via ``typing.get_type_hints(schema, include_extras=True)`` so
+    ``NotRequired[...]`` / ``Required[...]`` wrappers survive under
+    ``from __future__ import annotations``. The metaclass-populated
+    ``__required_keys__`` / ``__optional_keys__`` are unreliable in that
+    case because the class-body annotations are string literals the
+    metaclass cannot parse at class-definition time. ``get_type_hints``
+    resolves the strings at call time and ``typing.get_origin`` yields
+    the wrapper so author intent survives regardless of syntax.
     """
-    # ``is_typeddict(schema)`` was verified by the caller, so ``__total__``
-    # exists. mypy does not narrow ``type`` through the typing discriminator,
-    # so the runtime-verified access is suppressed at the call site below.
     total_required_default: bool = schema.__total__  # type: ignore[attr-defined]
     hints = get_type_hints(schema, include_extras=True)
     required: set[str] = set()
@@ -106,97 +440,27 @@ def _resolve_typeddict_key_sets(schema: type) -> tuple[frozenset[str], frozenset
     return frozenset(required), frozenset(optional)
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeCheckInputs:
-    """Bundle passed to ``DeclarationContract.runtime_check``.
-
-    ``static_contract`` carries the DAG-validator-computed guarantee set for
-    the current plugin's output (required by pass-through's verify_pass_through
-    per pass_through.py:39). Contracts that do not need it can ignore it.
-
-    ``override_input_fields`` lets the caller name the effective input-field
-    set explicitly rather than have the contract derive it from
-    ``input_row.contract.fields``. This exists because batch-flush
-    TRANSFORM mode (``RowProcessor._cross_check_flush_output``) must check
-    emitted rows against the *intersection* of every buffered token's
-    contract (ADR-009 §Clause 2 batch-homogeneous semantics) — a shape the
-    single ``input_row`` cannot express. Contracts that need the input
-    fields MUST use ``override_input_fields`` when it is not ``None``;
-    otherwise they fall back to ``input_row.contract.fields``. The
-    single-token call site in ``TransformExecutor`` passes ``None``, so
-    existing behaviour is unchanged there. ``frozenset`` is immutable so no
-    freeze guard is required in ``__post_init__``.
-    """
-
-    plugin: Any
-    node_id: str
-    run_id: str
-    row_id: str
-    token_id: str
-    input_row: Any
-    static_contract: frozenset[str]
-    override_input_fields: frozenset[str] | None = None
+def resolve_payload_schema_key_sets(schema: type) -> tuple[frozenset[str], frozenset[str]]:
+    """Public accessor for payload-schema key classification (N2 Layer B)."""
+    return _resolve_typeddict_key_sets(schema)
 
 
-@dataclass(frozen=True, slots=True)
-class RuntimeCheckOutputs:
-    """Emitted-rows bundle. ``emitted_rows`` is normalized to a deep-frozen
-    ``tuple`` in ``__post_init__``. Inputs must be ``list`` or ``tuple`` —
-    arbitrary ``Sequence`` subtypes (including lazy wrappers) crash loudly
-    rather than silently bypass the freeze guard. See CLAUDE.md §Frozen
-    Dataclass Immutability + §Offensive Programming.
-    """
-
-    emitted_rows: tuple[Any, ...]
-
-    def __post_init__(self) -> None:
-        # Cast to ``object`` so mypy does not pre-narrow via the declared field
-        # type (tuple[Any, ...]) and flag the ``isinstance(value, list)`` branch
-        # as unreachable. At runtime callers may pass any sequence subtype; the
-        # guard catches and rejects non-list/non-tuple inputs offensively.
-        value: object = self.emitted_rows
-        if isinstance(value, list):
-            object.__setattr__(
-                self,
-                "emitted_rows",
-                tuple(deep_freeze(item) for item in value),
-            )
-        elif isinstance(value, tuple):
-            freeze_fields(self, "emitted_rows")
-        else:
-            raise TypeError(f"RuntimeCheckOutputs.emitted_rows must be list or tuple, got {type(value).__name__!r}")
+# =============================================================================
+# DeclarationContractViolation — per-contract audit-evidence exception
+# =============================================================================
 
 
 class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
     """Generic audit-evidence-bearing violation for declaration contracts.
 
-    Individual contracts may subclass this to add stronger typing; the base
-    form is sufficient for contracts whose payload is a simple mapping.
+    Individual contracts may subclass to add stronger typing; the base form
+    suffices for contracts whose payload is a simple mapping. Subclasses
+    MUST override ``payload_schema`` (H5 Layer 1 deny-by-default).
 
-    The ``payload`` is deep-frozen in ``__init__`` (reviewer B12) and scrubbed
-    for secrets via ``scrub_payload_for_audit`` before ``to_audit_dict``
-    returns it (reviewer B7/F-4). The scrub is applied at serialization time
-    so the stored payload keeps full information for in-process diagnostics
-    while the Landscape record gets the redacted form.
-
-    **contract_name is dispatcher-attributed (issue elspeth-d74fe81529 / C4).**
-    Contracts MUST NOT supply ``contract_name`` at construction; the
-    declaration dispatcher (``run_runtime_checks``) catches the raised
-    violation and attaches the authoritative name via
-    ``_attach_contract_name`` before the exception propagates to the
-    audit-recording boundary. This closes the contract-name spoofing vector
-    where one contract's ``runtime_check`` could construct a violation
-    labelled with another contract's name and corrupt the audit trail.
-
-    ``contract_name`` is exposed as a read-only property; assigning to
-    ``violation.contract_name`` after construction raises ``AttributeError``
-    (the property has no setter). ``_attach_contract_name`` is one-shot —
-    a second call raises ``RuntimeError``.
-
-    ``__slots__`` names every identity field. ``BaseException`` unavoidably
-    provides a ``__dict__`` so __slots__ is not a hard mutation guard for
-    arbitrary attribute names; the property is. __slots__ is still declared
-    for code-review discoverability and memory/speed on the named fields.
+    ``contract_name`` is dispatcher-attributed via ``_attach_contract_name``
+    (C4 closure, issue elspeth-d74fe81529). Contracts MUST NOT supply
+    ``contract_name`` at construction. ``contract_name`` is exposed as a
+    read-only property; ``_attach_contract_name`` is one-shot.
     """
 
     __slots__ = (
@@ -209,10 +473,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         "token_id",
     )
 
-    # H5 Layer 1 (issue elspeth-3956044fb7): deny-by-default payload schema.
-    # Subclasses MUST override with a purpose-built TypedDict enumerating
-    # every key the violation's ``payload`` can carry. The base class's
-    # empty default accepts only ``payload={}``.
+    # H5 Layer 1 deny-by-default. Subclasses MUST override.
     payload_schema: ClassVar[type] = _EmptyPayload
 
     def __init__(
@@ -227,49 +488,19 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         message: str,
     ) -> None:
         super().__init__(message)
-        # H5 Layer 1: validate BEFORE deep-freeze. Deep-freeze is expensive
-        # and pointless on a payload we're about to reject; raising first
-        # also gives the caller a cleaner traceback pointing at the raw
-        # dict they supplied rather than the frozen proxy.
+        # H5 Layer 1: validate BEFORE deep-freeze. Cheap offensive guard.
         self._validate_payload_against_schema(payload)
-        # Dispatcher attaches via _attach_contract_name before the violation
-        # leaves run_runtime_checks. A None value here means the violation
-        # was raised outside the dispatch path — the ``contract_name``
-        # property will raise on read rather than silently serialize None.
         self._contract_name: str | None = None
         self.plugin = plugin
         self.node_id = node_id
         self.run_id = run_id
         self.row_id = row_id
         self.token_id = token_id
-        # Deep-freeze so the attacker-under-debugger vector is closed (cannot
-        # mutate between raise and record).
         self.payload: Mapping[str, Any] = deep_freeze(dict(payload))
 
     @classmethod
     def _validate_payload_against_schema(cls, payload: Mapping[str, Any]) -> None:
-        """H5 Layer 1: enforce ``payload.keys() ⊆ allowed`` and
-        ``required ⊆ payload.keys()`` against the class's ``payload_schema``.
-
-        Key resolution uses ``typing.get_type_hints(..., include_extras=True)``
-        rather than ``TypedDict.__required_keys__`` / ``__optional_keys__``.
-        The metaclass-populated attributes are unreliable under
-        ``from __future__ import annotations`` because ``NotRequired[...]``
-        / ``Required[...]`` become string literals that the metaclass
-        cannot parse at class-definition time. ``get_type_hints`` evaluates
-        the strings at call time, after which ``get_origin(annotation)``
-        correctly yields ``NotRequired`` / ``Required`` / ``None`` so the
-        resolved required/optional sets match author intent regardless of
-        whether the defining module uses future-annotation syntax.
-
-        Raises:
-            TypeError: ``payload_schema`` is not a TypedDict (canonical
-                ``typing.is_typeddict`` check).
-            ValueError: payload carries undeclared keys OR omits a required
-                key. Messages include the schema name + the offending key
-                set so the traceback identifies the culprit without a
-                debugger round-trip.
-        """
+        """H5 Layer 1 enforcement — see module docstring."""
         schema = cls.payload_schema
         if not is_typeddict(schema):
             raise TypeError(
@@ -287,11 +518,10 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
             raise ValueError(
                 f"{cls.__name__} payload contains undeclared keys "
                 f"{sorted(unknown)!r}; schema {schema.__name__} allows "
-                f"{sorted(allowed)!r}. Undeclared payload keys could "
-                f"carry secret formats the scrubber does not yet "
-                f"recognise — declare every key on the violation's "
-                f"payload_schema TypedDict "
-                f"(issue elspeth-3956044fb7 / H5 Layer 1)."
+                f"{sorted(allowed)!r}. Undeclared payload keys could carry "
+                f"secret formats the scrubber does not yet recognise — "
+                f"declare every key on the violation's payload_schema "
+                f"TypedDict (issue elspeth-3956044fb7 / H5 Layer 1)."
             )
         missing = required_keys - payload_keys
         if missing:
@@ -306,45 +536,27 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
 
     @property
     def contract_name(self) -> str:
-        """Return the authoritative contract name attached by the dispatcher.
-
-        Raises ``RuntimeError`` if the violation was raised outside the
-        declaration-dispatch path — the audit trail requires an
-        authoritative contract name and there is no safe fallback.
-        """
+        """Authoritative contract name attached by the dispatcher (C4)."""
         cn = self._contract_name
         if cn is None:
             raise RuntimeError(
                 "DeclarationContractViolation.contract_name accessed before "
-                "the dispatcher attached an authoritative name. This "
-                "indicates the violation was raised outside "
-                "run_runtime_checks (the declaration-dispatch boundary). "
-                "All DeclarationContractViolation instances must propagate "
+                "the dispatcher attached an authoritative name. All "
+                "DeclarationContractViolation instances must propagate "
                 "through the dispatcher so their contract_name can be "
-                "derived from the firing contract's registry entry; "
-                "caller-supplied names were removed to close the spoofing "
+                "derived from the firing contract's registry entry. "
+                "Caller-supplied names were removed to close the spoofing "
                 "vector (issue elspeth-d74fe81529 / ADR-010 C4)."
             )
         return cn
 
     def _attach_contract_name(self, name: str) -> None:
-        """One-shot setter for the authoritative contract name.
-
-        Called by the declaration dispatcher (``run_runtime_checks``) after a
-        violation is raised and before it propagates to the audit-recording
-        boundary. A second call raises ``RuntimeError`` to catch double-
-        attachment bugs in the dispatcher or any other code path that
-        shouldn't be writing this field.
-
-        The underscore prefix signals private API; ``contract_name`` is the
-        public read-only surface.
-        """
+        """One-shot setter for the authoritative contract name (C4)."""
         if self._contract_name is not None:
             raise RuntimeError(
                 f"DeclarationContractViolation._attach_contract_name called "
                 f"twice: already set to {self._contract_name!r}, refused "
-                f"overwrite with {name!r}. This indicates a dispatcher or "
-                f"exception-handling bug — the authoritative name is set "
+                f"overwrite with {name!r}. The authoritative name is set "
                 f"exactly once per violation lifecycle."
             )
         self._contract_name = name
@@ -363,95 +575,327 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         }
 
 
-@runtime_checkable
-class DeclarationContract(Protocol):
-    """Protocol every declaration-trust contract satisfies.
+# =============================================================================
+# AggregateDeclarationContractViolation — N3 primary mitigation (ADR-010 §Semantics)
+# =============================================================================
 
-    Used for static type-checking and test diagnostics. The dispatcher does
-    NOT rely on ``isinstance(contract, DeclarationContract)`` at the call
-    site — it iterates ``registered_declaration_contracts()`` which returns
-    concrete instances already proven to satisfy the protocol at registration
-    time.
+
+class _AggregatePayload(TypedDict):
+    """Payload shape for AggregateDeclarationContractViolation.
+
+    Unlike DCV children which carry a schema-validated ``payload``, the
+    aggregate's authoritative structured data IS its ``violations`` tuple
+    of child ``to_audit_dict()`` mappings. The payload is minimal — the
+    aggregate is a composition, not an independent violation.
     """
 
-    name: str
-    payload_schema: type  # must be a TypedDict class
 
-    def applies_to(self, plugin: Any) -> bool: ...
-    def runtime_check(self, inputs: RuntimeCheckInputs, outputs: RuntimeCheckOutputs) -> None: ...
+@tier_1_error(
+    reason="ADR-010 §Semantics — audit-complete dispatch aggregation (N3)",
+    caller_module=__name__,
+)
+class AggregateDeclarationContractViolation(AuditEvidenceBase, RuntimeError):
+    """Aggregate wrapper for multi-violation (row, call-site) tuples.
 
-    @classmethod
-    def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]: ...
+    **SIBLING class of DeclarationContractViolation — NOT a subclass.** Per
+    comment #417 §Semantics + N3 §Acceptance C5 closure + Security S2-001.
+    A generic ``except DeclarationContractViolation`` elsewhere does NOT
+    absorb this; triage SQL must distinguish the aggregate case explicitly.
 
-    @classmethod
-    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
-        """Return a scenario for which ``applies_to`` MUST return False.
+    Emitted by the dispatcher when M >= 2 applicable contracts fire on a
+    single (row, call-site) tuple. Each child's ``to_audit_dict()`` is
+    surfaced as an element of the aggregate's ``violations`` list so the
+    audit record carries every contract's evidence.
 
-        Paired with ``negative_example`` (which exercises the positive path
-        "contract fires when it should"). This method exercises the
-        complementary invariant "contract does NOT fire when preconditions
-        are absent" (issue elspeth-50509ed2bc / N2 Layer A).
+    **Triage SQL:** ``WHERE is_aggregate = true`` distinguishes the
+    multi-fire case. The aggregate's ``to_audit_dict`` emits
+    ``is_aggregate: True`` and ``violations: tuple[Mapping, ...]``; no
+    ``contract_name`` field (sentinel-string-in-name-column is a Spoofing
+    surface per S2-001).
 
-        Rationale: the ``negative_example`` harness catches dormant
-        ``runtime_check`` (reviewer B6/F-7). It does not catch a buggy
-        ``applies_to`` that returns True for plugins the contract was not
-        designed to cover — in that case the contract fires in the wrong
-        context and mis-attributes the violation to the wrong plugin kind
-        or dispatch site. The harness built on this classmethod asserts
-        every registered contract has a known non-applying scenario and
-        verifies ``applies_to`` returns False on it.
+    **One-shot dispatcher attribution** (mirrors C4 closure on DCV
+    children): ``_attached_by_dispatcher`` flag. The aggregate MUST be
+    raised via the dispatcher's audit-complete path; a non-dispatcher
+    raise would bypass the audit-completeness invariant.
+    """
+
+    __slots__ = ("_attached_by_dispatcher", "plugin", "violations")
+
+    # Payload schema is the empty sentinel — the aggregate has no construction-
+    # time validated payload (its payload IS the child-violation tuple). This
+    # keeps H5 Layer 1 orthogonal to the aggregate's composition semantics.
+    payload_schema: ClassVar[type] = _AggregatePayload
+
+    def __init__(
+        self,
+        *,
+        plugin: str,
+        violations: tuple[AuditEvidenceBase, ...],
+        message: str,
+    ) -> None:
+        super().__init__(message)
+        if len(violations) < 2:
+            raise ValueError(
+                "AggregateDeclarationContractViolation requires at least 2 "
+                f"violations; got {len(violations)}. Single-violation case "
+                f"MUST raise violations[0] via reference equality — the N6 "
+                f"regression invariant asserts type(raised) == original and "
+                f"id(raised) == id(violations[0]) at N=1, not an "
+                f"aggregation-of-one wrapper."
+            )
+        self._attached_by_dispatcher: bool = False
+        self.plugin = plugin
+        self.violations = violations  # tuple — immutable by construction
+
+    def _attach_by_dispatcher(self) -> None:
+        """One-shot attribution flag. C5 closure mirror of C4's
+        ``_attach_contract_name`` on individual DCV instances.
         """
-        ...
+        if self._attached_by_dispatcher:
+            raise RuntimeError(
+                "AggregateDeclarationContractViolation._attach_by_dispatcher "
+                "called twice. The aggregate is raised exactly once per "
+                "(row, call-site) tuple by the dispatcher; a second call "
+                "indicates a dispatcher bug."
+            )
+        self._attached_by_dispatcher = True
 
+    def to_audit_dict(self) -> Mapping[str, Any]:
+        if not self._attached_by_dispatcher:
+            raise RuntimeError(
+                "AggregateDeclarationContractViolation.to_audit_dict accessed "
+                "before dispatcher attribution. Aggregate was raised outside "
+                "the audit-complete dispatcher path — framework bug."
+            )
+        return {
+            "exception_type": type(self).__name__,
+            "is_aggregate": True,
+            "plugin": self.plugin,
+            "violations": tuple(v.to_audit_dict() for v in self.violations),
+            "message": str(self),
+        }
+
+
+# =============================================================================
+# DeclarationContract — nominal ABC (H2 §Fix direction)
+# =============================================================================
+
+
+class DeclarationContract(ABC):
+    """Nominal abstract base for every declaration-trust contract.
+
+    Four dispatch methods carry default no-op bodies. Concrete contracts
+    OVERRIDE the methods for sites they implement AND decorate each override
+    with ``@implements_dispatch_site("<site>")``. The decorator is the
+    authoritative signal; the in-class override is the secondary signal for
+    flat (non-mixin) contracts.
+
+    **NOT a runtime-checkable Protocol.** ADR-010 §Alternative 3 rejection
+    of structural typing stands: nominal inheritance closes the STRIDE
+    Spoofing vector where any class exposing coincidental method signatures
+    could claim to be a contract.
+
+    Subclasses MUST:
+      * Declare a unique ``name: ClassVar[str]``.
+      * Declare a purpose-built ``payload_schema: ClassVar[type]`` (TypedDict).
+      * Implement ``applies_to(plugin) -> bool``.
+      * Implement ``negative_example(cls) -> ExampleBundle``.
+      * Implement ``positive_example_does_not_apply(cls) -> ExampleBundle``.
+      * Override at least ONE dispatch method AND decorate it.
+
+    Registration-time enforcement (``register_declaration_contract``) rejects
+    contracts with zero implemented sites — a contract that opts into no
+    dispatch site is non-functional by construction.
+    """
+
+    name: ClassVar[str]
+    payload_schema: ClassVar[type]
+
+    @abstractmethod
+    def applies_to(self, plugin: Any) -> bool:
+        """Return True iff this contract applies to ``plugin``."""
+
+    @classmethod
+    @abstractmethod
+    def negative_example(cls) -> ExampleBundle:
+        """Return a site-tagged scenario that MUST trigger the contract's
+        violation when passed to the contract's decorated dispatch method."""
+
+    @classmethod
+    @abstractmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        """Return a site-tagged scenario for which ``applies_to`` MUST
+        return False (N2 Layer A non-fire invariant)."""
+
+    # -------------------------------------------------------------------------
+    # Dispatch methods — default no-op bodies. Concrete contracts override
+    # and decorate with @implements_dispatch_site. MC3c CI rule forbids
+    # trivial override bodies so opting-in-then-no-op is caught pre-merge.
+    # -------------------------------------------------------------------------
+
+    def pre_emission_check(self, inputs: PreEmissionInputs) -> None:
+        """Default no-op; decorated override in concrete contracts."""
+        return None
+
+    def post_emission_check(
+        self,
+        inputs: PostEmissionInputs,
+        outputs: PostEmissionOutputs,
+    ) -> None:
+        """Default no-op; decorated override in concrete contracts."""
+        return None
+
+    def batch_flush_check(
+        self,
+        inputs: BatchFlushInputs,
+        outputs: BatchFlushOutputs,
+    ) -> None:
+        """Default no-op; decorated override in concrete contracts."""
+        return None
+
+    def boundary_check(
+        self,
+        inputs: BoundaryInputs,
+        outputs: BoundaryOutputs,
+    ) -> None:
+        """Default no-op; decorated override in concrete contracts."""
+        return None
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+
+def derive_effective_input_fields(input_row: Any) -> frozenset[str]:
+    """Derive the effective input-field set from a PipelineRow.
+
+    Panel F1 resolution (ADR-010 §Semantics amendment 2026-04-20): callers
+    use this single helper so the derivation logic does not drift across
+    dispatcher call sites. Contracts receive the derived set in their
+    bundle; they do NOT re-derive.
+
+    ``input_row.contract is None`` is a framework invariant violation —
+    ``PipelineRow.__init__`` always sets one. Raise ``FrameworkBugError``
+    (Tier-1) for the specific "missing contract" case so the error message
+    names the root cause explicitly rather than surfacing a generic
+    AttributeError from a nested field iteration.
+    """
+    contract = input_row.contract
+    if contract is None:
+        raise FrameworkBugError(
+            "derive_effective_input_fields: input row has no contract. "
+            "PipelineRow.__init__ invariant violated — every row MUST carry "
+            "a non-None contract at this dispatcher call site."
+        )
+    return frozenset(fc.normalized_name for fc in contract.fields)
+
+
+# =============================================================================
+# Registry (H2 extension — per-site map)
+# =============================================================================
 
 _REGISTRY: list[DeclarationContract] = []
+_REGISTRY_BY_SITE: dict[DispatchSite, list[DeclarationContract]] = {site: [] for site in DispatchSite}
 _FROZEN: bool = False
 
 
 # -----------------------------------------------------------------------------
-# EXPECTED_CONTRACTS manifest (ADR-010 §Decision 3, issue elspeth-b03c6112c0 / C2)
+# EXPECTED_CONTRACT_SITES — extended manifest (N1 Fix direction)
 # -----------------------------------------------------------------------------
 #
-# Every declaration contract registered at orchestrator bootstrap MUST be
-# listed here. The bootstrap check (``prepare_for_run()``) asserts set
-# *equality* between the registered names and this manifest — not merely
-# non-empty — so that a conditional/forgotten module import that silently
-# skips a contract registration fails loudly instead of being recorded as
-# "compliant" in the audit trail.
+# Per-site manifest: contract_name → frozenset of DispatchSiteName values. The
+# orchestrator bootstrap asserts equality between every (name, site) pair
+# registered and every (name, site) pair named here. Drift fails loudly.
 #
-# Adding or removing a contract requires updating this manifest in the SAME
-# commit that adds/removes the registration call site. ``scripts/cicd/
-# enforce_contract_manifest.py`` scans the source tree and fails CI if the
-# manifest drifts from the registration call sites.
-#
-# CLOSED SET — do not extend without adding the matching
-# ``register_declaration_contract(...)`` call site in the same commit.
-EXPECTED_CONTRACTS: frozenset[str] = frozenset(
+# CLOSED SET — adding or removing a contract requires updating this manifest
+# in the SAME commit as the register_declaration_contract(...) call site AND
+# the @implements_dispatch_site markers on the contract's methods.
+# ``scripts/cicd/enforce_contract_manifest.py`` scans the source tree and
+# fails CI if the manifest drifts from the registration + marker call sites.
+
+
+EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]] = MappingProxyType(
     {
         # PassThroughDeclarationContract
-        #   Defined:     src/elspeth/engine/executors/pass_through.py
-        #   Registered:  src/elspeth/engine/executors/pass_through.py (module-import side-effect)
-        #   ADR:         ADR-007 / ADR-008 / ADR-010
-        "passes_through_input",
+        #   Defined:    src/elspeth/engine/executors/pass_through.py
+        #   Registered: src/elspeth/engine/executors/pass_through.py (module-import side-effect)
+        #   ADR:        ADR-007 / ADR-008 / ADR-010 (§Semantics amendment 2026-04-20)
+        #   Sites:      post_emission_check (single-token TransformExecutor path)
+        #               batch_flush_check   (RowProcessor._cross_check_flush_output)
+        "passes_through_input": frozenset({"post_emission_check", "batch_flush_check"}),
     }
 )
 
 
+def _collect_contract_sites(contract: DeclarationContract) -> frozenset[DispatchSiteName]:
+    """Walk the contract's class hierarchy collecting dispatch-site markers.
+
+    Returns the frozenset of sites the contract implements via
+    ``@implements_dispatch_site``. Walks ``type(contract).__mro__`` skipping
+    ``object`` and the base ABC so multi-level inheritance (mixins) is
+    supported at registration time.
+
+    The MC3 CI rules enforce that the manifest and the marker-discovered set
+    agree, so runtime registration and static AST inspection converge on the
+    same per-contract site set.
+    """
+    sites: set[DispatchSiteName] = set()
+    for klass in type(contract).__mro__:
+        if klass is object or klass is DeclarationContract:
+            continue
+        for attr_name in vars(klass):
+            candidate = vars(klass)[attr_name]
+            # Only functions carry the marker; non-callables and dataclass
+            # fields are skipped naturally because getattr returns the
+            # unwrapped value.
+            site_name = getattr(candidate, _DISPATCH_SITE_MARKER_ATTR, None)
+            if site_name is None:
+                continue
+            if site_name not in _DISPATCH_SITE_VALUES:
+                raise FrameworkBugError(
+                    f"Contract {type(contract).__name__!r} method "
+                    f"{attr_name!r} carries @implements_dispatch_site with "
+                    f"invalid site {site_name!r}. The decorator validates at "
+                    f"decoration time; seeing an invalid marker here "
+                    f"indicates bytecode-level tampering or a framework bug."
+                )
+            sites.add(cast(DispatchSiteName, site_name))
+    return frozenset(sites)
+
+
 def register_declaration_contract(contract: DeclarationContract) -> None:
-    """Register a contract. Validates protocol shape and uniqueness.
+    """Register a contract. Validates protocol shape, uniqueness, and at
+    least one claimed dispatch site.
+
+    Extended (H2) to:
+      * Require the contract inherit ``DeclarationContract`` (nominal ABC).
+      * Walk the class hierarchy for ``@implements_dispatch_site`` markers.
+      * Require at least one claimed site — a contract opting into no site
+        is non-functional by construction.
+      * Append to ``_REGISTRY_BY_SITE[site]`` for each claimed site AND to
+        the global ``_REGISTRY``.
 
     Raises:
         FrameworkBugError: registry is frozen (post-bootstrap).
-        ValueError: duplicate ``name``.
-        TypeError: ``payload_schema`` missing, not a type, or ``negative_example``
-            not callable.
+        TypeError: contract is not a DeclarationContract subclass; or
+            ``payload_schema`` missing / wrong type; or ``negative_example``
+            or ``positive_example_does_not_apply`` not callable.
+        ValueError: duplicate ``name``; or contract claims zero dispatch
+            sites.
     """
     if _FROZEN:
         raise FrameworkBugError(f"Cannot register {contract.name!r}: declaration-contract registry is frozen.")
 
-    # Validate payload_schema presence and type.
-    # We use try/except AttributeError (not hasattr — banned by CLAUDE.md) to
-    # detect a missing attribute at this registration trust boundary.
+    if not isinstance(contract, DeclarationContract):
+        raise TypeError(
+            f"register_declaration_contract requires a DeclarationContract "
+            f"subclass instance; got {type(contract).__name__!r}. ADR-010 "
+            f"§Alternative 3 rejection of structural Protocol matching "
+            f"stands — contracts MUST inherit the nominal ABC."
+        )
+
+    # payload_schema validation (H5 Layer 1 — same as 2A).
     try:
         payload_schema = contract.payload_schema
     except AttributeError:
@@ -459,89 +903,80 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
     if not isinstance(payload_schema, type):
         raise TypeError(f"Contract {contract.name!r} payload_schema must be a type (TypedDict subclass)")
 
-    # Validate negative_example presence and callability.
-    # Access via type(contract) to detect the classmethod on the class, not an
-    # instance attribute. Try/except AttributeError instead of hasattr (banned).
-    try:
-        neg_example = type(contract).negative_example
-    except AttributeError:
-        raise TypeError(f"Contract {contract.name!r} missing required negative_example classmethod") from None
-    if not callable(neg_example):
-        raise TypeError(f"Contract {contract.name!r} negative_example must be callable")
+    # Example-classmethod callability — N2 Layer A / B harnesses require both.
+    for method_name in ("negative_example", "positive_example_does_not_apply"):
+        try:
+            method = getattr(type(contract), method_name)
+        except AttributeError:
+            raise TypeError(
+                f"Contract {contract.name!r} missing required {method_name!r} classmethod (ADR-010 §Decision 3 + N2 Layer A/B harness)."
+            ) from None
+        if not callable(method):
+            raise TypeError(f"Contract {contract.name!r}.{method_name} must be callable")
 
-    # Validate positive_example_does_not_apply presence and callability
-    # (issue elspeth-50509ed2bc / N2 Layer A — non-fire coverage).
-    try:
-        non_fire_example = type(contract).positive_example_does_not_apply
-    except AttributeError:
-        raise TypeError(
-            f"Contract {contract.name!r} missing required positive_example_does_not_apply classmethod "
-            f"(issue elspeth-50509ed2bc / ADR-010 N2 Layer A — non-fire coverage)"
-        ) from None
-    if not callable(non_fire_example):
-        raise TypeError(f"Contract {contract.name!r} positive_example_does_not_apply must be callable")
+    # Claimed-sites validation (H2 §Fix direction + N1 MC3).
+    sites = _collect_contract_sites(contract)
+    if not sites:
+        raise ValueError(
+            f"Contract {contract.name!r} claims zero dispatch sites. A "
+            f"contract must decorate at least one dispatch method with "
+            f'@implements_dispatch_site("<site>") — otherwise the '
+            f"dispatcher will never invoke it and the contract is "
+            f"non-functional."
+        )
 
+    # Uniqueness.
     for existing in _REGISTRY:
         if existing.name == contract.name:
             raise ValueError(f"duplicate contract name {contract.name!r}: already registered")
+
     _REGISTRY.append(contract)
+    for site_name in sites:
+        _REGISTRY_BY_SITE[DispatchSite(site_name)].append(contract)
 
 
 def registered_declaration_contracts() -> Sequence[DeclarationContract]:
+    """Return the full contract registry (across all sites)."""
     return tuple(_REGISTRY)
 
 
+def registered_declaration_contracts_for_site(
+    site: DispatchSite,
+) -> Sequence[DeclarationContract]:
+    """Return contracts that implement ``site`` (marked with the decorator).
+
+    Order preserved from registration order within the site. Used by the
+    dispatcher's site-filtered iteration.
+    """
+    return tuple(_REGISTRY_BY_SITE[site])
+
+
+def contract_sites(contract: DeclarationContract) -> frozenset[DispatchSiteName]:
+    """Return the frozenset of sites ``contract`` implements.
+
+    Exposed for the N1 manifest scanner's runtime fixture pass (MC3a/b).
+    """
+    return _collect_contract_sites(contract)
+
+
 def freeze_declaration_registry() -> None:
-    """Seal the registry. Subsequent ``register_declaration_contract`` calls
-    raise ``FrameworkBugError``. Called at end of orchestrator bootstrap."""
+    """Seal the registry. Called at end of orchestrator bootstrap."""
     global _FROZEN
     _FROZEN = True
 
 
-def resolve_payload_schema_key_sets(schema: type) -> tuple[frozenset[str], frozenset[str]]:
-    """Public accessor for payload-schema key classification.
-
-    Returns ``(required, optional)`` frozensets for a TypedDict class, as
-    resolved by ``_resolve_typeddict_key_sets`` (the H5 Layer 1 resolver
-    that handles NotRequired/Required wrappers under
-    ``from __future__ import annotations``).
-
-    Exposed so the invariant harness (issue elspeth-50509ed2bc / N2 Layer B
-    payload-representativeness) can assert every registered contract's
-    ``negative_example`` raises a violation whose payload covers the
-    schema's required-key set — a harness-level defence-in-depth for the
-    gate that H5 Layer 1 already enforces at ``__init__`` time.
-    """
-    return _resolve_typeddict_key_sets(schema)
-
-
 def declaration_registry_is_frozen() -> bool:
-    """Return whether the registry has been sealed by bootstrap.
-
-    Used by ``prepare_for_run()`` to skip the non-empty assertion and
-    re-freeze on subsequent calls when the registry is already sealed (e.g.
-    when ``Orchestrator.run()`` is invoked more than once in a single
-    process with the same registry state).
-    """
+    """Return whether the registry has been sealed by bootstrap."""
     return _FROZEN
 
 
-def _require_pytest_process(helper_name: str) -> None:
-    """Single pytest-process gate for every test-only registry helper.
+# =============================================================================
+# Pytest-gated test helpers (unchanged from 2A — preserved verbatim)
+# =============================================================================
 
-    Enforces the ADR-010 §Decision 3 invariant that test-only mutation
-    helpers must never execute outside a pytest worker. The gate is
-    ``"pytest" in sys.modules`` — this is true under both the main pytest
-    runner and xdist subprocesses (which import pytest by design), and
-    false under any production interpreter. **It is the ONLY unlock
-    path.** An ``ELSPETH_TESTING=1`` env-var arm previously also
-    unlocked these helpers; issue elspeth-cc511e7234 (C3) removed it
-    because any process capable of setting an environment variable
-    (CI misconfiguration, parent-process env leakage, operator error,
-    attacker with env-write capability) could silently clear all
-    runtime VAL contracts in production. Declarative invariants that
-    can be disabled by an environment variable are not invariants.
-    """
+
+def _require_pytest_process(helper_name: str) -> None:
+    """Single pytest-process gate for every test-only registry helper."""
     if "pytest" not in sys.modules:
         raise RuntimeError(
             f"{helper_name} called outside a pytest process. This helper "
@@ -554,55 +989,51 @@ def _require_pytest_process(helper_name: str) -> None:
 def _clear_registry_for_tests() -> None:
     """Test-only: wipe the registry AND reset the freeze flag.
 
-    Gated on ``pytest`` being imported. A production caller raises
-    ``RuntimeError`` — this helper must never run in a live orchestrator
-    process (reviewer B5/B9, issue elspeth-cc511e7234)."""
+    Clears BOTH the global list AND the per-site map so post-clear
+    registration builds the per-site map cleanly.
+    """
     global _FROZEN
     _require_pytest_process("_clear_registry_for_tests")
     _REGISTRY.clear()
+    for site_list in _REGISTRY_BY_SITE.values():
+        site_list.clear()
     _FROZEN = False
 
 
-def _snapshot_registry_for_tests() -> tuple[list[DeclarationContract], bool]:
-    """Test-only: return a snapshot of (registry_copy, frozen_flag).
+def _snapshot_registry_for_tests() -> tuple[
+    list[DeclarationContract],
+    dict[DispatchSite, list[DeclarationContract]],
+    bool,
+]:
+    """Test-only: snapshot of ``(global_list, per_site_map, frozen_flag)``.
 
-    Pair with ``_restore_registry_snapshot_for_tests`` to save/restore across
-    test boundaries. Gated on ``pytest`` being imported. Production callers
-    raise (issue elspeth-cc511e7234)."""
+    Extended for the per-site map. The returned ``per_site_map`` is a
+    shallow copy of each site's list (lists are mutable; the copy is
+    necessary for correct restore semantics).
+    """
     _require_pytest_process("_snapshot_registry_for_tests")
-    return list(_REGISTRY), _FROZEN
+    per_site_copy = {site: list(lst) for site, lst in _REGISTRY_BY_SITE.items()}
+    return list(_REGISTRY), per_site_copy, _FROZEN
 
 
 def _restore_registry_snapshot_for_tests(
-    snapshot: tuple[list[DeclarationContract], bool],
+    snapshot: tuple[
+        list[DeclarationContract],
+        dict[DispatchSite, list[DeclarationContract]],
+        bool,
+    ],
 ) -> None:
-    """Test-only: restore the registry and freeze flag from a snapshot.
+    """Test-only: restore from a ``_snapshot_registry_for_tests`` tuple.
 
-    Gated on ``pytest`` being imported. Production callers raise (issue
-    elspeth-cc511e7234).
-
-    **Not safe under concurrent reads.** The registry rewrite is a single
-    slice-assignment (issue elspeth-a8bb70a40b / M2), which collapses the
-    teardown window to one Python bytecode step — tighter than the prior
-    ``clear()``+``extend()`` pair that allowed a reader to observe an
-    empty registry mid-teardown. The single slice-assign is still not
-    truly atomic across the CPython GIL's boundaries for list mutation
-    relative to concurrent iterators (another thread holding an iterator
-    over ``_REGISTRY`` at restore time may raise ``RuntimeError`` or see
-    an inconsistent state). Tests MUST NOT spawn reader threads that
-    iterate ``_REGISTRY`` during restore; if such a pattern ever becomes
-    necessary, upgrade to a reference-rebind scheme (rebuild the list
-    bound to a new name and swap the module binding atomically) or a
-    ``threading.RLock`` guard around every read and write. Neither is
-    warranted today: bootstrap is single-threaded and test fixtures
-    snapshot/restore between tests, not during."""
+    Not safe under concurrent reads (see 2A M2 note preserved verbatim —
+    the slice-assignment tightens the teardown window to a single bytecode
+    step relative to the prior clear()+extend() pair, but concurrent
+    iterators over the registry may still observe an inconsistent state).
+    """
     global _FROZEN
     _require_pytest_process("_restore_registry_snapshot_for_tests")
-    registry_copy, frozen_flag = snapshot
-    # M2 (issue elspeth-a8bb70a40b): slice-assignment replaces the prior
-    # clear()+extend() pair. A single ``_REGISTRY[:] = registry_copy`` step
-    # has no mid-teardown window where the list is observably empty; the
-    # prior two-step form allowed a concurrent reader (if any existed) to
-    # see the registry as empty between the two operations.
+    registry_copy, per_site_copy, frozen_flag = snapshot
     _REGISTRY[:] = registry_copy
+    for site, lst in per_site_copy.items():
+        _REGISTRY_BY_SITE[site][:] = lst
     _FROZEN = frozen_flag
