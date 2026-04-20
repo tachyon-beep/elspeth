@@ -194,7 +194,7 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:ac691495c23d2754"
+    source_file_hash: str | None = "sha256:117603cf58c7e68d"
     config_model = WebScrapeConfig
 
     def __init__(self, options: dict[str, Any]) -> None:
@@ -202,6 +202,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Parse and validate config
         cfg = WebScrapeConfig.from_dict(options, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
 
         # Required fields
         self._url_field = cfg.url_field
@@ -238,10 +239,13 @@ class WebScrapeTransform(BaseTransform):
                 ipaddress.ip_network("::/0"),
             )
         else:
-            assert isinstance(allowed_hosts, list), (
-                f"Pydantic validator bug: allowed_hosts should be list[str], got {type(allowed_hosts).__name__}"
-            )
-            self._allowed_ranges = _parse_allowed_ranges(allowed_hosts)
+            match allowed_hosts:
+                case list() as cidr_ranges:
+                    self._allowed_ranges = _parse_allowed_ranges(cidr_ranges)
+                case _:
+                    raise FrameworkBugError(
+                        f"WebScrapeConfig.http.allowed_hosts validator admitted an invalid runtime value: {type(allowed_hosts).__name__!r}."
+                    )
 
         # Element stripping
         self._strip_elements = cfg.strip_elements
@@ -370,6 +374,7 @@ class WebScrapeTransform(BaseTransform):
             input_contract=row.contract,
             output_row=output,
         )
+        output_contract = self._align_output_contract(output_contract)
 
         return TransformResult.success(
             PipelineRow(output, output_contract),

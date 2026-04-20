@@ -94,7 +94,7 @@ class BatchReplicate(BaseTransform):
 
     name = "batch_replicate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:9b74ca77456e3324"
+    source_file_hash: str | None = "sha256:3e2392bc0cd96a33"
     config_model = BatchReplicateConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
@@ -117,6 +117,7 @@ class BatchReplicate(BaseTransform):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = BatchReplicateConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
 
         # Declare output fields for centralized collision detection.
         self.declared_output_fields = frozenset(["copy_index"] if cfg.include_copy_index else [])
@@ -245,6 +246,7 @@ class BatchReplicate(BaseTransform):
             fields=tuple(merged_fields.values()),
             locked=True,
         )
+        output_contract = self._align_output_contract(output_contract)
 
         success_reason: TransformSuccessReason = {
             "action": "processed",

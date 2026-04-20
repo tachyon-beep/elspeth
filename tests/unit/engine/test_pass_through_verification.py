@@ -4,7 +4,7 @@ Exercises the semantic of the cross-check directly, decoupled from the two
 call sites (single-token executor, batch-flush processor). The key axes:
 
 - Happy path: input_fields ⊆ runtime_observed → no-op.
-- Empty emitted_rows → no-op (ADR-009 §Clause 3 carve-out).
+- Empty emitted_rows obey `can_drop_rows` governance.
 - Divergence: contract-only, payload-only, and both.
 - Framework invariant: emitted row with no contract → FrameworkBugError.
 """
@@ -30,6 +30,7 @@ class TestHappyPath:
         verify_pass_through(
             input_fields=frozenset({"x", "y"}),
             emitted_rows=[row],
+            can_drop_rows=False,
             static_contract=frozenset({"x", "y"}),
             transform_name="t",
             transform_node_id="n",
@@ -39,11 +40,27 @@ class TestHappyPath:
         )
 
 
-class TestEmptyEmissionCarveOut:
-    def test_empty_emitted_rows_no_op(self) -> None:
+class TestEmptyEmissionGovernance:
+    def test_empty_emitted_rows_raise_when_can_drop_rows_false(self) -> None:
+        with pytest.raises(PassThroughContractViolation) as exc_info:
+            verify_pass_through(
+                input_fields=frozenset({"x"}),
+                emitted_rows=[],
+                can_drop_rows=False,
+                static_contract=frozenset(),
+                transform_name="t",
+                transform_node_id="n",
+                run_id="r",
+                row_id="row-1",
+                token_id="tok-1",
+            )
+        assert exc_info.value.divergence_set == frozenset({"x"})
+
+    def test_empty_emitted_rows_no_op_when_can_drop_rows_true(self) -> None:
         verify_pass_through(
             input_fields=frozenset({"x"}),
             emitted_rows=[],
+            can_drop_rows=True,
             static_contract=frozenset(),
             transform_name="t",
             transform_node_id="n",
@@ -61,6 +78,7 @@ class TestDivergence:
             verify_pass_through(
                 input_fields=frozenset({"x", "y"}),
                 emitted_rows=[row],
+                can_drop_rows=False,
                 static_contract=frozenset({"x", "y"}),
                 transform_name="t",
                 transform_node_id="n",
@@ -77,6 +95,7 @@ class TestDivergence:
             verify_pass_through(
                 input_fields=frozenset({"x", "y"}),
                 emitted_rows=[row],
+                can_drop_rows=False,
                 static_contract=frozenset({"x", "y"}),
                 transform_name="t",
                 transform_node_id="n",
@@ -92,6 +111,7 @@ class TestDivergence:
             verify_pass_through(
                 input_fields=frozenset({"x", "y"}),
                 emitted_rows=[row],
+                can_drop_rows=False,
                 static_contract=frozenset({"x", "y"}),
                 transform_name="t",
                 transform_node_id="n",
@@ -109,6 +129,7 @@ class TestDivergence:
             verify_pass_through(
                 input_fields=frozenset({"x"}),
                 emitted_rows=[ok, bad, ok],
+                can_drop_rows=False,
                 static_contract=frozenset({"x"}),
                 transform_name="t",
                 transform_node_id="n",
@@ -134,6 +155,7 @@ class TestFrameworkInvariants:
             verify_pass_through(
                 input_fields=frozenset({"x"}),
                 emitted_rows=[_ContractNoneRow()],  # type: ignore[list-item]
+                can_drop_rows=False,
                 static_contract=frozenset({"x"}),
                 transform_name="t",
                 transform_node_id="n",
@@ -150,6 +172,7 @@ class TestViolationPayload:
             verify_pass_through(
                 input_fields=frozenset({"x", "y"}),
                 emitted_rows=[row],
+                can_drop_rows=False,
                 static_contract=frozenset({"x", "y"}),
                 transform_name="t",
                 transform_node_id="n",

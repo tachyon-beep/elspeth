@@ -119,6 +119,8 @@ def accumulate_row_outcomes(
         elif result.outcome == RowOutcome.CONSUMED_IN_BATCH:
             # Aggregated - will be counted when batch flushes
             pass
+        elif result.outcome == RowOutcome.DROPPED_BY_FILTER:
+            counters.rows_succeeded += 1
         elif result.outcome == RowOutcome.COALESCED:
             sink_name = _require_sink_name(result)
             counters.rows_coalesced += 1

@@ -280,12 +280,21 @@ class TransformProtocol(Protocol):
     # PassThroughContractViolation (TIER_1).
     passes_through_input: bool
 
+    # ADR-012 empty-emission governance declaration.
+    # True means the transform may intentionally emit zero rows on success.
+    can_drop_rows: bool
+
     # Field collision enforcement (centralized in TransformExecutor).
     # Transforms that add fields to the output row declare WHAT fields they add
     # at init time. The executor checks these against input keys BEFORE running
     # the transform, preventing wasted API calls and making collision detection
     # mandatory (not opt-in per plugin). Empty frozenset = no fields added = no check.
     declared_output_fields: frozenset[str]
+
+    # ADR-013 pre-emission declaration surface.
+    # Normalized from TransformDataConfig.required_input_fields at construction
+    # time. Empty frozenset = no required-input declaration.
+    declared_input_fields: frozenset[str]
 
     # DAG contract: output schema for transforms that declare output fields.
     # Set by BaseTransform._build_output_schema_config() after declared_output_fields
@@ -440,6 +449,9 @@ class BatchTransformProtocol(Protocol):
     # at runtime by TransformExecutor's cross-check (per-row in batch mode).
     # Mis-annotation raises PassThroughContractViolation (TIER_1).
     passes_through_input: bool
+
+    # ADR-013 pre-emission declaration surface.
+    declared_input_fields: frozenset[str]
 
     # Error routing configuration
     # Injected by cli_helpers.py bridge from AggregationSettings/TransformSettings.

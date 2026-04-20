@@ -939,6 +939,14 @@ _FROZEN: bool = False
 
 EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]] = MappingProxyType(
     {
+        # DeclaredRequiredFieldsContract
+        #   Defined:    src/elspeth/engine/executors/declared_required_fields.py
+        #   Registered: src/elspeth/engine/executors/declared_required_fields.py (module-import side-effect)
+        #   ADR:        ADR-013
+        #   Sites:      pre_emission_check (TransformExecutor single-token path only)
+        # NOTE: batch-pre-execution site absent; batch-aware transforms with
+        # declared_input_fields fail closed instead of silently skipping.
+        "declared_required_fields": frozenset({"pre_emission_check"}),
         # DeclaredOutputFieldsContract
         #   Defined:    src/elspeth/engine/executors/declared_output_fields.py
         #   Registered: src/elspeth/engine/executors/declared_output_fields.py (module-import side-effect)
@@ -946,6 +954,20 @@ EXPECTED_CONTRACT_SITES: Mapping[str, frozenset[DispatchSiteName]] = MappingProx
         #   Sites:      post_emission_check (single-token TransformExecutor path)
         #               batch_flush_check   (RowProcessor._cross_check_flush_output)
         "declared_output_fields": frozenset({"post_emission_check", "batch_flush_check"}),
+        # CanDropRowsContract
+        #   Defined:    src/elspeth/engine/executors/can_drop_rows.py
+        #   Registered: src/elspeth/engine/executors/can_drop_rows.py (module-import side-effect)
+        #   ADR:        ADR-012
+        #   Sites:      post_emission_check (single-token TransformExecutor path)
+        #               batch_flush_check   (RowProcessor._cross_check_flush_output)
+        "can_drop_rows": frozenset({"post_emission_check", "batch_flush_check"}),
+        # SchemaConfigModeContract
+        #   Defined:    src/elspeth/engine/executors/schema_config_mode.py
+        #   Registered: src/elspeth/engine/executors/schema_config_mode.py (module-import side-effect)
+        #   ADR:        ADR-014
+        #   Sites:      post_emission_check (single-token TransformExecutor path)
+        #               batch_flush_check   (RowProcessor._cross_check_flush_output)
+        "schema_config_mode": frozenset({"post_emission_check", "batch_flush_check"}),
         # PassThroughDeclarationContract
         #   Defined:    src/elspeth/engine/executors/pass_through.py
         #   Registered: src/elspeth/engine/executors/pass_through.py (module-import side-effect)

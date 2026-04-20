@@ -1,7 +1,7 @@
 # ELSPETH Plugin Protocol Contract
 
-> **Status:** FINAL (v1.10)
-> **Last Updated:** 2026-02-13
+> **Status:** FINAL (v1.11)
+> **Last Updated:** 2026-04-20
 > **Authority:** This document is the master reference for all plugin interactions.
 
 ## Overview
@@ -412,6 +412,10 @@ determinism: Determinism
 plugin_version: str
 is_batch_aware: bool = False  # Set True for batch processing at aggregation nodes
 creates_tokens: bool = False  # Set True for deaggregation (1→N row expansion)
+passes_through_input: bool = False  # Set True only when every emitted row preserves input fields
+can_drop_rows: bool = False  # Set True only when pass-through transform may intentionally emit zero rows
+declared_input_fields: frozenset[str] = frozenset()  # Required input-field declaration (single-row only)
+declared_output_fields: frozenset[str] = frozenset()  # Guaranteed per-emitted-row output fields
 transforms_adds_fields: bool = False  # Set True if transform adds fields to the output schema
 ```
 
@@ -437,7 +441,16 @@ class JSONExplode(BaseTransform):
 - `creates_tokens=True` + `success()` → single output (allowed, like passthrough)
 - `creates_tokens=True` + `success_multi()` → engine creates new tokens per output row
 - `creates_tokens=False` + `success_multi()` → RuntimeError (except in aggregation passthrough mode)
-- `success_multi([])` is invalid (no silent drops) - use `success()` for a single-row empty case
+- `success_multi([])` is invalid (no silent drops) - use `success_empty()` for intentional zero emission
+- If `passes_through_input=True` and zero emission is intentional, the transform must also declare `can_drop_rows=True`
+
+#### Zero-Emission Filters
+
+Transforms that intentionally emit zero rows must use `TransformResult.success_empty(...)`.
+
+- `can_drop_rows=False` (default): zero-emission success is a runtime declaration violation for pass-through transforms
+- `can_drop_rows=True`: pass-through transform may intentionally terminate the row with terminal outcome `DROPPED_BY_FILTER`
+- `can_drop_rows` is governance, not batching: it does not permit `success_multi([])`
 
 **Engine semantics:**
 - When a deaggregation transform (`creates_tokens=True`) returns `success_multi()` for a single input token, the engine creates N child tokens via `expand_token()` and the parent token reaches terminal state `EXPANDED` (children continue).
@@ -487,6 +500,7 @@ class SummaryTransform(BaseTransform):
 - `is_batch_aware = False` (default): Transform implements `TransformProtocol`, receives single `PipelineRow`
 - `is_batch_aware = True`: Transform implements `BatchTransformProtocol`, receives `list[PipelineRow]` at aggregation nodes
 - The engine decides when to batch based on pipeline configuration
+- `declared_input_fields` is a single-row precondition surface today; batch-aware transforms must leave it empty until a batch pre-emission contract exists
 
 #### Optional Configuration
 
@@ -647,6 +661,11 @@ TransformResult.success_multi(
     success_reason={"action": "split", "count": len(rows)},
     context_after=None,  # Optional operational metadata
     contract=None,       # Optional schema contract for to_pipeline_rows()
+)
+
+TransformResult.success_empty(
+    success_reason={"action": "filtered"},
+    context_after=None,  # Optional operational metadata
 )
 
 TransformResult.error(
@@ -1459,6 +1478,7 @@ Plugins make calls; the engine throttles them.
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 1.11 | 2026-04-20 | Added `declared_input_fields`, `declared_output_fields`, and `can_drop_rows` transform declarations; documented `TransformResult.success_empty()` and `DROPPED_BY_FILTER` zero-emission semantics |
 | 1.10 | 2026-02-13 | RC-3 alignment — Fixed stale "(config OR plugin)" gate description to "(config-driven)" (gate plugins removed 2026-02-11). Corrected gate key property to reflect routing-only behavior (no row modification). |
 | 1.9 | 2026-02-08 | Second accuracy pass — Fixed `Determinism` comment (all 6 levels, not 3), `Enum` → `StrEnum`, `list[dict]` → `list[PipelineRow]` in aggregation section, `invalid_data` → `invalid_input` error category, `RoutingAction.route()` parameter clarification, `BatchTransformProtocol` attribute precision |
 | 1.8 | 2026-02-08 | Accuracy pass — Fixed `RoutingAction.fork()` → `fork_to_paths()`, documented `SanitizedDatabaseUrl`/`SanitizedWebhookUrl` for ArtifactDescriptor factories, documented `BatchTransformProtocol` as separate protocol, added `transforms_adds_fields` attribute, expanded expression language reference, fixed `ctx.run_started_at` reference, documented sink resume capability, noted `CoalesceProtocol` existence |

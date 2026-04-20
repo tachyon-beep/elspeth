@@ -123,7 +123,7 @@ class KeywordFilter(BaseTransform):
     name = "keyword_filter"
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:8ddd55ee5f31cbb1"
+    source_file_hash: str | None = "sha256:f9ecd339b153339c"
     config_model = KeywordFilterConfig
     is_batch_aware = False
     creates_tokens = False
@@ -132,6 +132,7 @@ class KeywordFilter(BaseTransform):
         super().__init__(config)
 
         cfg = KeywordFilterConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
         self._fields = cfg.fields
 
         # Patterns already validated (regex syntax + ReDoS safety) by config validator
@@ -208,7 +209,7 @@ class KeywordFilter(BaseTransform):
 
         # No matches - pass through unchanged
         return TransformResult.success(
-            row,
+            self._align_output_row_contract(row),
             success_reason={"action": "filtered"},
         )
 

@@ -51,8 +51,11 @@ if sys.flags.optimize != 0:
 # the ``_snapshot_registry_for_tests`` / ``_restore_registry_snapshot_for_tests``
 # helpers, which are pytest-gated (issue elspeth-cc511e7234 / C3).
 from elspeth.engine.executors import (
+    can_drop_rows,  # noqa: F401  (import side-effect registers CanDropRowsContract)
     declared_output_fields,  # noqa: F401  (import side-effect registers DeclaredOutputFieldsContract)
+    declared_required_fields,  # noqa: F401  (import side-effect registers DeclaredRequiredFieldsContract)
     pass_through,  # noqa: F401  (import side-effect registers PassThroughDeclarationContract)
+    schema_config_mode,  # noqa: F401  (import side-effect registers SchemaConfigModeContract)
 )
 
 # ---------------------------------------------------------------------------

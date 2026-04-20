@@ -430,11 +430,6 @@ allow_hits:
   reason: Tier 2→external trust boundary — isinstance(float) guards non-finite metadata values (NaN/Infinity) before they reach canonical_json() hashing; diverts affected rows instead of crashing the batch
   safety: Non-finite float rows diverted via _divert_row() with per-field detail; valid rows written normally; no silent data loss
   expires: null
-- key: plugins/transforms/web_scrape.py:R5:WebScrapeTransform:__init__:fp=86c52a744594f2b9
-  owner: feature
-  reason: Offensive isinstance assertion — detects Pydantic validator bug if allowed_hosts is not list[str] after validation
-  safety: Crashes immediately with descriptive error; better than silently iterating string characters as ip_network calls
-  expires: null
 - key: plugins/infrastructure/discovery.py:R6:discover_plugins_in_directory:fp=17b3c58c5cf147b9
   owner: bugfix
   reason: Optional extras (e.g. chromadb for [rag]) are external dependencies — ImportError is expected when not installed

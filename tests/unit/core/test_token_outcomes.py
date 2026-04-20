@@ -137,18 +137,7 @@ class TestTokenOutcomeDataclass:
 
         from elspeth.contracts import RowOutcome, TokenOutcome
 
-        # Test with different RowOutcome values
-        for row_outcome in [
-            RowOutcome.COMPLETED,
-            RowOutcome.ROUTED,
-            RowOutcome.FORKED,
-            RowOutcome.FAILED,
-            RowOutcome.QUARANTINED,
-            RowOutcome.CONSUMED_IN_BATCH,
-            RowOutcome.COALESCED,
-            RowOutcome.EXPANDED,
-            RowOutcome.BUFFERED,
-        ]:
+        for row_outcome in RowOutcome:
             outcome = TokenOutcome(
                 outcome_id="out_123",
                 run_id="run_456",
@@ -480,6 +469,18 @@ class TestOutcomeContractValidation:
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.CONSUMED_IN_BATCH,
             )
+
+    def test_dropped_by_filter_requires_no_extra_fields(self, factory, run_with_token) -> None:
+        """DROPPED_BY_FILTER is terminal and requires no auxiliary columns."""
+        from elspeth.contracts import RowOutcome
+
+        run, token = run_with_token
+
+        outcome_id = factory.data_flow.record_token_outcome(
+            ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
+            outcome=RowOutcome.DROPPED_BY_FILTER,
+        )
+        assert outcome_id is not None
 
 
 class TestGetTokenOutcome:

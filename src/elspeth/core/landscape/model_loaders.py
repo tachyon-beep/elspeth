@@ -578,6 +578,8 @@ class TokenOutcomeLoader:
                 f"TokenOutcome {oid} has outcome={outcome.value!r} but batch_id is NULL — "
                 f"audit integrity violation (CONSUMED_IN_BATCH/BUFFERED require batch_id)"
             )
+        if outcome == RowOutcome.DROPPED_BY_FILTER:
+            pass
 
         return TokenOutcome(
             outcome_id=row.outcome_id,

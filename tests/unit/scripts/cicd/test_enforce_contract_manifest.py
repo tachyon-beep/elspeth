@@ -52,8 +52,12 @@ def _write_manifest(root: Path, entries: dict[str, list[str]]) -> Path:
     else:
         dict_entries = []
         for name, sites in entries.items():
-            sites_repr = ", ".join(repr(s) for s in sites)
-            dict_entries.append(f"{name!r}: frozenset({{{sites_repr}}})")
+            if sites:
+                sites_repr = ", ".join(repr(s) for s in sites)
+                rendered_sites = f"frozenset({{{sites_repr}}})"
+            else:
+                rendered_sites = "frozenset([])"
+            dict_entries.append(f"{name!r}: {rendered_sites}")
         body = "{" + ", ".join(dict_entries) + "}"
 
     manifest_path.write_text(
@@ -354,6 +358,57 @@ class TestMC3aMarkerWithoutManifest:
         assert "declared_output_fields" in mc3a[0].contract_name
         assert "batch_flush_check" in mc3a[0].contract_name
 
+    def test_declared_required_fields_marker_without_manifest_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, {"declared_required_fields": []})
+        _write_registration(
+            tmp_path,
+            "declared_required_fields.py",
+            "DeclaredRequiredFieldsContract",
+            "declared_required_fields",
+            marker_sites=["pre_emission_check"],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3a = [f for f in findings if f.rule_id == RULE_ID_MARKER_WITHOUT_MANIFEST]
+        assert len(mc3a) == 1
+        assert "declared_required_fields" in mc3a[0].contract_name
+        assert "pre_emission_check" in mc3a[0].contract_name
+
+    def test_schema_config_mode_marker_without_manifest_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, {"schema_config_mode": ["post_emission_check"]})
+        _write_registration(
+            tmp_path,
+            "schema_config_mode.py",
+            "SchemaConfigModeContract",
+            "schema_config_mode",
+            marker_sites=["post_emission_check", "batch_flush_check"],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3a = [f for f in findings if f.rule_id == RULE_ID_MARKER_WITHOUT_MANIFEST]
+        assert len(mc3a) == 1
+        assert "schema_config_mode" in mc3a[0].contract_name
+        assert "batch_flush_check" in mc3a[0].contract_name
+
+    def test_can_drop_rows_marker_without_manifest_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(tmp_path, {"can_drop_rows": ["post_emission_check"]})
+        _write_registration(
+            tmp_path,
+            "can_drop_rows.py",
+            "CanDropRowsContract",
+            "can_drop_rows",
+            marker_sites=["post_emission_check", "batch_flush_check"],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3a = [f for f in findings if f.rule_id == RULE_ID_MARKER_WITHOUT_MANIFEST]
+        assert len(mc3a) == 1
+        assert "can_drop_rows" in mc3a[0].contract_name
+        assert "batch_flush_check" in mc3a[0].contract_name
+
 
 class TestMC3bManifestWithoutMarker:
     """MC3b: manifest names a site with no @implements_dispatch_site marker
@@ -396,6 +451,66 @@ class TestMC3bManifestWithoutMarker:
         mc3b = [f for f in findings if f.rule_id == RULE_ID_MANIFEST_WITHOUT_MARKER]
         assert len(mc3b) == 1
         assert "declared_output_fields" in mc3b[0].contract_name
+        assert "batch_flush_check" in mc3b[0].contract_name
+
+    def test_schema_config_mode_missing_marker_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"schema_config_mode": ["post_emission_check", "batch_flush_check"]},
+        )
+        _write_registration(
+            tmp_path,
+            "schema_config_mode.py",
+            "SchemaConfigModeContract",
+            "schema_config_mode",
+            marker_sites=["post_emission_check"],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3b = [f for f in findings if f.rule_id == RULE_ID_MANIFEST_WITHOUT_MARKER]
+        assert len(mc3b) == 1
+        assert "schema_config_mode" in mc3b[0].contract_name
+        assert "batch_flush_check" in mc3b[0].contract_name
+
+    def test_declared_required_fields_missing_marker_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"declared_required_fields": ["pre_emission_check"]},
+        )
+        _write_registration(
+            tmp_path,
+            "declared_required_fields.py",
+            "DeclaredRequiredFieldsContract",
+            "declared_required_fields",
+            marker_sites=[],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3b = [f for f in findings if f.rule_id == RULE_ID_MANIFEST_WITHOUT_MARKER]
+        assert len(mc3b) == 1
+        assert "declared_required_fields" in mc3b[0].contract_name
+        assert "pre_emission_check" in mc3b[0].contract_name
+
+    def test_can_drop_rows_missing_marker_detected(self, tmp_path: Path) -> None:
+        manifest = _write_manifest(
+            tmp_path,
+            {"can_drop_rows": ["post_emission_check", "batch_flush_check"]},
+        )
+        _write_registration(
+            tmp_path,
+            "can_drop_rows.py",
+            "CanDropRowsContract",
+            "can_drop_rows",
+            marker_sites=["post_emission_check"],
+        )
+        name_to_sites, name_to_line, assign_line = extract_manifest(manifest)
+        registrations = scan_source_tree(tmp_path, tmp_path, manifest)
+        findings = compute_findings(name_to_sites, name_to_line, registrations, "declaration_contracts.py", assign_line)
+        mc3b = [f for f in findings if f.rule_id == RULE_ID_MANIFEST_WITHOUT_MARKER]
+        assert len(mc3b) == 1
+        assert "can_drop_rows" in mc3b[0].contract_name
         assert "batch_flush_check" in mc3b[0].contract_name
 
 

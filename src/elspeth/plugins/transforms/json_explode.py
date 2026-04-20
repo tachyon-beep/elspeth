@@ -112,7 +112,7 @@ class JSONExplode(BaseTransform):
 
     name = "json_explode"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:02918e61771e0c8a"
+    source_file_hash: str | None = "sha256:39fd3d4895ab2112"
     config_model = JSONExplodeConfig
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 
@@ -302,6 +302,7 @@ class JSONExplode(BaseTransform):
                 fields=patched_fields,
                 locked=True,
             )
+        output_contract = self._align_output_contract(output_contract)
 
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],

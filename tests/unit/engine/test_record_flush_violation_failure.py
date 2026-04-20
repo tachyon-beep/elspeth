@@ -110,7 +110,9 @@ def test_recorder_failure_mid_loop_raises_audit_integrity_error() -> None:
     transform.is_batch_aware = True
     transform.creates_tokens = False
     transform.declared_output_fields = frozenset()
+    transform.declared_input_fields = frozenset()
     transform.passes_through_input = True
+    transform.can_drop_rows = False
     transform._output_schema_config = None
 
     contract = make_contract(fields={"x": int}, mode="OBSERVED")

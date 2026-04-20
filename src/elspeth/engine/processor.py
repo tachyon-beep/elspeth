@@ -40,6 +40,7 @@ from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     BatchFlushInputs,
     BatchFlushOutputs,
+    DeclarationContractViolation,
 )
 from elspeth.contracts.enums import NodeStateStatus, OutputMode, RoutingKind, RoutingMode, TriggerType
 from elspeth.contracts.errors import (
@@ -690,7 +691,8 @@ class RowProcessor:
 
         Raises:
             FrameworkBugError: A buffered token has no input contract.
-            PassThroughContractViolation: Any emitted row drops a field.
+            DeclarationContractViolation | PassThroughContractViolation:
+                Any batch-flush declaration contract fires.
                 ``_record_flush_violation`` writes per-token FAILED audit
                 entries before re-raising.
         """
@@ -754,6 +756,26 @@ class RowProcessor:
                             ),
                             outputs=BatchFlushOutputs(emitted_rows=(emitted_row,)),
                         )
+                elif len(emitted) == 0:
+                    # Zero-emission success has no 1:1 pairing witness, but the
+                    # dispatcher still must evaluate governance contracts and the
+                    # pass-through empty-emission path. The honest batch-level
+                    # surface is the shared intersection across buffered tokens.
+                    input_fields = frozenset.intersection(*per_input_field_sets)
+                    identity_token = fctx.triggering_token or fctx.buffered_tokens[0]
+                    run_batch_flush_checks(
+                        inputs=BatchFlushInputs(
+                            plugin=fctx.transform,
+                            node_id=transform_node_id_str,
+                            run_id=self._run_id,
+                            row_id=identity_token.row_id,
+                            token_id=identity_token.token_id,
+                            buffered_tokens=tuple(fctx.buffered_tokens),
+                            static_contract=static_contract,
+                            effective_input_fields=input_fields,
+                        ),
+                        outputs=BatchFlushOutputs(emitted_rows=()),
+                    )
                 else:
                     # Count mismatch is ``_route_passthrough_results``'s
                     # concern; pass through unchecked so routing can surface
@@ -785,41 +807,28 @@ class RowProcessor:
                     outputs=BatchFlushOutputs(emitted_rows=tuple(emitted)),
                 )
         except PassThroughContractViolation as violation:
-            # Single-violation fast path — unchanged triage SQL
-            # (exception_type='PassThroughContractViolation'). Per-token
-            # FAILED audit entries via _record_flush_violation.
+            self._record_flush_violation(fctx, violation)
+            raise
+        except DeclarationContractViolation as violation:
             self._record_flush_violation(fctx, violation)
             raise
         except AggregateDeclarationContractViolation as aggregate:
-            # Audit-complete multi-fire case (N3 primary mitigation —
-            # ADR-010 §Semantics amendment). The dispatcher wrapped 2+
-            # child violations into the aggregate. For each
-            # PassThroughContractViolation child, replay the pre-existing
-            # per-token FAILED recording so triage SQL filtering on
-            # PassThroughContractViolation (inside the aggregate's
-            # violations list) still lights up; the aggregate itself
-            # propagates to NodeStateGuard.__exit__ which writes its
-            # to_audit_dict() (is_aggregate=True + violations list) into
-            # ExecutionError.context.
-            for child in aggregate.violations:
-                if isinstance(child, PassThroughContractViolation):
-                    self._record_flush_violation(fctx, child)
+            # Audit-complete multi-fire case: every buffered token gets a
+            # FAILED outcome carrying the aggregate evidence bundle.
+            self._record_flush_violation(fctx, aggregate)
             raise
 
     def _record_flush_violation(
         self,
         fctx: _FlushContext,
-        violation: PassThroughContractViolation,
+        violation: DeclarationContractViolation | PassThroughContractViolation | AggregateDeclarationContractViolation,
     ) -> None:
-        """Record FAILED audit entries for every buffered token (ADR-009 §Clause 2).
+        """Record FAILED audit entries for every buffered token on flush failure.
 
         The violation is semantically batch-level but the audit trail must
-        capture per-token evidence: triage queries of the form ``WHERE
-        exception_type = 'PassThroughContractViolation'`` expect every
-        affected token to return a row. ``per_token_audit_payload`` is rebuilt
-        inside the loop so ``$.context.token_id`` reflects the row's own
-        token, not the triggering token's (an auditor must be able to ask
-        "which tokens were affected?" and get accurate answers).
+        capture per-token evidence for every buffered token. ``per_token_audit_payload``
+        is rebuilt inside the loop so ``$.context.token_id`` reflects the
+        row's own token, not the triggering token's.
 
         If ``record_token_outcome`` raises mid-loop, the audit trail is
         incomplete. Rather than silently swallow the failure and re-raise the
@@ -828,7 +837,10 @@ class RowProcessor:
         is preserved via ``__context__`` (Python automatically sets it
         because this is inside ``except``).
         """
-        violation_summary = f"PassThroughContractViolation:{fctx.transform.name}:{sorted(violation.divergence_set)}"
+        if isinstance(violation, PassThroughContractViolation):
+            violation_summary = f"PassThroughContractViolation:{fctx.transform.name}:{sorted(violation.divergence_set)}"
+        else:
+            violation_summary = f"{type(violation).__name__}:{fctx.transform.name}"
         error_hash = hashlib.sha256(violation_summary.encode()).hexdigest()[:16]
         base_audit = violation.to_audit_dict()
 
@@ -848,7 +860,7 @@ class RowProcessor:
                 )
             except Exception as record_failure:
                 raise AuditIntegrityError(
-                    f"Failed to record PassThroughContractViolation FAILED outcome "
+                    f"Failed to record {type(violation).__name__} FAILED outcome "
                     f"for token {token.token_id!r} in batch flush "
                     f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
                     f"Audit trail is INCOMPLETE — FAILED records may exist for some "
@@ -857,6 +869,40 @@ class RowProcessor:
                     f"Original violation: {violation!s}"
                 ) from record_failure
             self._emit_token_completed(token, RowOutcome.FAILED)
+
+    def _route_empty_emission_results(
+        self,
+        fctx: _FlushContext,
+    ) -> tuple[tuple[RowResult, ...], list[WorkItem]]:
+        """Record terminal outcomes for a successful batch flush with zero rows.
+
+        If these buffered tokens were fork branches awaiting a downstream
+        coalesce, each dropped branch must still notify the coalesce executor
+        so joins do not strand.
+        """
+        results: list[RowResult] = []
+        child_items: list[WorkItem] = []
+        for token in fctx.buffered_tokens:
+            self._data_flow.record_token_outcome(
+                ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
+                outcome=RowOutcome.DROPPED_BY_FILTER,
+            )
+            self._emit_token_completed(token, RowOutcome.DROPPED_BY_FILTER)
+            results.append(
+                RowResult(
+                    token=token,
+                    final_data=token.row_data,
+                    outcome=RowOutcome.DROPPED_BY_FILTER,
+                )
+            )
+            results.extend(
+                self._notify_coalesce_of_lost_branch(
+                    token,
+                    "dropped_by_filter",
+                    child_items,
+                )
+            )
+        return tuple(results), child_items
 
     def _route_passthrough_results(
         self,
@@ -877,6 +923,8 @@ class RowProcessor:
             )
         if result.rows is None:
             raise RuntimeError("Multi-row result has rows=None")
+        if len(result.rows) == 0:
+            return self._route_empty_emission_results(fctx)
         if len(result.rows) != len(fctx.buffered_tokens):
             raise OrchestrationInvariantError(
                 f"Passthrough mode requires same number of output rows "
@@ -955,6 +1003,8 @@ class RowProcessor:
                     f"This is a plugin bug."
                 )
             output_rows = (result.row,)
+        if len(output_rows) == 0:
+            return self._route_empty_emission_results(fctx)
 
         # Enforce expected_output_count if configured
         if fctx.settings.expected_output_count is not None:
@@ -1671,9 +1721,10 @@ class RowProcessor:
         if self._coalesce_executor is None or current_token.branch_name is None:
             return []
 
-        coalesce_name = self._branch_to_coalesce.get(BranchName(current_token.branch_name))
-        if coalesce_name is None:
+        branch_name = BranchName(current_token.branch_name)
+        if branch_name not in self._branch_to_coalesce:
             return []
+        coalesce_name = self._branch_to_coalesce[branch_name]
 
         coalesce_node_id = self._coalesce_node_ids[coalesce_name]
         outcome = self._coalesce_executor.notify_branch_lost(
@@ -1862,6 +1913,28 @@ class RowProcessor:
         # NOTE: This is ONLY for non-aggregation transforms. Aggregation
         # transforms route through _process_batch_aggregation_node() above.
         if transform_result.is_multi_row:
+            if transform_result.rows is None:
+                raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
+            if len(transform_result.rows) == 0:
+                self._data_flow.record_token_outcome(
+                    ref=TokenRef(token_id=current_token.token_id, run_id=self._run_id),
+                    outcome=RowOutcome.DROPPED_BY_FILTER,
+                )
+                self._emit_token_completed(current_token, RowOutcome.DROPPED_BY_FILTER)
+                sibling_results = self._notify_coalesce_of_lost_branch(
+                    current_token,
+                    "dropped_by_filter",
+                    child_items,
+                )
+                current_result = RowResult(
+                    token=current_token,
+                    final_data=current_token.row_data,
+                    outcome=RowOutcome.DROPPED_BY_FILTER,
+                )
+                if sibling_results:
+                    return _TransformTerminal(result=(current_result, *sibling_results))
+                return _TransformTerminal(result=current_result)
+
             # Validate transform is allowed to create tokens
             if not transform.creates_tokens:
                 raise RuntimeError(
@@ -1873,10 +1946,6 @@ class RowProcessor:
 
             # Deaggregation: create child tokens for each output row
             # NOTE: Parent EXPANDED outcome is recorded atomically in expand_token()
-
-            # is_multi_row check above guarantees rows is not None
-            if transform_result.rows is None:
-                raise OrchestrationInvariantError("is_multi_row guarantees rows is not None")
             # Contract consistency is enforced by TransformResult.success_multi()
             output_contract = transform_result.rows[0].contract
             child_tokens, _expand_group_id = self._token_manager.expand_token(

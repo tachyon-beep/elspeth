@@ -18,6 +18,7 @@ class TestRowOutcome:
             RowOutcome.QUARANTINED,
             RowOutcome.DIVERTED,
             RowOutcome.CONSUMED_IN_BATCH,
+            RowOutcome.DROPPED_BY_FILTER,
             RowOutcome.COALESCED,
             RowOutcome.EXPANDED,
         }

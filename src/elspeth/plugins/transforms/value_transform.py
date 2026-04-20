@@ -111,12 +111,13 @@ class ValueTransform(BaseTransform):
 
     name = "value_transform"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:2484d35defb0049b"
+    source_file_hash: str | None = "sha256:7a4da8ecfbb526e4"
     config_model = ValueTransformConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = ValueTransformConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
         self._operations = cfg.operations
         self._schema_config = cfg.schema_config
 
@@ -189,8 +190,9 @@ class ValueTransform(BaseTransform):
             # Write result to working copy
             working_data[target] = result
 
+        output_contract = self._align_output_contract(row.contract)
         return TransformResult.success(
-            PipelineRow(working_data, row.contract),
+            PipelineRow(working_data, output_contract),
             success_reason={
                 "action": "transformed",
                 "fields_modified": fields_modified,

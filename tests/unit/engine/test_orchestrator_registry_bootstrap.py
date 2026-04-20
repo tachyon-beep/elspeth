@@ -268,8 +268,16 @@ def test_bootstrap_passes_when_registry_exactly_matches_manifest(_isolate_both_r
     # Must not raise.
     prepare_for_run()
     assert declaration_registry_is_frozen()
-    assert len(EXPECTED_CONTRACT_SITES) == 2
-    assert frozenset(EXPECTED_CONTRACT_SITES.keys()) == frozenset({"passes_through_input", "declared_output_fields"})
+    assert len(EXPECTED_CONTRACT_SITES) == 5
+    assert frozenset(EXPECTED_CONTRACT_SITES.keys()) == frozenset(
+        {
+            "passes_through_input",
+            "declared_output_fields",
+            "declared_required_fields",
+            "schema_config_mode",
+            "can_drop_rows",
+        }
+    )
 
 
 def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> None:

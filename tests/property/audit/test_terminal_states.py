@@ -18,6 +18,7 @@ Terminal states (from RowOutcome):
 - FAILED: Processing failed, not recoverable
 - QUARANTINED: Failed validation, stored for investigation
 - CONSUMED_IN_BATCH: Absorbed into aggregate
+- DROPPED_BY_FILTER: Transform intentionally emitted zero rows
 - COALESCED: Merged in join from parallel paths
 - EXPANDED: Deaggregated into child tokens
 
@@ -525,7 +526,7 @@ class TestRowOutcomeEnumProperties:
         assert non_terminal == [RowOutcome.BUFFERED], f"Expected only BUFFERED to be non-terminal, but found: {non_terminal}"
 
     def test_terminal_outcomes_count(self) -> None:
-        """Property: There are exactly 9 terminal outcomes."""
+        """Property: There are exactly 10 terminal outcomes."""
         terminal = [o for o in RowOutcome if o.is_terminal]
         expected = [
             RowOutcome.COMPLETED,
@@ -535,6 +536,7 @@ class TestRowOutcomeEnumProperties:
             RowOutcome.QUARANTINED,
             RowOutcome.DIVERTED,
             RowOutcome.CONSUMED_IN_BATCH,
+            RowOutcome.DROPPED_BY_FILTER,
             RowOutcome.COALESCED,
             RowOutcome.EXPANDED,
         ]

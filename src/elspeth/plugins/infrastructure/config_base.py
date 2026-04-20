@@ -484,3 +484,16 @@ class TransformDataConfig(DataPluginConfig):
             raise ValueError(f"Duplicate field names in required_input_fields: {', '.join(duplicates)}")
 
         return result
+
+    @property
+    def declared_input_fields(self) -> frozenset[str]:
+        """Normalized runtime view of ``required_input_fields``.
+
+        ``required_input_fields`` stays list-shaped in config models so JSON
+        schema and YAML remain natural. Runtime declaration contracts need an
+        immutable, order-insensitive set surface, so transforms normalize the
+        value through this property at construction time.
+        """
+        if self.required_input_fields is None:
+            return frozenset()
+        return frozenset(self.required_input_fields)

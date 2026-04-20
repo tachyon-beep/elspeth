@@ -187,6 +187,9 @@ def _make_transform(
     on_error: str | None = None,
     declared_output_fields: frozenset[str] | None = None,
     passes_through_input: bool = False,
+    can_drop_rows: bool = False,
+    declared_input_fields: frozenset[str] | None = None,
+    is_batch_aware: bool = False,
 ) -> MagicMock:
     """Create a mock transform (non-batch)."""
     # Use spec to avoid MagicMock auto-creating 'accept' attribute
@@ -196,10 +199,13 @@ def _make_transform(
             "node_id",
             "on_error",
             "declared_output_fields",
+            "declared_input_fields",
             "input_schema",
             "_on_start_called",
             "process",
             "passes_through_input",
+            "can_drop_rows",
+            "is_batch_aware",
             "_output_schema_config",
         ]
     )
@@ -207,9 +213,12 @@ def _make_transform(
     t.node_id = node_id
     t.on_error = on_error
     t.declared_output_fields = declared_output_fields or frozenset()
+    t.declared_input_fields = declared_input_fields or frozenset()
     t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
     t._on_start_called = True
     t.passes_through_input = passes_through_input
+    t.can_drop_rows = can_drop_rows
+    t.is_batch_aware = is_batch_aware
     t._output_schema_config = None
     return t
 

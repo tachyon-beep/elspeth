@@ -241,6 +241,8 @@ class DataFlowRepository:
                     "CONSUMED_IN_BATCH outcome requires batch_id but got None. "
                     "Contract violation - see docs/contracts/token-outcomes/00-token-outcome-contract.md"
                 )
+        elif outcome == RowOutcome.DROPPED_BY_FILTER:
+            pass
         elif outcome == RowOutcome.COALESCED:
             if join_group_id is None:
                 raise ValueError(

@@ -60,6 +60,7 @@ def verify_pass_through(
     *,
     input_fields: frozenset[str],
     emitted_rows: Sequence[PipelineRow],
+    can_drop_rows: bool,
     static_contract: frozenset[str],
     transform_name: str,
     transform_node_id: str,
@@ -81,7 +82,24 @@ def verify_pass_through(
     other contract's raise on the same row.
     """
     if not emitted_rows:
-        return
+        if can_drop_rows:
+            return
+        _VIOLATIONS_COUNTER.add(1, {"transform": transform_name})
+        raise PassThroughContractViolation(
+            transform=transform_name,
+            transform_node_id=transform_node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            static_contract=static_contract,
+            runtime_observed=frozenset(),
+            divergence_set=input_fields,
+            message=(
+                f"Transform {transform_name!r} (node {transform_node_id!r}) "
+                f"declared passes_through_input=True but emitted zero rows for "
+                f"row {row_id!r}, dropping fields {sorted(input_fields)!r}."
+            ),
+        )
 
     for emitted in emitted_rows:
         if emitted.contract is None:
@@ -162,6 +180,7 @@ class PassThroughDeclarationContract(DeclarationContract):
         verify_pass_through(
             input_fields=inputs.effective_input_fields,
             emitted_rows=outputs.emitted_rows,
+            can_drop_rows=inputs.plugin.can_drop_rows,
             static_contract=inputs.static_contract,
             transform_name=inputs.plugin.name,
             transform_node_id=transform_node_id,
@@ -188,6 +207,7 @@ class PassThroughDeclarationContract(DeclarationContract):
         verify_pass_through(
             input_fields=inputs.effective_input_fields,
             emitted_rows=outputs.emitted_rows,
+            can_drop_rows=inputs.plugin.can_drop_rows,
             static_contract=inputs.static_contract,
             transform_name=inputs.plugin.name,
             transform_node_id=transform_node_id,
@@ -237,6 +257,7 @@ class PassThroughDeclarationContract(DeclarationContract):
             name = "NegativeExample"
             node_id = "neg-1"
             passes_through_input = True
+            can_drop_rows = False
             _output_schema_config = None
 
         inputs = PostEmissionInputs(
@@ -288,6 +309,7 @@ class PassThroughDeclarationContract(DeclarationContract):
             name = "NonFireExample"
             node_id = "non-fire-1"
             passes_through_input = False  # the discriminator applies_to reads
+            can_drop_rows = False
             _output_schema_config = None
 
         inputs = PostEmissionInputs(
@@ -335,6 +357,7 @@ class PassThroughDeclarationContract(DeclarationContract):
             name = "NegativeBatchFlushExample"
             node_id = "neg-batch-1"
             passes_through_input = True
+            can_drop_rows = False
             declared_output_fields: frozenset[str] = frozenset()
             _output_schema_config = None
 
@@ -384,6 +407,7 @@ class PassThroughDeclarationContract(DeclarationContract):
             name = "NonFireBatchFlushExample"
             node_id = "non-fire-batch-1"
             passes_through_input = False
+            can_drop_rows = False
             declared_output_fields: frozenset[str] = frozenset()
             _output_schema_config = None
 

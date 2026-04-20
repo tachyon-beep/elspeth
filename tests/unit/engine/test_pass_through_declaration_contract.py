@@ -52,6 +52,9 @@ class _FakeTransform:
     name = "Fake"
     node_id = "n-1"
     passes_through_input = True
+    can_drop_rows = False
+    declared_input_fields = frozenset()
+    is_batch_aware = False
     _output_schema_config = None
 
 
@@ -94,11 +97,30 @@ def test_post_emission_check_raises_on_divergence() -> None:
     assert exc_info.value.divergence_set == frozenset({"b"})
 
 
-def test_post_emission_check_empty_emission_is_noop() -> None:
+def test_post_emission_check_empty_emission_raises_when_can_drop_rows_false() -> None:
     c = PassThroughDeclarationContract()
     input_row = _row(("a",))
     inputs = PostEmissionInputs(
         plugin=_FakeTransform(),
+        node_id="n-1",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        input_row=input_row,
+        static_contract=frozenset(),
+        effective_input_fields=derive_effective_input_fields(input_row),
+    )
+    with pytest.raises(PassThroughContractViolation):
+        c.post_emission_check(inputs, PostEmissionOutputs(emitted_rows=()))
+
+
+def test_post_emission_check_empty_emission_is_noop_when_can_drop_rows_true() -> None:
+    c = PassThroughDeclarationContract()
+    input_row = _row(("a",))
+    plugin = _FakeTransform()
+    plugin.can_drop_rows = True
+    inputs = PostEmissionInputs(
+        plugin=plugin,
         node_id="n-1",
         run_id="r",
         row_id="rw",

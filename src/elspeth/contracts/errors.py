@@ -797,6 +797,29 @@ class OrchestrationInvariantError(Exception):
     pass
 
 
+class DeclaredRequiredInputFieldsPayload(TypedDict):
+    """Audit payload for ADR-013 declared-input-field mismatches."""
+
+    declared: Required[list[str]]
+    effective_input_fields: Required[list[str]]
+    missing: Required[list[str]]
+
+
+@tier_1_error(
+    reason="ADR-013: undeclared transform input dependency corrupts attribution",
+    caller_module=__name__,
+)
+class DeclaredRequiredInputFieldsViolation(DeclarationContractViolation):
+    """Raised when a transform runs on input missing its declared fields.
+
+    ``declared_input_fields`` is trusted as the transform's precondition
+    surface. If runtime input does not satisfy that declaration, any later
+    plugin crash or emitted output would be attributed on false premises.
+    """
+
+    payload_schema: ClassVar[type] = DeclaredRequiredInputFieldsPayload
+
+
 class DeclaredOutputFieldsPayload(TypedDict):
     """Audit payload for ADR-011 declared-output-fields mismatches."""
 
@@ -820,6 +843,52 @@ class DeclaredOutputFieldsViolation(DeclarationContractViolation):
     """
 
     payload_schema: ClassVar[type] = DeclaredOutputFieldsPayload
+
+
+class SchemaConfigModePayload(TypedDict):
+    """Audit payload for ADR-014 schema-mode/runtime-semantic mismatches."""
+
+    declared_mode: Required[str]
+    observed_mode: Required[str]
+    declared_locked: Required[bool]
+    observed_locked: Required[bool]
+    undeclared_extra_fields: NotRequired[list[str]]
+
+
+@tier_1_error(
+    reason="ADR-014: emitted runtime schema semantics diverge from declared config mode",
+    caller_module=__name__,
+)
+class SchemaConfigModeViolation(DeclarationContractViolation):
+    """Raised when emitted row contracts disagree with declared schema mode.
+
+    ``_output_schema_config`` is the transform's runtime declaration surface for
+    schema semantics. If emitted contracts advertise a different mode/lock
+    posture, or a FIXED schema leaks undeclared output fields, auditors query a
+    fabricated contract view rather than the transform's declared one.
+    """
+
+    payload_schema: ClassVar[type] = SchemaConfigModePayload
+
+
+class UnexpectedEmptyEmissionPayload(TypedDict):
+    """Audit payload for ADR-012 unexpected empty-emission mismatches."""
+
+    passes_through_input: Required[bool]
+    can_drop_rows: Required[bool]
+    emitted_count: Required[int]
+
+
+# TIER-2: Plugin declaration mismatch — row-level failure is fully auditable and does not imply framework or audit-record corruption.
+class UnexpectedEmptyEmissionViolation(DeclarationContractViolation):
+    """Raised when a pass-through transform emits zero rows without opting in.
+
+    Tier 2 by design. The row-level terminal state remains auditable and the
+    failure reflects a plugin declaration bug, not a corruption of Tier-1
+    framework state.
+    """
+
+    payload_schema: ClassVar[type] = UnexpectedEmptyEmissionPayload
 
 
 # TIER-2: Plugin retry signal — transient operational failure eligible for RetryManager retry, not a system corruption or framework bug.

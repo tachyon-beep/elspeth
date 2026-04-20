@@ -1355,6 +1355,7 @@ class TestTokenOutcomeLoader:
         "quarantined": {"error_hash": "e" * 64},
         "diverted": {"sink_name": "failsink", "error_hash": "e" * 16},
         "consumed_in_batch": {"batch_id": "batch-1"},
+        "dropped_by_filter": {},
         "coalesced": {"join_group_id": "jg-1"},
         "expanded": {"expand_group_id": "eg-1"},
         "buffered": {"batch_id": "batch-1"},

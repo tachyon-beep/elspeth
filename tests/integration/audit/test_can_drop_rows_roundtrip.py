@@ -1,11 +1,13 @@
-"""DeclaredOutputFieldsContract -> dispatcher -> Landscape -> explain() round-trip."""
+"""CanDropRowsContract -> dispatcher -> Landscape -> queryable terminal state."""
 
 from __future__ import annotations
 
 import json
 from typing import Any
 
-from elspeth.contracts import NodeStateFailed, NodeType
+from sqlalchemy import text
+
+from elspeth.contracts import NodeStateFailed, NodeType, PluginSchema, RowOutcome, TransformResult
 from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     BatchFlushInputs,
@@ -18,16 +20,24 @@ from elspeth.contracts.declaration_contracts import (
     register_declaration_contract,
 )
 from elspeth.contracts.enums import NodeStateStatus
-from elspeth.contracts.errors import DeclaredOutputFieldsViolation, ExecutionError
+from elspeth.contracts.errors import ExecutionError, UnexpectedEmptyEmissionViolation
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.core.config import SourceSettings
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.lineage import explain
+from elspeth.engine.executors.can_drop_rows import CanDropRowsContract
 from elspeth.engine.executors.declaration_dispatch import (
     run_batch_flush_checks,
     run_post_emission_checks,
 )
-from elspeth.engine.executors.declared_output_fields import DeclaredOutputFieldsContract
 from elspeth.engine.executors.pass_through import PassThroughDeclarationContract
-from tests.fixtures.landscape import make_recorder_with_run, register_test_node
+from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.plugins.infrastructure.base import BaseTransform
+from tests.fixtures.base_classes import as_sink, as_source, as_transform
+from tests.fixtures.factories import wire_transforms
+from tests.fixtures.landscape import make_landscape_db, make_recorder_with_run, register_test_node
+from tests.fixtures.plugins import CollectSink, ListSource
+from tests.fixtures.stores import MockPayloadStore
 
 
 def _setup_landscape(*, run_id: str, row_id: str, token_id: str, node_id: str):
@@ -41,7 +51,7 @@ def _setup_landscape(*, run_id: str, row_id: str, token_id: str, node_id: str):
         run_id=run_id,
         node_id=node_id,
         node_type=NodeType.TRANSFORM,
-        plugin_name="DeclaredOutputFieldsTransform",
+        plugin_name="CanDropRowsTransform",
     )
     row = setup.factory.data_flow.create_row(
         run_id=run_id,
@@ -106,27 +116,59 @@ def _row(fields: tuple[str, ...]) -> PipelineRow:
 
 def _plugin(
     *,
-    name: str = "DeclaredOutputFieldsTransform",
-    node_id: str = "declared-output-fields-node",
-    declared_output_fields: frozenset[str] = frozenset({"new_a", "new_b"}),
-    passes_through_input: bool = False,
+    name: str = "CanDropRowsTransform",
+    node_id: str = "can-drop-rows-node",
+    passes_through_input: bool = True,
     can_drop_rows: bool = False,
-    declared_input_fields: frozenset[str] = frozenset(),
     is_batch_aware: bool = False,
 ) -> Any:
-    plugin = type("DeclaredOutputFieldsPlugin", (), {})()
+    plugin = type("CanDropRowsPlugin", (), {})()
     plugin.name = name
     plugin.node_id = node_id
-    plugin.declared_output_fields = declared_output_fields
     plugin.passes_through_input = passes_through_input
     plugin.can_drop_rows = can_drop_rows
-    plugin.declared_input_fields = declared_input_fields
+    plugin.declared_output_fields = frozenset()
+    plugin.declared_input_fields = frozenset()
     plugin.is_batch_aware = is_batch_aware
     plugin._output_schema_config = None
     return plugin
 
 
-class TestDeclaredOutputFieldsRoundTrip:
+def _build_production_graph(config: PipelineConfig) -> ExecutionGraph:
+    return ExecutionGraph.from_plugin_instances(
+        source=config.source,
+        source_settings=SourceSettings(plugin=config.source.name, on_success="source_out", options={}),
+        transforms=wire_transforms(
+            [as_transform(transform) for transform in config.transforms],
+            source_connection="source_out",
+            final_sink="default",
+        ),
+        sinks=config.sinks,
+        aggregations={},
+        gates=[],
+        coalesce_settings=None,
+    )
+
+
+class _TestSchema(PluginSchema):
+    pass
+
+
+class _HonestFilterTransform(BaseTransform):
+    name = "honest_filter_transform"
+    input_schema: type[PluginSchema] = _TestSchema
+    output_schema: type[PluginSchema] = _TestSchema
+    passes_through_input = True
+    can_drop_rows = True
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        return TransformResult.success_empty(success_reason={"action": "filtered"})
+
+
+class TestCanDropRowsRoundTrip:
     def setup_method(self) -> None:
         self._snapshot = _snapshot_registry_for_tests()
         _clear_registry_for_tests()
@@ -135,15 +177,15 @@ class TestDeclaredOutputFieldsRoundTrip:
         _restore_registry_snapshot_for_tests(self._snapshot)
 
     def test_post_emission_violation_survives_landscape_round_trip(self) -> None:
-        register_declaration_contract(DeclaredOutputFieldsContract())
+        register_declaration_contract(CanDropRowsContract())
 
-        run_id = "run-declared-output-fields"
-        row_id = "row-declared-output-fields"
-        token_id = "token-declared-output-fields"
-        node_id = "node-declared-output-fields"
+        run_id = "run-can-drop-rows"
+        row_id = "row-can-drop-rows"
+        token_id = "token-can-drop-rows"
+        node_id = "node-can-drop-rows"
         setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
 
-        plugin = _plugin(node_id=node_id)
+        plugin = _plugin(node_id=node_id, passes_through_input=True, can_drop_rows=False)
         inputs = PostEmissionInputs(
             plugin=plugin,
             node_id=node_id,
@@ -151,14 +193,13 @@ class TestDeclaredOutputFieldsRoundTrip:
             row_id=row_id,
             token_id=token_id,
             input_row=_row(("source",)),
-            static_contract=frozenset({"new_a", "new_b"}),
+            static_contract=frozenset(),
             effective_input_fields=frozenset({"source"}),
         )
-        outputs = PostEmissionOutputs(emitted_rows=(_row(("source", "new_a")),))
 
         try:
-            run_post_emission_checks(inputs=inputs, outputs=outputs)
-        except DeclaredOutputFieldsViolation as violation:
+            run_post_emission_checks(inputs=inputs, outputs=PostEmissionOutputs(emitted_rows=()))
+        except UnexpectedEmptyEmissionViolation as violation:
             error = ExecutionError(
                 exception=str(violation),
                 exception_type=type(violation).__name__,
@@ -166,30 +207,28 @@ class TestDeclaredOutputFieldsRoundTrip:
                 context=violation.to_audit_dict(),
             )
         else:
-            raise AssertionError("Expected DeclaredOutputFieldsViolation")
+            raise AssertionError("Expected UnexpectedEmptyEmissionViolation")
 
         context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
-        assert context["exception_type"] == "DeclaredOutputFieldsViolation"
-        assert context["contract_name"] == "declared_output_fields"
-        assert context["plugin"] == "DeclaredOutputFieldsTransform"
-        assert context["node_id"] == node_id
-        assert context["run_id"] == run_id
-        assert context["row_id"] == row_id
-        assert context["token_id"] == token_id
-        assert context["payload"]["declared"] == ["new_a", "new_b"]
-        assert context["payload"]["runtime_observed"] == ["new_a", "source"]
-        assert context["payload"]["missing"] == ["new_b"]
+        assert context["exception_type"] == "UnexpectedEmptyEmissionViolation"
+        assert context["contract_name"] == "can_drop_rows"
+        assert context["plugin"] == "CanDropRowsTransform"
+        assert context["payload"] == {
+            "passes_through_input": True,
+            "can_drop_rows": False,
+            "emitted_count": 0,
+        }
 
     def test_batch_flush_violation_survives_landscape_round_trip(self) -> None:
-        register_declaration_contract(DeclaredOutputFieldsContract())
+        register_declaration_contract(CanDropRowsContract())
 
-        run_id = "run-declared-output-fields-batch"
-        row_id = "row-declared-output-fields-batch"
-        token_id = "token-declared-output-fields-batch"
-        node_id = "node-declared-output-fields-batch"
+        run_id = "run-can-drop-rows-batch"
+        row_id = "row-can-drop-rows-batch"
+        token_id = "token-can-drop-rows-batch"
+        node_id = "node-can-drop-rows-batch"
         setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
 
-        plugin = _plugin(node_id=node_id)
+        plugin = _plugin(node_id=node_id, passes_through_input=True, can_drop_rows=False, is_batch_aware=True)
         token_row = _row(("source",))
         inputs = BatchFlushInputs(
             plugin=plugin,
@@ -198,14 +237,13 @@ class TestDeclaredOutputFieldsRoundTrip:
             row_id=row_id,
             token_id=token_id,
             buffered_tokens=(token_row,),
-            static_contract=frozenset({"new_a", "new_b"}),
+            static_contract=frozenset(),
             effective_input_fields=frozenset({"source"}),
         )
-        outputs = BatchFlushOutputs(emitted_rows=(_row(("source", "new_a")),))
 
         try:
-            run_batch_flush_checks(inputs=inputs, outputs=outputs)
-        except DeclaredOutputFieldsViolation as violation:
+            run_batch_flush_checks(inputs=inputs, outputs=BatchFlushOutputs(emitted_rows=()))
+        except UnexpectedEmptyEmissionViolation as violation:
             error = ExecutionError(
                 exception=str(violation),
                 exception_type=type(violation).__name__,
@@ -213,39 +251,37 @@ class TestDeclaredOutputFieldsRoundTrip:
                 context=violation.to_audit_dict(),
             )
         else:
-            raise AssertionError("Expected DeclaredOutputFieldsViolation on batch-flush path")
+            raise AssertionError("Expected UnexpectedEmptyEmissionViolation on batch-flush path")
 
         context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
-        assert context["exception_type"] == "DeclaredOutputFieldsViolation"
-        assert context["contract_name"] == "declared_output_fields"
-        assert context["payload"]["missing"] == ["new_b"]
+        assert context["exception_type"] == "UnexpectedEmptyEmissionViolation"
+        assert context["contract_name"] == "can_drop_rows"
+        assert context["payload"]["emitted_count"] == 0
 
     def test_aggregate_round_trip_with_pass_through(self) -> None:
         register_declaration_contract(PassThroughDeclarationContract())
-        register_declaration_contract(DeclaredOutputFieldsContract())
+        register_declaration_contract(CanDropRowsContract())
 
-        run_id = "run-declared-output-fields-aggregate"
-        row_id = "row-declared-output-fields-aggregate"
-        token_id = "token-declared-output-fields-aggregate"
-        node_id = "node-declared-output-fields-aggregate"
+        run_id = "run-can-drop-rows-aggregate"
+        row_id = "row-can-drop-rows-aggregate"
+        token_id = "token-can-drop-rows-aggregate"
+        node_id = "node-can-drop-rows-aggregate"
         setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
 
-        plugin = _plugin(node_id=node_id, passes_through_input=True)
-        input_row = _row(("source", "carry"))
+        plugin = _plugin(node_id=node_id, passes_through_input=True, can_drop_rows=False)
         inputs = PostEmissionInputs(
             plugin=plugin,
             node_id=node_id,
             run_id=run_id,
             row_id=row_id,
             token_id=token_id,
-            input_row=input_row,
-            static_contract=frozenset({"new_a", "new_b"}),
+            input_row=_row(("source", "carry")),
+            static_contract=frozenset(),
             effective_input_fields=frozenset({"source", "carry"}),
         )
-        outputs = PostEmissionOutputs(emitted_rows=(_row(("source", "new_a")),))
 
         try:
-            run_post_emission_checks(inputs=inputs, outputs=outputs)
+            run_post_emission_checks(inputs=inputs, outputs=PostEmissionOutputs(emitted_rows=()))
         except AggregateDeclarationContractViolation as aggregate:
             error = ExecutionError(
                 exception=str(aggregate),
@@ -260,11 +296,48 @@ class TestDeclaredOutputFieldsRoundTrip:
         assert context["exception_type"] == "AggregateDeclarationContractViolation"
         assert context["is_aggregate"] is True
         child_types = {entry["exception_type"] for entry in context["violations"]}
-        assert child_types == {"DeclaredOutputFieldsViolation", "PassThroughContractViolation"}
+        assert child_types == {"UnexpectedEmptyEmissionViolation", "PassThroughContractViolation"}
 
-        declared_child = next(entry for entry in context["violations"] if entry["exception_type"] == "DeclaredOutputFieldsViolation")
-        assert declared_child["contract_name"] == "declared_output_fields"
-        assert declared_child["payload"]["missing"] == ["new_b"]
+        empty_child = next(entry for entry in context["violations"] if entry["exception_type"] == "UnexpectedEmptyEmissionViolation")
+        assert empty_child["contract_name"] == "can_drop_rows"
+        assert empty_child["payload"]["emitted_count"] == 0
 
         pass_through_child = next(entry for entry in context["violations"] if entry["exception_type"] == "PassThroughContractViolation")
-        assert pass_through_child["divergence_set"] == ["carry"]
+        assert pass_through_child["divergence_set"] == ["carry", "source"]
+
+
+def test_legitimate_filter_records_queryable_dropped_by_filter_terminal_state() -> None:
+    db = make_landscape_db()
+    payload_store = MockPayloadStore()
+    source = ListSource([{"value": 1}])
+    transform = _HonestFilterTransform()
+    sink = CollectSink("default")
+
+    config = PipelineConfig(
+        source=as_source(source),
+        transforms=[as_transform(transform)],
+        sinks={"default": as_sink(sink)},
+    )
+
+    orchestrator = Orchestrator(db)
+    run = orchestrator.run(config, graph=_build_production_graph(config), payload_store=payload_store)
+
+    assert sink.results == []
+
+    with db.connection() as conn:
+        outcomes = conn.execute(
+            text("""
+                SELECT o.outcome, o.is_terminal, o.error_hash
+                FROM token_outcomes o
+                JOIN tokens t ON t.token_id = o.token_id
+                JOIN rows r ON r.row_id = t.row_id
+                WHERE r.run_id = :run_id
+                ORDER BY o.recorded_at
+            """),
+            {"run_id": run.run_id},
+        ).fetchall()
+
+    assert len(outcomes) == 1
+    assert outcomes[0].outcome == RowOutcome.DROPPED_BY_FILTER.value
+    assert outcomes[0].is_terminal == 1
+    assert outcomes[0].error_hash is None

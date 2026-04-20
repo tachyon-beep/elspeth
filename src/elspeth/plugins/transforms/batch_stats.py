@@ -95,13 +95,14 @@ class BatchStats(BaseTransform):
 
     name = "batch_stats"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:18511ffa163168f4"
+    source_file_hash: str | None = "sha256:8bb9dd818321b8c1"
     config_model = BatchStatsConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = BatchStatsConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
         self._value_field = cfg.value_field
         self._group_by = cfg.group_by
         self._compute_mean = cfg.compute_mean
@@ -280,6 +281,7 @@ class BatchStats(BaseTransform):
             for key in result
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        output_contract = self._align_output_contract(output_contract)
 
         return TransformResult.success(
             PipelineRow(result, output_contract),

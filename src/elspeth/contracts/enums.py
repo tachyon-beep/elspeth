@@ -159,6 +159,7 @@ class RowOutcome(StrEnum):
     - QUARANTINED: Failed validation, stored for investigation
     - DIVERTED: Sink write failed for this row, diverted to failsink
     - CONSUMED_IN_BATCH: Absorbed into aggregate (single/transform mode)
+    - DROPPED_BY_FILTER: Transform intentionally emitted zero rows
     - COALESCED: Merged in join from parallel paths
     - EXPANDED: Deaggregated into child tokens (parent token)
 
@@ -174,6 +175,7 @@ class RowOutcome(StrEnum):
     QUARANTINED = "quarantined"
     DIVERTED = "diverted"
     CONSUMED_IN_BATCH = "consumed_in_batch"
+    DROPPED_BY_FILTER = "dropped_by_filter"
     COALESCED = "coalesced"
     EXPANDED = "expanded"
 

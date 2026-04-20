@@ -198,6 +198,16 @@ class TestAccumulateRowOutcomesTerminal:
 
         assert counters.rows_buffered == 1
 
+    def test_dropped_by_filter_counts_as_succeeded(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        results = [_make_result(RowOutcome.DROPPED_BY_FILTER)]
+
+        accumulate_row_outcomes(results, counters, pending)
+
+        assert counters.rows_succeeded == 1
+        assert len(pending["output"]) == 0
+
     def test_consumed_in_batch_is_noop(self) -> None:
         """CONSUMED_IN_BATCH doesn't increment any counter (counted on batch flush)."""
         counters = _make_counters()

@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
-    from elspeth.plugins.infrastructure.config_base import PluginConfig
+    from elspeth.plugins.infrastructure.config_base import PluginConfig, TransformDataConfig
 from elspeth.plugins.infrastructure.results import (
     TransformResult,
 )
@@ -192,11 +192,24 @@ class BaseTransform(ABC):
     # cross-check; mis-annotation raises PassThroughContractViolation (TIER_1).
     passes_through_input: bool = False
 
+    # Empty-emission governance declaration (ADR-012).
+    # True means the transform may intentionally emit zero rows on success.
+    # False means empty success output is governance-significant for
+    # passes_through_input=True transforms and is checked by the
+    # can_drop_rows declaration contract.
+    can_drop_rows: bool = False
+
     # Field collision enforcement (centralized in TransformExecutor).
     # Transforms that add fields to the output row declare WHAT fields they add
     # at init time. The executor checks these against input keys BEFORE running
     # the transform. Empty frozenset = no fields added = no check needed.
     declared_output_fields: frozenset[str] = frozenset()
+
+    # Input-field declaration for ADR-013.
+    # Normalized from TransformDataConfig.required_input_fields at construction
+    # time via _initialize_declared_input_fields(). Empty frozenset means the
+    # transform declares no pre-emission required-input contract.
+    declared_input_fields: frozenset[str] = frozenset()
 
     # Error routing configuration.
     # Transforms extending TransformDataConfig override this from config.
@@ -228,6 +241,62 @@ class BaseTransform(ABC):
         # Per-instance, not per-class — class-level defaults would be shared across instances.
         self._on_start_called: bool = False
         self._output_schema_config: SchemaConfig | None = None
+        self.declared_input_fields = frozenset()
+
+    def _initialize_declared_input_fields(self, validated_config: TransformDataConfig) -> None:
+        """Populate ADR-013's runtime input-field declaration from config.
+
+        Call from the transform's authoritative config-validation path —
+        immediately after ``<Config>.from_dict(...)`` succeeds. This preserves
+        existing per-plugin validation/error semantics while centralizing the
+        runtime normalization and batch-aware fail-closed guard.
+        """
+        declared_input_fields = validated_config.declared_input_fields
+        if declared_input_fields and self.is_batch_aware:
+            raise FrameworkBugError(
+                f"Transform {self.name!r} declares declared_input_fields "
+                f"{sorted(declared_input_fields)!r} but is batch-aware. No "
+                f"batch-pre-execution dispatch site exists; ADR-013 scopes "
+                f"DeclaredRequiredFieldsContract to non-batch transforms until "
+                f"an ADR-010 amendment lands."
+            )
+        self.declared_input_fields = declared_input_fields
+
+    def _align_output_contract(self, contract: SchemaContract) -> SchemaContract:
+        """Normalize emitted contract mode/lock state to declared output semantics.
+
+        ADR-014 compares emitted ``PipelineRow.contract`` semantics to the
+        transform's ``_output_schema_config`` declaration. Once a contract is
+        attached to an emitted row it is expected to be locked, even for
+        ``flexible``/``observed`` config modes whose pre-emission builders may
+        begin unlocked.
+        """
+        output_schema_config = self._output_schema_config
+        if output_schema_config is None:
+            return contract
+
+        from elspeth.contracts.schema_contract import SchemaContract
+        from elspeth.contracts.schema_contract_factory import map_schema_mode
+
+        expected_mode = map_schema_mode(output_schema_config.mode)
+        if contract.mode == expected_mode and contract.locked:
+            return contract
+
+        return SchemaContract(
+            mode=expected_mode,
+            fields=contract.fields,
+            locked=True,
+        )
+
+    def _align_output_row_contract(self, row: PipelineRow) -> PipelineRow:
+        """Return ``row`` with contract semantics aligned to this transform."""
+        if row.contract is None:
+            raise FrameworkBugError(f"Transform {self.name!r} emitted PipelineRow with no contract. Framework invariant violated.")
+
+        aligned_contract = self._align_output_contract(row.contract)
+        if aligned_contract is row.contract:
+            return row
+        return PipelineRow(row.to_dict(), aligned_contract)
 
     @classmethod
     def probe_config(cls) -> dict[str, Any]:

@@ -4,12 +4,16 @@ This module tests the engine's RowResult dataclass with RowOutcome enum values.
 RowOutcome enum contract tests are in tests/contracts/test_enums.py.
 """
 
+from typing import ClassVar
+
 from elspeth.contracts import RowOutcome, RowResult, TokenInfo
 from elspeth.testing import make_pipeline_row
 
 
 class TestRowResultOutcome:
     """Tests for RowResult.outcome as enum."""
+
+    _SINK_OUTCOMES: ClassVar[set[RowOutcome]] = {RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED}
 
     def test_outcome_is_enum(self) -> None:
         """RowResult.outcome should be RowOutcome, not str."""
@@ -28,7 +32,7 @@ class TestRowResultOutcome:
 
         # Iterate over ALL enum members - not a hardcoded subset
         for outcome in RowOutcome:
-            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
+            sink_name = "output" if outcome in self._SINK_OUTCOMES else None
             result = RowResult(
                 token=token,
                 final_data=make_pipeline_row({}),
@@ -43,7 +47,7 @@ class TestRowResultOutcome:
         token = TokenInfo(row_id="r1", token_id="t1", row_data=make_pipeline_row({}), branch_name=None)
 
         for outcome in RowOutcome:
-            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
+            sink_name = "output" if outcome in self._SINK_OUTCOMES else None
             result = RowResult(token=token, final_data=make_pipeline_row({}), outcome=outcome, sink_name=sink_name)
             # Use 'is' to verify identity, not just value equality
             assert result.outcome is outcome
@@ -79,19 +83,8 @@ class TestRowResultOutcome:
         """All terminal outcomes should have is_terminal=True via RowResult."""
         token = TokenInfo(row_id="r1", token_id="t1", row_data=make_pipeline_row({}), branch_name=None)
 
-        terminal_outcomes = [
-            RowOutcome.COMPLETED,
-            RowOutcome.ROUTED,
-            RowOutcome.FORKED,
-            RowOutcome.FAILED,
-            RowOutcome.QUARANTINED,
-            RowOutcome.CONSUMED_IN_BATCH,
-            RowOutcome.COALESCED,
-            RowOutcome.EXPANDED,
-        ]
-
-        for outcome in terminal_outcomes:
-            sink_name = "output" if outcome in (RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.COALESCED) else None
+        for outcome in (value for value in RowOutcome if value.is_terminal):
+            sink_name = "output" if outcome in self._SINK_OUTCOMES else None
             result = RowResult(token=token, final_data=make_pipeline_row({}), outcome=outcome, sink_name=sink_name)
             assert result.outcome.is_terminal is True
 

@@ -229,6 +229,7 @@ class SingleQueryStrategy:
     temperature: float
     max_tokens: int | None
     response_field: str
+    align_output_contract: Callable[[SchemaContract], SchemaContract]
 
     def execute(
         self,
@@ -366,6 +367,7 @@ class SingleQueryStrategy:
             output_row=output,
             transform_adds_fields=True,
         )
+        output_contract = self.align_output_contract(output_contract)
 
         return TransformResult.success(
             PipelineRow(output, output_contract),
@@ -404,6 +406,8 @@ class MultiQueryStrategy:
     temperature: float
     max_tokens: int | None
     response_field: str
+    align_output_contract: Callable[[SchemaContract], SchemaContract]
+    align_output_row_contract: Callable[[PipelineRow], PipelineRow]
     executor: PooledExecutor | None = None
     _query_templates: Mapping[str, PromptTemplate] = field(init=False, default_factory=dict)
 
@@ -798,6 +802,7 @@ class MultiQueryStrategy:
             output_row=output,
             transform_adds_fields=True,
         )
+        output_contract = self.align_output_contract(output_contract)
 
         return TransformResult.success(
             PipelineRow(output, output_contract),
@@ -892,7 +897,7 @@ class MultiQueryStrategy:
             # audit/replay data — so materialize a fresh dict here. PipelineRow
             # re-deep-freezes internally, preserving immutability across the handoff.
             return TransformResult.success(
-                PipelineRow(dict(result.fields), observed),
+                self.align_output_row_contract(PipelineRow(dict(result.fields), observed)),
                 success_reason={"action": "query_completed", "metadata": {"query_name": work["spec"].name}},
             )
 
@@ -952,6 +957,7 @@ class MultiQueryStrategy:
             output_row=output,
             transform_adds_fields=True,
         )
+        output_contract = self.align_output_contract(output_contract)
 
         return TransformResult.success(
             PipelineRow(output, output_contract),
@@ -986,7 +992,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     name = "llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:ac98190f359a9266"
+    source_file_hash: str | None = "sha256:ef3166cad9d59717"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
 
@@ -1078,6 +1084,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             "AzureOpenAIConfig | OpenRouterConfig",
             config_cls.from_dict(config, plugin_name=self.name),
         )
+        self._initialize_declared_input_fields(self._config)
 
         # Store common LLM settings.
         # AzureOpenAIConfig._set_model_from_deployment ensures model is populated;
@@ -1145,6 +1152,8 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
                 response_field=self._response_field,
+                align_output_contract=self._align_output_contract,
+                align_output_row_contract=self._align_output_row_contract,
                 executor=self._query_executor,
             )
 
@@ -1205,6 +1214,7 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
                 response_field=self._response_field,
+                align_output_contract=self._align_output_contract,
             )
 
             # Single-query emits unprefixed fields (operational only — audit goes to success_reason)

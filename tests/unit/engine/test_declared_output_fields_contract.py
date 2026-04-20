@@ -60,12 +60,18 @@ def _plugin(
     node_id: str | None = "declared-output-fields-node",
     declared_output_fields: frozenset[str] = frozenset({"new_a", "new_b"}),
     passes_through_input: bool = False,
+    can_drop_rows: bool = False,
+    declared_input_fields: frozenset[str] = frozenset(),
+    is_batch_aware: bool = False,
 ) -> Any:
     plugin = type("DeclaredOutputFieldsPlugin", (), {})()
     plugin.name = name
     plugin.node_id = node_id
     plugin.declared_output_fields = declared_output_fields
     plugin.passes_through_input = passes_through_input
+    plugin.can_drop_rows = can_drop_rows
+    plugin.declared_input_fields = declared_input_fields
+    plugin.is_batch_aware = is_batch_aware
     plugin._output_schema_config = None
     return plugin
 
@@ -244,6 +250,14 @@ def test_batch_flush_dispatcher_raises_declared_output_fields_violation(_isolate
     assert exc_info.value.contract_name == "declared_output_fields"
 
 
-def test_task3_manifest_count_advances_to_two_contracts() -> None:
-    assert len(EXPECTED_CONTRACT_SITES) == 2
-    assert frozenset(EXPECTED_CONTRACT_SITES.keys()) == frozenset({"passes_through_input", "declared_output_fields"})
+def test_phase_2b_manifest_contains_all_production_contracts() -> None:
+    assert len(EXPECTED_CONTRACT_SITES) == 5
+    assert frozenset(EXPECTED_CONTRACT_SITES.keys()) == frozenset(
+        {
+            "passes_through_input",
+            "declared_output_fields",
+            "declared_required_fields",
+            "schema_config_mode",
+            "can_drop_rows",
+        }
+    )

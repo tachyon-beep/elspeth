@@ -297,6 +297,16 @@ class TestTokenOutcomeContractProperties:
             factory.data_flow.record_token_outcome(ref=TokenRef(token_id=token_id, run_id=run_id), outcome=RowOutcome.BUFFERED)
         db.close()
 
+    def test_dropped_by_filter_requires_no_auxiliary_fields(self) -> None:
+        """Property: DROPPED_BY_FILTER is terminal with no extra required fields."""
+        db, factory, run_id, token_id = self._setup()
+        outcome_id = factory.data_flow.record_token_outcome(
+            ref=TokenRef(token_id=token_id, run_id=run_id),
+            outcome=RowOutcome.DROPPED_BY_FILTER,
+        )
+        assert outcome_id is not None
+        db.close()
+
 
 # =============================================================================
 # Schema Contract Round-Trip Properties

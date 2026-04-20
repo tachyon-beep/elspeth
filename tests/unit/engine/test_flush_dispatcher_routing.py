@@ -110,7 +110,7 @@ def _make_token(
     return token.with_updated_data(row)
 
 
-def _make_flush_transform(*, passes_through_input: bool = True) -> Mock:
+def _make_flush_transform(*, passes_through_input: bool = True, can_drop_rows: bool = False) -> Mock:
     transform = Mock(spec=TransformProtocol)
     transform.node_id = "agg-node"
     transform.name = "test-transform"
@@ -119,7 +119,9 @@ def _make_flush_transform(*, passes_through_input: bool = True) -> Mock:
     transform.is_batch_aware = True
     transform.creates_tokens = False
     transform.declared_output_fields = frozenset()
+    transform.declared_input_fields = frozenset()
     transform.passes_through_input = passes_through_input
+    transform.can_drop_rows = can_drop_rows
     transform._output_schema_config = None
     return transform
 
@@ -279,3 +281,19 @@ class TestBatchFlushDispatcherRouting:
 
         processor._cross_check_flush_output(fctx, result)
         assert _CountingContract.invocations == []
+
+    def test_passthrough_zero_emission_still_hits_dispatcher(self) -> None:
+        """Zero-emission passthrough has no 1:1 pairing, but governance still dispatches."""
+        processor = _make_processor()
+        contract = _make_contract({"x": int})
+        tokens = [_make_token(f"t{i}", {"x": i}, contract) for i in range(2)]
+        transform = _make_flush_transform(passes_through_input=True, can_drop_rows=True)
+        fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=OutputMode.PASSTHROUGH)
+        result = TransformResult.success_empty(success_reason={"action": "filtered"})
+
+        processor._cross_check_flush_output(fctx, result)
+
+        assert len(_CountingContract.invocations) == 1
+        token_id, effective_input_fields = _CountingContract.invocations[0]
+        assert token_id == "t1"
+        assert effective_input_fields == frozenset({"x"})

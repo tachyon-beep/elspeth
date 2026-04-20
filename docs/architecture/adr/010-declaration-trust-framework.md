@@ -239,18 +239,19 @@ regardless of registration order. (See `elspeth-60890a7388` / N3
 
 ## §Adoption State — per dispatch surface (Amendment A3, F4)
 
-Added 2026-04-20 per `elspeth-b513c01cff` (F4). The 2A rule-of-three
-criterion treated the single-site registry as one surface; under H2 each
-dispatch site is its own surface with its own rule-of-three gate. A
-contract's landing on a new surface does NOT reset the rule for sites
-that already counted; conversely, one boundary adopter does NOT prove the
-boundary subtype — see the paired-landing rule below.
+Added 2026-04-20 per `elspeth-b513c01cff` (F4), updated 2026-04-20 after
+Phase 2B Tasks 3-7 landed. The 2A rule-of-three criterion treated the
+single-site registry as one surface; under H2 each dispatch site is its
+own surface with its own rule-of-three gate. A contract's landing on a
+new surface does NOT reset the rule for sites that already counted;
+conversely, one boundary adopter does NOT prove the boundary subtype —
+see the paired-landing rule below.
 
 | Surface | Adopter count | Rule-of-three satisfied? | Adopters |
 |---------|:-------------:|:------------------------:|----------|
-| `pre_emission_check` | 0 | NO — 3 needed | first adopter: `DeclaredRequiredFieldsContract` in Phase 2B (`elspeth-2cc9b47132`, blocked on F2) |
-| `post_emission_check` | 1 | NO — 2 more needed | `PassThroughDeclarationContract` |
-| `batch_flush_check` | 1 | NO — 2 more needed | `PassThroughDeclarationContract` |
+| `pre_emission_check` | 1 | NO — 2 more needed | `DeclaredRequiredFieldsContract` (Phase 2B provisional adopter; batch-aware transforms remain fail-closed until a fifth site is ADR-approved) |
+| `post_emission_check` | 4 | YES — closed at 4/3 | `PassThroughDeclarationContract`, `DeclaredOutputFieldsContract`, `SchemaConfigModeContract`, `CanDropRowsContract` |
+| `batch_flush_check` | 4 | YES — closed at 4/3 | `PassThroughDeclarationContract`, `DeclaredOutputFieldsContract`, `SchemaConfigModeContract`, `CanDropRowsContract` |
 | `boundary_check` | 0 | NO — 3 needed | paired adopters: `SourceGuaranteedFieldsContract` (`elspeth-48c8a9762b`) + `SinkRequiredFieldsContract` (`elspeth-ea5e9e4759`) — 2C |
 
 **ADR-015 note (2026-04-20).** `CreatesTokensContract` is rejected as a
@@ -270,6 +271,12 @@ counts toward that surface's rule-of-three. A new contract introducing a
 new surface (not one of the four named above) would require an ADR
 amendment to name the surface, update `DispatchSite`, and restart the
 rule-of-three gate at that surface.
+
+**Pre-emission governance note (ST-4).** The pre-emission site's zero
+baseline meant the rule-of-three gate provided weaker early coverage
+there. Designs that plausibly fit `pre_emission_check` SHOULD prefer
+that surface to build its evidential weight instead of defaulting to the
+already-closed post-emission surfaces.
 
 ---
 

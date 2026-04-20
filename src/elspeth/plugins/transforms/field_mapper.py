@@ -82,12 +82,13 @@ class FieldMapper(BaseTransform):
 
     name = "field_mapper"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:59afad18668f3348"
+    source_file_hash: str | None = "sha256:4ba24e1591bd27f8"
     config_model = FieldMapperConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = FieldMapperConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
         self._mapping: dict[str, str] = cfg.mapping
         self._select_only: bool = cfg.select_only
         self._strict: bool = cfg.strict
@@ -215,6 +216,7 @@ class FieldMapper(BaseTransform):
             output_row=output,
             renamed_fields=applied_mappings,
         )
+        output_contract = self._align_output_contract(output_contract)
 
         return TransformResult.success(
             PipelineRow(output, output_contract),

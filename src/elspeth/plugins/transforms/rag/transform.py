@@ -56,7 +56,7 @@ class RAGRetrievalTransform(BaseTransform):
 
     name = "rag_retrieval"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:d0f56ea598f29948"
+    source_file_hash: str | None = "sha256:27ea317d53f5dd88"
     determinism: Determinism = Determinism.EXTERNAL_CALL
     config_model = RAGRetrievalConfig
 
@@ -64,6 +64,7 @@ class RAGRetrievalTransform(BaseTransform):
         super().__init__(config)
 
         self._rag_config = RAGRetrievalConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(self._rag_config)
         prefix = self._rag_config.output_prefix
 
         # Output field names
@@ -239,6 +240,7 @@ class RAGRetrievalTransform(BaseTransform):
                 output_row=output,
                 transform_adds_fields=True,
             )
+            output_contract = self._align_output_contract(output_contract)
             return TransformResult.success(
                 PipelineRow(output, output_contract),
                 success_reason={
@@ -284,6 +286,7 @@ class RAGRetrievalTransform(BaseTransform):
             output_row=output,
             transform_adds_fields=True,
         )
+        output_contract = self._align_output_contract(output_contract)
 
         # Include skip details in audit metadata — "record what we didn't get".
         # All providers implement last_skipped_count and last_skipped_reasons

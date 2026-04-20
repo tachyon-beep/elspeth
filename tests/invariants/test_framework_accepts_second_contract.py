@@ -83,6 +83,8 @@ def test_dispatcher_invokes_declared_output_fields_proof(proof_contract_register
         node_id = "dof-ok-1"
         passes_through_input = False
         declared_output_fields = frozenset({"new_a", "new_b"})
+        declared_input_fields = frozenset()
+        is_batch_aware = False
         _output_schema_config = None
 
     inputs = PostEmissionInputs(

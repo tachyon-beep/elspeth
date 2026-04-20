@@ -275,12 +275,13 @@ class TypeCoerce(BaseTransform):
 
     name = "type_coerce"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:c7d0cfe6731d1b01"
+    source_file_hash: str | None = "sha256:4efd014678abb13c"
     config_model = TypeCoerceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = TypeCoerceConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
         self._conversions = cfg.conversions
         self._schema_config = cfg.schema_config
 
@@ -364,8 +365,9 @@ class TypeCoerce(BaseTransform):
             output[normalized_key] = converted
             fields_coerced.append(normalized_key)
 
+        output_contract = self._align_output_contract(row.contract)
         return TransformResult.success(
-            PipelineRow(output, row.contract),
+            PipelineRow(output, output_contract),
             success_reason={
                 "action": "coerced",
                 "fields_modified": fields_coerced,

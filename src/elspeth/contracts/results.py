@@ -110,8 +110,9 @@ class TransformResult:
     Multi-row output:
     - Single-row: success(row) sets row=row, rows=None
     - Multi-row: success_multi(rows) sets row=None, rows=rows
+    - Empty success: success_empty() sets row=None, rows=()
     - Use is_multi_row property to distinguish
-    - Use has_output_data property to check if ANY output exists
+    - Use has_output_data property to check if ANY explicit output carrier exists
     """
 
     status: Literal["success", "error"]
@@ -178,7 +179,7 @@ class TransformResult:
 
     @property
     def has_output_data(self) -> bool:
-        """True if this result has any output data (row or rows)."""
+        """True if this result has any explicit output carrier (row or rows)."""
         return self.row is not None or self.rows is not None
 
     @classmethod
@@ -270,6 +271,28 @@ class TransformResult:
             row=None,
             reason=None,
             rows=tuple(rows),
+            success_reason=success_reason,
+            context_after=context_after,
+        )
+
+    @classmethod
+    def success_empty(
+        cls,
+        *,
+        success_reason: TransformSuccessReason,
+        context_after: NodeStateContext | None = None,
+    ) -> TransformResult:
+        """Create successful result with explicit zero-row emission.
+
+        This is distinct from ``success_multi([])`` which remains invalid.
+        ``success_empty()`` is the auditable "the transform intentionally
+        emitted nothing" shape used by the engine's zero-emission pathways.
+        """
+        return cls(
+            status="success",
+            row=None,
+            reason=None,
+            rows=(),
             success_reason=success_reason,
             context_after=context_after,
         )

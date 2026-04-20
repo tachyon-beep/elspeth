@@ -156,7 +156,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     name = "azure_batch_llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:65cdf0712d92a37d"
+    source_file_hash: str | None = "sha256:c3124a85317d1ad7"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = AzureBatchConfig
 
@@ -172,6 +172,7 @@ class AzureBatchLLMTransform(BaseTransform):
         super().__init__(config)
 
         cfg = AzureBatchConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
 
         # Declare output fields for centralized collision detection.
         self.declared_output_fields = frozenset(get_llm_guaranteed_fields(cfg.response_field))
@@ -1531,6 +1532,7 @@ class AzureBatchLLMTransform(BaseTransform):
             for key, inferred_type in all_keys.items()
         )
         output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        output_contract = self._align_output_contract(output_contract)
 
         # Batch-level template provenance — shared across all rows in the batch.
         # Per-row request/response hashes are in the calls table via record_call().

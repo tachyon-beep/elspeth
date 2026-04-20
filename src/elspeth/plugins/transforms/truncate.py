@@ -86,12 +86,13 @@ class Truncate(BaseTransform):
 
     name = "truncate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:7e72fd6a6ab417ae"
+    source_file_hash: str | None = "sha256:4eeeded01f37bae4"
     config_model = TruncateConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = TruncateConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
         self._fields = cfg.fields
         self._suffix = cfg.suffix
         self._strict = cfg.strict
@@ -150,8 +151,9 @@ class Truncate(BaseTransform):
                     output[normalized_field_name] = value[:max_len]
                 fields_modified.append(field_name)
 
+        output_contract = self._align_output_contract(row.contract)
         return TransformResult.success(
-            PipelineRow(output, row.contract),
+            PipelineRow(output, output_contract),
             success_reason={
                 "action": "transformed",
                 "fields_modified": fields_modified,

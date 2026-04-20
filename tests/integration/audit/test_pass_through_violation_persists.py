@@ -75,7 +75,9 @@ def _mk_transform() -> Mock:
     t.is_batch_aware = True
     t.creates_tokens = False
     t.declared_output_fields = frozenset()
+    t.declared_input_fields = frozenset()
     t.passes_through_input = True
+    t.can_drop_rows = False
     t._output_schema_config = None
     return t
 

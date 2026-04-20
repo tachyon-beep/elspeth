@@ -185,10 +185,13 @@ def _make_mock_transform(
     transform.is_batch_aware = is_batch_aware
     transform.creates_tokens = creates_tokens
     transform.declared_output_fields = frozenset()
+    transform.declared_input_fields = frozenset()
     # ADR-009 §Clause 2: cross-check is gated on this flag. Default False
     # matches BaseTransform's default; tests opting into pass-through coverage
     # set it explicitly after construction.
     transform.passes_through_input = False
+    transform.can_drop_rows = False
+    transform._output_schema_config = None
     if result is not None:
         transform.process.return_value = result
     return transform

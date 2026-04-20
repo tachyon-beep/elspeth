@@ -678,6 +678,7 @@ class TestTokenOutcomeProperties:
             (RowOutcome.FAILED, {"error_hash": stable_hash({"reason": "failure"})}),
             (RowOutcome.QUARANTINED, {"error_hash": stable_hash({"reason": "validation"})}),
             (RowOutcome.CONSUMED_IN_BATCH, {"batch_id": "batch_1"}),
+            (RowOutcome.DROPPED_BY_FILTER, {}),
             (RowOutcome.COALESCED, {"join_group_id": "join_group_1"}),
             (RowOutcome.EXPANDED, {"expand_group_id": "expand_group_1"}),
             (RowOutcome.BUFFERED, {"batch_id": "batch_2"}),

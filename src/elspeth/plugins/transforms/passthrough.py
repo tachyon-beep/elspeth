@@ -38,7 +38,7 @@ class PassThrough(BaseTransform):
 
     name = "passthrough"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:11981db75817bec8"
+    source_file_hash: str | None = "sha256:fb92ac7641ea6f32"
     config_model = PassThroughConfig
 
     # ADR-007: PassThrough emits a deep copy of the input row unchanged, so every
@@ -48,6 +48,7 @@ class PassThrough(BaseTransform):
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = PassThroughConfig.from_dict(config, plugin_name=self.name)
+        self._initialize_declared_input_fields(cfg)
 
         self._schema_config = cfg.schema_config
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "PassThrough")
@@ -71,8 +72,9 @@ class PassThrough(BaseTransform):
             PluginContractViolation: Raised by executor if row fails input schema
                 validation. This indicates a bug in the upstream source/transform.
         """
+        output_contract = self._align_output_contract(row.contract)
         return TransformResult.success(
-            PipelineRow(copy.deepcopy(row.to_dict()), row.contract),
+            PipelineRow(copy.deepcopy(row.to_dict()), output_contract),
             success_reason={"action": "passthrough"},
         )
 

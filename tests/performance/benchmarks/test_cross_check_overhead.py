@@ -33,6 +33,7 @@ from elspeth.contracts.declaration_contracts import (
     _snapshot_registry_for_tests,
     implements_dispatch_site,
     register_declaration_contract,
+    registered_declaration_contracts,
 )
 from elspeth.contracts.errors import PassThroughContractViolation
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
@@ -83,6 +84,7 @@ def test_cross_check_p99_within_budget(benchmark: pytest.FixtureRequest) -> None
         verify_pass_through(
             input_fields=input_fields,
             emitted_rows=emitted_rows,
+            can_drop_rows=False,
             static_contract=input_fields,
             transform_name="bench",
             transform_node_id="bench_node",
@@ -129,6 +131,7 @@ def test_cross_check_raises_on_drop(benchmark: pytest.FixtureRequest) -> None:
             verify_pass_through(
                 input_fields=input_fields,
                 emitted_rows=emitted_rows,
+                can_drop_rows=False,
                 static_contract=input_fields,
                 transform_name="bench",
                 transform_node_id="bench_node",
@@ -179,6 +182,7 @@ def test_batch_flush_cross_check_within_budget(benchmark: pytest.FixtureRequest)
         verify_pass_through(
             input_fields=input_fields,
             emitted_rows=emitted_rows,
+            can_drop_rows=False,
             static_contract=static_contract,
             transform_name="bench_batch",
             transform_node_id="bench_batch_node",
@@ -204,19 +208,20 @@ def test_batch_flush_cross_check_within_budget(benchmark: pytest.FixtureRequest)
 @pytest.mark.performance
 @pytest.mark.benchmark(group="dispatcher-overhead")
 def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.FixtureRequest) -> None:
-    """Reviewer O2/O7: quantify the per-row dispatcher overhead vs direct
-    verify_pass_through call. Budget: median ≤ 27 µs at N=1
-    (25 µs ADR-008 direct baseline + 2 µs ADR-010 §NFR dispatcher overhead).
+    """Reviewer O2/O7: quantify per-row dispatcher overhead against the live registry.
 
     The dispatcher adds one ``registered_declaration_contracts()`` call + one
     ``applies_to()`` short-circuit + one ``runtime_check()`` invocation on top
     of the direct ``verify_pass_through`` call.
 
-    This is the N=1 baseline fixed against the production registry at the
-    time of writing. The paramterised ``test_dispatcher_overhead_scales_with_n``
-    companion below tracks how the budget scales as 2B/2C adopters land
-    (issue elspeth-5dae105959 / H1 — benchmark no longer degrades to
-    theatre when N > 1).
+    The budget is derived from the current production registry cardinality:
+
+        budget_median(N) = 27 us (N=1 baseline) + (N - 1) * 1.5 us
+
+    where N is ``len(registered_declaration_contracts())`` at runtime. This
+    keeps the benchmark honest as production adopters land. The parametrised
+    ``test_dispatcher_overhead_scales_with_n`` companion below still probes the
+    wider N∈{1,2,4,8,16} envelope.
 
     Setup mirrors the direct-call benchmark: a 200-field input row with a
     matching 200-field output row so the pass-through contract holds and the
@@ -231,7 +236,10 @@ def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.Fix
         name = "bench_dispatcher"
         node_id = "bench_dispatcher_node"
         passes_through_input = True
+        can_drop_rows = False
         declared_output_fields = frozenset()
+        declared_input_fields = frozenset()
+        is_batch_aware = False
         _output_schema_config = None
 
     input_contract = _build_wide_contract(200)
@@ -265,11 +273,15 @@ def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.Fix
     mean_sec = stats["mean"]
     stddev_sec = stats["stddev"]
     p99_bound = mean_sec + 3 * stddev_sec
-    assert median_sec < 27e-6, (
-        f"Dispatcher median {median_sec * 1e6:.1f}us exceeds 27us budget (25us direct + 2us dispatcher overhead per ADR-010 §NFR)"
+    live_contract_count = len(registered_declaration_contracts())
+    median_budget_us = 27.0 + (live_contract_count - 1) * 1.5
+    p99_budget_us = median_budget_us * 2.0
+    assert median_sec * 1e6 < median_budget_us, (
+        f"Dispatcher median {median_sec * 1e6:.1f}us exceeds {median_budget_us:.1f}us budget at live N={live_contract_count}"
     )
-    assert p99_bound < 54e-6, (
-        f"Dispatcher mean+3*stddev {p99_bound * 1e6:.1f}us exceeds 54us budget "
+    assert p99_bound * 1e6 < p99_budget_us, (
+        f"Dispatcher mean+3*stddev {p99_bound * 1e6:.1f}us exceeds {p99_budget_us:.1f}us "
+        f"budget at live N={live_contract_count} "
         f"(mean={mean_sec * 1e6:.1f}us, stddev={stddev_sec * 1e6:.1f}us)"
     )
 
@@ -368,7 +380,10 @@ def test_dispatcher_overhead_scales_with_n(
         name = "bench_dispatcher_scaling"
         node_id = "bench_dispatcher_scaling_node"
         passes_through_input = True
+        can_drop_rows = False
         declared_output_fields = frozenset()
+        declared_input_fields = frozenset()
+        is_batch_aware = False
         _output_schema_config = None
 
     input_contract = _build_wide_contract(200)

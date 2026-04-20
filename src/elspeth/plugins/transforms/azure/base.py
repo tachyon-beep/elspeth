@@ -118,6 +118,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         schema_name: str,
     ) -> None:
         super().__init__(config)
+        self._initialize_declared_input_fields(cfg)
 
         self._endpoint = cfg.endpoint.rstrip("/")
         self._api_key = cfg.api_key
@@ -319,7 +320,10 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
             if violation is not None:
                 return violation
 
-        return TransformResult.success(row, success_reason={"action": "validated"})
+        return TransformResult.success(
+            self._align_output_row_contract(row),
+            success_reason={"action": "validated"},
+        )
 
     def _analyze_field(
         self,

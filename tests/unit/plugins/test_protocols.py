@@ -165,6 +165,8 @@ class TestTransformProtocol:
             is_batch_aware = False  # Batch support (structural aggregation)
             creates_tokens = False  # Deaggregation (multi-row output)
             passes_through_input = False  # ADR-007: pass-through contract flag
+            can_drop_rows = False  # ADR-012: empty-emission governance flag
+            declared_input_fields: frozenset[str] = frozenset()
             declared_output_fields: frozenset[str] = frozenset()  # Collision detection
             _output_schema_config: SchemaConfig | None = None  # Set by BaseTransform
             on_error: str | None = None  # Error routing (WP-11.99b)

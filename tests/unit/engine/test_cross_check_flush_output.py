@@ -14,9 +14,11 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import TokenInfo, TransformProtocol, TransformResult
+from elspeth.contracts.declaration_contracts import AggregateDeclarationContractViolation
 from elspeth.contracts.enums import OutputMode
 from elspeth.contracts.errors import (
     PassThroughContractViolation,
+    UnexpectedEmptyEmissionViolation,
 )
 from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.types import NodeID
@@ -46,6 +48,7 @@ def _make_flush_transform(
     *,
     name: str = "test-transform",
     passes_through_input: bool = True,
+    can_drop_rows: bool = False,
     output_schema_config: Any = None,
 ) -> Mock:
     transform = Mock(spec=TransformProtocol)
@@ -57,6 +60,7 @@ def _make_flush_transform(
     transform.creates_tokens = False
     transform.declared_output_fields = frozenset()
     transform.passes_through_input = passes_through_input
+    transform.can_drop_rows = can_drop_rows
     transform._output_schema_config = output_schema_config
     return transform
 
@@ -244,16 +248,35 @@ class TestTransformModeIntersection:
         assert "x" in exc_info.value.divergence_set
 
 
-class TestEmptyEmissionCarveOut:
-    """ADR-009 §Clause 3 — empty emission is compatible with pass-through.
+class TestEmptyEmissionGovernance:
+    def test_zero_emission_passthrough_raises_aggregate_when_can_drop_rows_false(self) -> None:
+        processor = _make_processor()
+        contract = _make_contract({"x": int})
+        tokens = [_make_token(f"t{i}", {"x": i}, contract) for i in range(2)]
+        _register_tokens(processor, tokens)
+        transform = _make_flush_transform(passes_through_input=True, can_drop_rows=False)
+        fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=OutputMode.PASSTHROUGH)
+        result = TransformResult.success_empty(success_reason={"action": "filtered"})
 
-    TransformResult.success_multi() rejects empty rows at construction, and
-    the primitive-level empty-emission carve-out is exercised via
-    verify_pass_through directly in tests/unit/engine/test_pass_through_verification.py.
-    The batch flush path cannot reach the empty branch from a success result
-    today; this class is retained as a placeholder in case the processor's
-    handling of empty emissions changes.
-    """
+        with pytest.raises(AggregateDeclarationContractViolation) as exc_info:
+            processor._cross_check_flush_output(fctx, result)
+
+        child_types = {type(child).__name__ for child in exc_info.value.violations}
+        assert child_types == {"UnexpectedEmptyEmissionViolation", "PassThroughContractViolation"}
+        empty_child = next(child for child in exc_info.value.violations if isinstance(child, UnexpectedEmptyEmissionViolation))
+        assert empty_child.payload["emitted_count"] == 0
+        pass_through_child = next(child for child in exc_info.value.violations if isinstance(child, PassThroughContractViolation))
+        assert pass_through_child.divergence_set == frozenset({"x"})
+
+    def test_zero_emission_passthrough_is_allowed_when_can_drop_rows_true(self) -> None:
+        processor = _make_processor()
+        contract = _make_contract({"x": int})
+        tokens = [_make_token(f"t{i}", {"x": i}, contract) for i in range(2)]
+        transform = _make_flush_transform(passes_through_input=True, can_drop_rows=True)
+        fctx = _make_fctx(transform=transform, tokens=tokens, output_mode=OutputMode.PASSTHROUGH)
+        result = TransformResult.success_empty(success_reason={"action": "filtered"})
+
+        processor._cross_check_flush_output(fctx, result)
 
 
 class TestRecordFlushViolation:
