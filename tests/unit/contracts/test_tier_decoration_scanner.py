@@ -35,11 +35,11 @@ def _run(extra_args: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def test_scanner_accepts_compliant_file(tmp_path: Path) -> None:
-    """@tier_1_error(reason=...) and # TIER-2: <text> both accepted; scanner passes."""
+    """@tier_1_error(reason=..., caller_module=__name__) and # TIER-2: <text> both accepted; scanner passes."""
     good = tmp_path / "errors.py"
     good.write_text(
         "from elspeth.contracts.tier_registry import tier_1_error\n\n"
-        "@tier_1_error(reason='audit corruption crashes pipeline')\n"
+        "@tier_1_error(reason='audit corruption crashes pipeline', caller_module=__name__)\n"
         "class CriticalError(Exception):\n"
         "    pass\n\n"
         "# TIER-2: row-level plugin bug; routable via on_error.\n"
@@ -96,11 +96,11 @@ def test_scanner_rejects_tier_2_without_justification(tmp_path: Path) -> None:
 
 
 def test_scanner_accepts_qualified_decorator(tmp_path: Path) -> None:
-    """@module.tier_1_error(reason='...') qualified-attribute form is accepted."""
+    """@module.tier_1_error(reason='...', caller_module=__name__) qualified-attribute form is accepted."""
     good = tmp_path / "errors.py"
     good.write_text(
         "import elspeth.contracts.tier_registry as reg\n\n"
-        "@reg.tier_1_error(reason='framework bug crashes immediately')\n"
+        "@reg.tier_1_error(reason='framework bug crashes immediately', caller_module=__name__)\n"
         "class QualifiedError(Exception):\n"
         "    pass\n"
     )

@@ -33,7 +33,7 @@ def _reset_registry():
 def test_decorator_registers_class() -> None:
     from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
 
-    @tier_1_error(reason="test: registered via decorator")
+    @tier_1_error(reason="test: registered via decorator", caller_module=__name__)
     class _TestViolation(Exception):
         pass
 
@@ -55,7 +55,7 @@ def test_reason_must_be_non_empty_string() -> None:
 
     with pytest.raises(ValueError, match="reason"):
 
-        @tier_1_error(reason="")
+        @tier_1_error(reason="", caller_module=__name__)
         class _Bad(Exception):
             pass
 
@@ -63,7 +63,7 @@ def test_reason_must_be_non_empty_string() -> None:
 def test_reason_persists_and_is_queryable() -> None:
     from elspeth.contracts.tier_registry import tier_1_error, tier_1_reason
 
-    @tier_1_error(reason="ADR-008: pass-through annotation lie")
+    @tier_1_error(reason="ADR-008: pass-through annotation lie", caller_module=__name__)
     class _Check(Exception):
         pass
 
@@ -73,7 +73,7 @@ def test_reason_persists_and_is_queryable() -> None:
 def test_decorator_returns_the_class_unchanged() -> None:
     from elspeth.contracts.tier_registry import tier_1_error
 
-    @tier_1_error(reason="test")
+    @tier_1_error(reason="test", caller_module=__name__)
     class _Foo(Exception):
         pass
 
@@ -83,7 +83,7 @@ def test_decorator_returns_the_class_unchanged() -> None:
 def test_double_registration_idempotent_with_matching_reason() -> None:
     from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
 
-    decorator = tier_1_error(reason="first")
+    decorator = tier_1_error(reason="first", caller_module=__name__)
 
     @decorator
     class _Twice(Exception):
@@ -98,7 +98,7 @@ def test_non_exception_class_raises_typeerror() -> None:
 
     with pytest.raises(TypeError, match="BaseException"):
 
-        @tier_1_error(reason="test")
+        @tier_1_error(reason="test", caller_module=__name__)
         class _NotException:
             pass
 
@@ -126,7 +126,7 @@ def test_registration_after_freeze_raises() -> None:
     freeze_tier_registry()
     with pytest.raises(FrameworkBugError, match="frozen"):
 
-        @tier_1_error(reason="too late")
+        @tier_1_error(reason="too late", caller_module=__name__)
         class _Late(Exception):
             pass
 
@@ -177,7 +177,7 @@ def test_tier_1_errors_view_supports_len() -> None:
 
     before = len(TIER_1_ERRORS)
 
-    @tier_1_error(reason="len test")
+    @tier_1_error(reason="len test", caller_module=__name__)
     class _Counted(Exception):
         pass
 
@@ -187,12 +187,39 @@ def test_tier_1_errors_view_supports_len() -> None:
 def test_tier_1_errors_view_repr_shows_names() -> None:
     from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
 
-    @tier_1_error(reason="repr test")
+    @tier_1_error(reason="repr test", caller_module=__name__)
     class _Repr(Exception):
         pass
 
     assert "_Repr" in repr(TIER_1_ERRORS)
     assert repr(TIER_1_ERRORS).startswith("TIER_1_ERRORS(")
+
+
+def test_caller_module_kwarg_is_required() -> None:
+    """M8 (issue elspeth-3af772b9e3): caller_module must be supplied explicitly.
+
+    The prior inspect.stack()-based implementation read the caller's
+    __name__ from frame 2 of the call stack, which made the allowlist
+    check fragile to any intervening wrapper (decorator stacking,
+    metaclass, functools.wraps) — a future contributor adding an
+    innocent wrapper could let a plugin-module class elevate itself to
+    Tier-1 silently. The fix: require caller_module=__name__ explicitly
+    at every call site. Calling without caller_module must raise.
+    """
+    from elspeth.contracts.tier_registry import tier_1_error
+
+    with pytest.raises(TypeError, match="caller_module"):
+        tier_1_error(reason="missing caller_module")  # type: ignore[call-overload]  # intentionally missing kwarg to assert the runtime check
+
+
+def test_caller_module_empty_string_rejected() -> None:
+    """Empty caller_module strings are rejected — the allowlist gate
+    would otherwise pass the empty-startswith check and allow the registration.
+    """
+    from elspeth.contracts.tier_registry import tier_1_error
+
+    with pytest.raises(ValueError, match="caller_module"):
+        tier_1_error(reason="valid", caller_module="")
 
 
 def test_tests_prefix_absent_when_pytest_not_loaded() -> None:

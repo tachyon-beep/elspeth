@@ -17,7 +17,6 @@ re-export it from ``errors.py``; this module cannot import ``errors`` (circular)
 
 from __future__ import annotations
 
-import inspect
 import sys
 from collections.abc import Iterator
 from typing import TypeVar
@@ -59,41 +58,54 @@ _ALLOWED_MODULE_PREFIXES: tuple[str, ...] = (
 _ExcT = TypeVar("_ExcT", bound=BaseException)
 
 
-def tier_1_error(_cls: type | None = None, *, reason: str):  # type: ignore[no-untyped-def]
+def tier_1_error(_cls: type | None = None, *, reason: str, caller_module: str):  # type: ignore[no-untyped-def]
     """Factory returning a decorator that registers ``cls`` as Tier-1.
 
-    Usage:
-        @tier_1_error(reason="ADR-008: annotation lie corrupts audit trail")
+    Usage (the ``caller_module=__name__`` literal is load-bearing — see below):
+        @tier_1_error(
+            reason="ADR-008: annotation lie corrupts audit trail",
+            caller_module=__name__,
+        )
         class AuditIntegrityError(Exception): ...
 
     Args:
         reason: Non-empty justification string. Recorded in the registry
             and queryable via ``tier_1_reason(cls)``.
+        caller_module: The calling module's ``__name__``. Every call site
+            MUST pass the literal ``__name__`` here — the CI scanner
+            ``scripts/cicd/enforce_tier_1_decoration.py`` (rule TDE2) rejects
+            any non-literal value (variable, f-string, attribute, etc.)
+            because the value is the primary input to the module-prefix
+            allowlist check (``elspeth.contracts.*`` / ``elspeth.engine.*``
+            / ``elspeth.core.*``). ADR-010 M8 (issue elspeth-3af772b9e3)
+            replaced the prior ``inspect.stack()`` scheme because
+            frame-offset introspection breaks silently if any decorator
+            or metaclass wrapping is added between ``@tier_1_error`` and
+            the class — a future contributor's innocent-looking wrapper
+            could thereby let a plugin-module class elevate itself to
+            Tier-1. The explicit kwarg makes the allowlist check
+            grep-auditable and wrapper-proof.
 
     Raises:
         TypeError: applied without ``reason`` (positional-class usage like
-            ``@tier_1_error`` instead of ``@tier_1_error(reason=...)``).
+            ``@tier_1_error`` instead of ``@tier_1_error(reason=..., caller_module=...)``).
         ValueError: ``reason`` is empty.
-        PermissionError: caller module is outside the allowlist.
+        PermissionError: ``caller_module`` is outside the allowlist.
         FrameworkBugError: registry is frozen.
     """
     if _cls is not None:
-        raise TypeError("@tier_1_error requires a reason kwarg — use @tier_1_error(reason=...) not @tier_1_error")
+        raise TypeError(
+            "@tier_1_error requires reason and caller_module kwargs — use @tier_1_error(reason=..., caller_module=__name__) not @tier_1_error"
+        )
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("@tier_1_error(reason=...) requires non-empty reason string")
+    if not isinstance(caller_module, str) or not caller_module.strip():
+        raise ValueError("@tier_1_error(caller_module=...) requires non-empty string; pass caller_module=__name__ literally")
 
     def _decorator(cls: type[_ExcT]) -> type[_ExcT]:
-        caller_module = _inspect_caller_module()
         return _register_with_module_prefix(cls=cls, reason=reason, caller_module=caller_module)
 
     return _decorator
-
-
-def _inspect_caller_module() -> str:
-    # Frame 0 = this function; frame 1 = _decorator; frame 2 = decoration site.
-    frame = inspect.stack()[2]
-    module: str = frame.frame.f_globals.get("__name__", "")
-    return module
 
 
 def _register_with_module_prefix[ExcT: BaseException](*, cls: type[ExcT], reason: str, caller_module: str) -> type[ExcT]:

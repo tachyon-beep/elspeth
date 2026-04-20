@@ -290,7 +290,7 @@ def test_bootstrap_freezes_tier_registry(_isolate_both_registries) -> None:
     # Post-bootstrap: tier-1 registration must fail.
     with pytest.raises(FrameworkBugError, match="frozen"):
 
-        @tier_1_error(reason="post-bootstrap: must fail")
+        @tier_1_error(reason="post-bootstrap: must fail", caller_module=__name__)
         class _TooLate(Exception):
             pass
 

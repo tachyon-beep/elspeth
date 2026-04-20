@@ -39,8 +39,18 @@ import yaml
 # Constants
 # =============================================================================
 
-# The rule ID used in allowlist keys and violation reports.
+# The rule ID used in allowlist keys and violation reports (decoration coverage).
 RULE_ID = "TDE1"
+
+# TDE2 — caller_module literal enforcement (ADR-010 M8, issue elspeth-3af772b9e3).
+# Every @tier_1_error(...) Call MUST pass ``caller_module=__name__`` where the
+# value is the *literal* identifier ``__name__`` (ast.Name). Variables,
+# attribute lookups, f-strings, and string literals are all rejected — the
+# value is the primary input to the module-prefix allowlist check in
+# tier_registry._register_with_module_prefix, and allowing non-literal forms
+# would let a caller spoof the allowlist (or silently miscategorize after a
+# refactor rename).
+RULE_ID_CALLER_MODULE = "TDE2"
 
 # Class name suffixes that trigger inspection.
 _CHECKED_SUFFIXES = ("Error", "Violation")
@@ -63,6 +73,26 @@ class Finding:
     def canonical_key(self) -> str:
         """Allowlist key: file:rule_id:class_name."""
         return f"{self.file_path}:{RULE_ID}:{self.class_name}"
+
+
+@dataclass(frozen=True)
+class CallerModuleFinding:
+    """A @tier_1_error(...) Call that does not pass ``caller_module=__name__`` literally.
+
+    ADR-010 M8 (issue elspeth-3af772b9e3) — the ``caller_module`` kwarg
+    is the input to the module-prefix allowlist; non-literal values
+    would let a caller spoof the allowlist. Enforce that every call
+    passes the ``__name__`` identifier literal.
+    """
+
+    file_path: str
+    line: int
+    detail: str  # e.g. "missing caller_module kwarg" / "caller_module value is not the __name__ literal"
+
+    @property
+    def canonical_key(self) -> str:
+        """Allowlist key: file:rule_id:line."""
+        return f"{self.file_path}:{RULE_ID_CALLER_MODULE}:{self.line}"
 
 
 @dataclass
@@ -183,8 +213,41 @@ def _has_tier_2_comment(class_node: ast.ClassDef, source_lines: list[str]) -> bo
     return False
 
 
-def scan_file(file_path: Path, relative_path: str) -> list[Finding]:
-    """Scan a single Python file for TDE1 violations.
+def _is_tier_1_error_call(call: ast.Call) -> bool:
+    """Return True if ``call`` is a ``tier_1_error(...)`` invocation.
+
+    Accepts the bare-name form ``tier_1_error(...)`` and the qualified
+    form ``some_pkg.tier_1_error(...)``. Used to find both decorator and
+    direct-function-call invocations of the factory.
+    """
+    func = call.func
+    return (isinstance(func, ast.Name) and func.id == "tier_1_error") or (isinstance(func, ast.Attribute) and func.attr == "tier_1_error")
+
+
+def _check_caller_module_literal(call: ast.Call) -> str | None:
+    """Return a violation ``detail`` string if ``call`` fails the TDE2 rule, else None.
+
+    The rule (ADR-010 M8): every ``tier_1_error(...)`` Call MUST include
+    a ``caller_module=`` kwarg whose value is exactly the Python name
+    literal ``__name__`` (ast.Name with id == "__name__"). Any other
+    shape — missing kwarg, string literal, variable, attribute, f-string
+    — is rejected so the module-prefix allowlist cannot be spoofed.
+    """
+    caller_module_kw: ast.keyword | None = None
+    for kw in call.keywords:
+        if kw.arg == "caller_module":
+            caller_module_kw = kw
+            break
+    if caller_module_kw is None:
+        return "missing caller_module kwarg (require caller_module=__name__)"
+    value = caller_module_kw.value
+    if not (isinstance(value, ast.Name) and value.id == "__name__"):
+        return f"caller_module value must be the __name__ literal, got {ast.dump(value)}"
+    return None
+
+
+def scan_file(file_path: Path, relative_path: str) -> tuple[list[Finding], list[CallerModuleFinding]]:
+    """Scan a single Python file for TDE1 and TDE2 violations.
 
     Crashes loudly on read errors and SyntaxErrors per CLAUDE.md offensive
     programming posture — these indicate broken code that must be investigated.
@@ -202,26 +265,40 @@ def scan_file(file_path: Path, relative_path: str) -> list[Finding]:
         sys.exit(1)
 
     source_lines = source.splitlines()
-    findings: list[Finding] = []
+    tde1_findings: list[Finding] = []
+    tde2_findings: list[CallerModuleFinding] = []
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ClassDef):
-            continue
-        if not node.name.endswith(_CHECKED_SUFFIXES):
-            continue
-        if _has_tier_1_error_decorator(node):
-            continue
-        if _has_tier_2_comment(node, source_lines):
-            continue
-        findings.append(
-            Finding(
-                file_path=relative_path,
-                line=node.lineno,
-                class_name=node.name,
+        # TDE1: class-level decoration coverage.
+        if isinstance(node, ast.ClassDef):
+            if not node.name.endswith(_CHECKED_SUFFIXES):
+                continue
+            if _has_tier_1_error_decorator(node):
+                continue
+            if _has_tier_2_comment(node, source_lines):
+                continue
+            tde1_findings.append(
+                Finding(
+                    file_path=relative_path,
+                    line=node.lineno,
+                    class_name=node.name,
+                )
             )
-        )
+            continue
 
-    return findings
+        # TDE2: every tier_1_error(...) Call must pass caller_module=__name__ literally.
+        if isinstance(node, ast.Call) and _is_tier_1_error_call(node):
+            detail = _check_caller_module_literal(node)
+            if detail is not None:
+                tde2_findings.append(
+                    CallerModuleFinding(
+                        file_path=relative_path,
+                        line=node.lineno,
+                        detail=detail,
+                    )
+                )
+
+    return tde1_findings, tde2_findings
 
 
 # =============================================================================
@@ -401,18 +478,24 @@ def run_check(args: argparse.Namespace) -> int:
 
     allowlist = load_allowlist(allowlist_path)
 
-    all_findings = scan_file(target, relative_path)
+    tde1_findings, tde2_findings = scan_file(target, relative_path)
 
-    # Filter through allowlist.
+    # Filter TDE1 through allowlist.
     violations: list[Finding] = []
-    for finding in all_findings:
+    for finding in tde1_findings:
         if allowlist.match(finding) is None:
             violations.append(finding)
+
+    # TDE2 (ADR-010 M8) has no allowlist yet — the rule is new and the 4
+    # in-tree call sites are all under our control. If this ever needs to
+    # allowlist transitional failures, extend Allowlist.match to accept
+    # CallerModuleFinding keyed by file:TDE2:line.
+    tde2_violations = list(tde2_findings)
 
     stale_entries = allowlist.get_stale_entries() if allowlist.fail_on_stale else []
     expired_entries = allowlist.get_expired_entries() if allowlist.fail_on_expired else []
 
-    has_errors = bool(violations or stale_entries or expired_entries)
+    has_errors = bool(violations or tde2_violations or stale_entries or expired_entries)
 
     if violations:
         print(f"\n{'=' * 60}")
@@ -435,6 +518,20 @@ def run_check(args: argparse.Namespace) -> int:
         print("    reason: <explain why this class is not yet decorated>")
         print("    task: <filigree issue or ADR task that will resolve this>")
         print("    expires: <YYYY-MM-DD>")
+
+    if tde2_violations:
+        print(f"\n{'=' * 60}")
+        print(f"TDE2 VIOLATIONS FOUND: {len(tde2_violations)}")
+        print("@tier_1_error(...) Calls missing or mis-shaping caller_module=__name__")
+        print("(ADR-010 M8, issue elspeth-3af772b9e3 — module-prefix allowlist spoofing guard)")
+        print("=" * 60)
+        for v in tde2_violations:
+            print(f"{v.file_path}:{v.line}: {v.detail}")
+        print()
+        print("To fix: pass caller_module=__name__ literally at every @tier_1_error call site.")
+        print("The value MUST be the bare identifier __name__, not a variable, not an f-string,")
+        print("not an attribute lookup, not a string literal. The module-prefix allowlist check")
+        print("depends on this being the actual module name the decoration lives in.")
 
     if stale_entries:
         print(f"\n{'=' * 60}")

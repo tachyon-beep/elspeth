@@ -20,7 +20,10 @@ from elspeth.contracts.freeze import deep_freeze, freeze_fields
 from elspeth.contracts.tier_registry import FrameworkBugError as _FrameworkBugError
 from elspeth.contracts.tier_registry import tier_1_error
 
-FrameworkBugError = tier_1_error(reason="ADR-008: framework internal inconsistency — engine bug")(_FrameworkBugError)
+FrameworkBugError = tier_1_error(
+    reason="ADR-008: framework internal inconsistency — engine bug",
+    caller_module=__name__,
+)(_FrameworkBugError)
 
 if TYPE_CHECKING:
     from elspeth.contracts.batch_checkpoint import BatchCheckpointState
@@ -725,7 +728,10 @@ class GracefulShutdownError(Exception):
         )
 
 
-@tier_1_error(reason="ADR-008: audit trail corruption — permanent OPEN state")
+@tier_1_error(
+    reason="ADR-008: audit trail corruption — permanent OPEN state",
+    caller_module=__name__,
+)
 class AuditIntegrityError(Exception):
     """Raised when audit database operations fail unexpectedly.
 
@@ -767,7 +773,10 @@ class CoalesceCollisionError(Exception):
         self.metadata = metadata
 
 
-@tier_1_error(reason="ADR-008: orchestration invariant broken — executor bug")
+@tier_1_error(
+    reason="ADR-008: orchestration invariant broken — executor bug",
+    caller_module=__name__,
+)
 class OrchestrationInvariantError(Exception):
     """Raised when orchestration invariants are violated.
 
@@ -837,7 +846,10 @@ class PluginContractViolation(AuditEvidenceBase, RuntimeError):
         return {"exception_type": type(self).__name__, "message": str(self)}
 
 
-@tier_1_error(reason="ADR-008: pass-through annotation lie corrupts batch audit fields")
+@tier_1_error(
+    reason="ADR-008: pass-through annotation lie corrupts batch audit fields",
+    caller_module=__name__,
+)
 class PassThroughContractViolation(PluginContractViolation):
     """Raised by TransformExecutor when a passes_through_input=True transform
     drops input fields from its emitted row(s).
