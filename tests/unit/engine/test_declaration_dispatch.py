@@ -38,6 +38,14 @@ class _AppliesContract:
     def negative_example(cls):
         return _inputs(), _outputs()
 
+    @classmethod
+    def positive_example_does_not_apply(cls):
+        # N2 Layer A: test-scope fixture. Registered inside _isolate fixture
+        # only; never reaches the harness. Returning the same scenario is
+        # sufficient because these tests don't exercise the harness — they
+        # exercise the dispatcher's routing directly.
+        return _inputs(), _outputs()
+
 
 class _SkipsContract:
     name = "skips"
@@ -52,6 +60,14 @@ class _SkipsContract:
 
     @classmethod
     def negative_example(cls):
+        return _inputs(), _outputs()
+
+    @classmethod
+    def positive_example_does_not_apply(cls):
+        # N2 Layer A: test-scope fixture. Registered inside _isolate fixture
+        # only; never reaches the harness. Returning the same scenario is
+        # sufficient because these tests don't exercise the harness — they
+        # exercise the dispatcher's routing directly.
         return _inputs(), _outputs()
 
 
@@ -85,6 +101,14 @@ class _RaisesViolationContract:
     def negative_example(cls):
         return _inputs(), _outputs()
 
+    @classmethod
+    def positive_example_does_not_apply(cls):
+        # N2 Layer A: test-scope fixture. Registered inside _isolate fixture
+        # only; never reaches the harness. Returning the same scenario is
+        # sufficient because these tests don't exercise the harness — they
+        # exercise the dispatcher's routing directly.
+        return _inputs(), _outputs()
+
 
 class _ApplyRaisesContract:
     """Simulates a buggy contract whose applies_to raises — must propagate."""
@@ -101,6 +125,14 @@ class _ApplyRaisesContract:
     def negative_example(cls):
         return _inputs(), _outputs()
 
+    @classmethod
+    def positive_example_does_not_apply(cls):
+        # N2 Layer A: test-scope fixture. Registered inside _isolate fixture
+        # only; never reaches the harness. Returning the same scenario is
+        # sufficient because these tests don't exercise the harness — they
+        # exercise the dispatcher's routing directly.
+        return _inputs(), _outputs()
+
 
 class _CheckRaisesContract:
     name = "check_raises"
@@ -114,6 +146,14 @@ class _CheckRaisesContract:
 
     @classmethod
     def negative_example(cls):
+        return _inputs(), _outputs()
+
+    @classmethod
+    def positive_example_does_not_apply(cls):
+        # N2 Layer A: test-scope fixture. Registered inside _isolate fixture
+        # only; never reaches the harness. Returning the same scenario is
+        # sufficient because these tests don't exercise the harness — they
+        # exercise the dispatcher's routing directly.
         return _inputs(), _outputs()
 
 

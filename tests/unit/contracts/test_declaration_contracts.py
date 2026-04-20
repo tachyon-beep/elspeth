@@ -100,6 +100,24 @@ class _FakeContract:
             RuntimeCheckOutputs(emitted_rows=(object(),)),
         )
 
+    @classmethod
+    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+        # fake_flag=False → applies_to returns False (N2 Layer A).
+        plugin = _FakePlugin()
+        plugin.fake_flag = False
+        return (
+            RuntimeCheckInputs(
+                plugin=plugin,
+                node_id="n",
+                run_id="r",
+                row_id="rw",
+                token_id="t",
+                input_row=object(),
+                static_contract=frozenset(),
+            ),
+            RuntimeCheckOutputs(emitted_rows=(object(),)),
+        )
+
 
 class _FakePlugin:
     fake_flag = True
@@ -188,6 +206,33 @@ def test_contract_without_negative_example_rejected() -> None:
 
     with pytest.raises(TypeError, match="negative_example"):
         register_declaration_contract(_NoNeg())  # type: ignore[arg-type]
+
+
+def test_contract_without_positive_example_does_not_apply_rejected() -> None:
+    """N2 Layer A (issue elspeth-50509ed2bc): registration must reject a
+    contract missing ``positive_example_does_not_apply``. The harness at
+    tests/invariants/test_contract_non_fire.py iterates every registered
+    contract and exercises the non-fire invariant, so every adopter MUST
+    provide the classmethod at registration time."""
+
+    class _NoNonFire:
+        name = "no_non_fire"
+        payload_schema = _FakePayload
+
+        def applies_to(self, p):
+            return False
+
+        def runtime_check(self, i, o):
+            pass
+
+        @classmethod
+        def negative_example(cls):
+            raise NotImplementedError
+
+        # positive_example_does_not_apply missing
+
+    with pytest.raises(TypeError, match="positive_example_does_not_apply"):
+        register_declaration_contract(_NoNonFire())  # type: ignore[arg-type]
 
 
 def test_registration_after_freeze_raises() -> None:
@@ -489,6 +534,16 @@ def test_dispatcher_attaches_contract_name_from_registry() -> None:
 
         @classmethod
         def negative_example(cls):  # type: ignore[override]
+            raise NotImplementedError
+
+        @classmethod
+        def positive_example_does_not_apply(cls):  # type: ignore[override]
+            # applies_to returns True unconditionally, so no non-fire scenario
+            # exists for this attacker fixture. N2 Layer A only requires the
+            # method to be present and callable; the harness runs against
+            # the production registry, which this test-scope contract never
+            # joins in a harness-visible way (the fixture registers inside the
+            # _isolate_registry fixture and is torn down before the harness).
             raise NotImplementedError
 
     register_declaration_contract(_AttackerContract())

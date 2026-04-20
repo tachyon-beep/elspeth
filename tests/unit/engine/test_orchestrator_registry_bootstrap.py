@@ -130,6 +130,12 @@ def test_bootstrap_fails_when_specific_contract_conditionally_skipped(_isolate_b
         def negative_example(cls):  # type: ignore[override]
             raise NotImplementedError
 
+        @classmethod
+        def positive_example_does_not_apply(cls):  # type: ignore[override]
+            # N2 Layer A: fixture registered only for this bootstrap test;
+            # never exercised by the invariant harness.
+            raise NotImplementedError
+
     # Clear registry, then register ONLY an unexpected contract — pass_through
     # is missing. The registry is non-empty, so a bare truthiness check would
     # pass. The manifest-equality check must catch this.
@@ -176,6 +182,12 @@ def test_bootstrap_fails_when_extra_contract_registered(_isolate_both_registries
 
         @classmethod
         def negative_example(cls):  # type: ignore[override]
+            raise NotImplementedError
+
+        @classmethod
+        def positive_example_does_not_apply(cls):  # type: ignore[override]
+            # N2 Layer A: fixture registered only for this bootstrap test;
+            # never exercised by the invariant harness.
             raise NotImplementedError
 
     # Clear + re-register PassThrough so manifest is satisfied, then add an
@@ -262,6 +274,12 @@ def test_bootstrap_freezes_declaration_registry(_isolate_both_registries) -> Non
 
         @classmethod
         def negative_example(cls):  # type: ignore[override]
+            raise NotImplementedError
+
+        @classmethod
+        def positive_example_does_not_apply(cls):  # type: ignore[override]
+            # N2 Layer A: fixture registered only for this bootstrap test;
+            # never exercised by the invariant harness.
             raise NotImplementedError
 
     with pytest.raises(FrameworkBugError):

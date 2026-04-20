@@ -152,6 +152,34 @@ class CreatesTokensContract:
         outputs = RuntimeCheckOutputs(emitted_rows=(object(),))
         return inputs, outputs
 
+    @classmethod
+    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+        """A creates_tokens=False plugin — applies_to must return False.
+
+        N2 Layer A harness (issue elspeth-50509ed2bc) invariant.
+        """
+
+        class _NonCreatesTokensTransform:
+            name = "NonFireCreatesTokensExample"
+            node_id = "ct-non-fire-1"
+            creates_tokens = False  # ← applies_to reads this
+
+        inputs = RuntimeCheckInputs(
+            plugin=_NonCreatesTokensTransform(),
+            node_id="ct-non-fire-1",
+            run_id="ct-non-fire-run",
+            row_id="ct-non-fire-row",
+            token_id="ct-non-fire-token",
+            input_row=object(),
+            static_contract=frozenset(),
+        )
+        # Multi-row emission which this contract would flag on a creates_tokens=True
+        # plugin. Here applies_to returns False so the dispatcher never invokes
+        # runtime_check; belt-and-suspenders semantics mean the contract body
+        # tolerates this shape without raising.
+        outputs = RuntimeCheckOutputs(emitted_rows=(object(), object(), object()))
+        return inputs, outputs
+
 
 # ---------------------------------------------------------------------------
 # Fixture: snapshot-and-restore so the proof contract does not leak

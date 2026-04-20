@@ -383,6 +383,26 @@ class DeclarationContract(Protocol):
     @classmethod
     def negative_example(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]: ...
 
+    @classmethod
+    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+        """Return a scenario for which ``applies_to`` MUST return False.
+
+        Paired with ``negative_example`` (which exercises the positive path
+        "contract fires when it should"). This method exercises the
+        complementary invariant "contract does NOT fire when preconditions
+        are absent" (issue elspeth-50509ed2bc / N2 Layer A).
+
+        Rationale: the ``negative_example`` harness catches dormant
+        ``runtime_check`` (reviewer B6/F-7). It does not catch a buggy
+        ``applies_to`` that returns True for plugins the contract was not
+        designed to cover — in that case the contract fires in the wrong
+        context and mis-attributes the violation to the wrong plugin kind
+        or dispatch site. The harness built on this classmethod asserts
+        every registered contract has a known non-applying scenario and
+        verifies ``applies_to`` returns False on it.
+        """
+        ...
+
 
 _REGISTRY: list[DeclarationContract] = []
 _FROZEN: bool = False
@@ -449,6 +469,18 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
     if not callable(neg_example):
         raise TypeError(f"Contract {contract.name!r} negative_example must be callable")
 
+    # Validate positive_example_does_not_apply presence and callability
+    # (issue elspeth-50509ed2bc / N2 Layer A — non-fire coverage).
+    try:
+        non_fire_example = type(contract).positive_example_does_not_apply
+    except AttributeError:
+        raise TypeError(
+            f"Contract {contract.name!r} missing required positive_example_does_not_apply classmethod "
+            f"(issue elspeth-50509ed2bc / ADR-010 N2 Layer A — non-fire coverage)"
+        ) from None
+    if not callable(non_fire_example):
+        raise TypeError(f"Contract {contract.name!r} positive_example_does_not_apply must be callable")
+
     for existing in _REGISTRY:
         if existing.name == contract.name:
             raise ValueError(f"duplicate contract name {contract.name!r}: already registered")
@@ -464,6 +496,23 @@ def freeze_declaration_registry() -> None:
     raise ``FrameworkBugError``. Called at end of orchestrator bootstrap."""
     global _FROZEN
     _FROZEN = True
+
+
+def resolve_payload_schema_key_sets(schema: type) -> tuple[frozenset[str], frozenset[str]]:
+    """Public accessor for payload-schema key classification.
+
+    Returns ``(required, optional)`` frozensets for a TypedDict class, as
+    resolved by ``_resolve_typeddict_key_sets`` (the H5 Layer 1 resolver
+    that handles NotRequired/Required wrappers under
+    ``from __future__ import annotations``).
+
+    Exposed so the invariant harness (issue elspeth-50509ed2bc / N2 Layer B
+    payload-representativeness) can assert every registered contract's
+    ``negative_example`` raises a violation whose payload covers the
+    schema's required-key set — a harness-level defence-in-depth for the
+    gate that H5 Layer 1 already enforces at ``__init__`` time.
+    """
+    return _resolve_typeddict_key_sets(schema)
 
 
 def declaration_registry_is_frozen() -> bool:

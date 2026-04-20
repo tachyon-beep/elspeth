@@ -360,12 +360,20 @@ class TestWithDetailsConsistencyProperties:
 
         assert set(details.keys()) == simple
 
-    @given(field=bracket_field_names)
+    @given(field=valid_field_names)
     @settings(max_examples=50)
     def test_attr_access_labeled_as_attr(self, field: str) -> None:
-        """Property: Attribute access (row.field) labeled as 'attr'."""
-        assume(field.isidentifier())
+        """Property: Attribute access (row.field) labeled as 'attr'.
 
+        Uses ``valid_field_names`` (which excludes the PipelineRow API names
+        in ``_EXCLUDED_ROW_API_NAMES``) rather than ``bracket_field_names``
+        because this test exercises attribute access (``row.field``) — the
+        extractor applies the API-name filter on that path. Prior to the
+        fix this test took ``bracket_field_names`` which allowed any
+        identifier-or-not string, so Hypothesis found "contract" as a
+        falsifying example (same bug class as the cad25ec0 fix for
+        ``test_duplicate_attributes_deduplicated``).
+        """
         template = f"{{{{ row.{field} }}}}"
         details = extract_jinja2_fields_with_details(template)
 

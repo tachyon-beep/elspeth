@@ -95,6 +95,24 @@ class _CountingContract:
             RuntimeCheckOutputs(emitted_rows=(object(),)),
         )
 
+    @classmethod
+    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+        # N2 Layer A: same commentary as negative_example above —
+        # registered inside the isolation fixture only. Well-formed pair
+        # returned to satisfy the registry validator's callability check.
+        return (
+            RuntimeCheckInputs(
+                plugin=object(),
+                node_id="n",
+                run_id="r",
+                row_id="rw",
+                token_id="t",
+                input_row=object(),
+                static_contract=frozenset(),
+            ),
+            RuntimeCheckOutputs(emitted_rows=(object(),)),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Processor / flush-context builders (mirror existing test file conventions)

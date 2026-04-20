@@ -247,6 +247,68 @@ class PassThroughDeclarationContract:
         outputs = RuntimeCheckOutputs(emitted_rows=(_row(("a", "c")),))
         return inputs, outputs
 
+    @classmethod
+    def positive_example_does_not_apply(cls) -> tuple[RuntimeCheckInputs, RuntimeCheckOutputs]:
+        """Classmethod used by the N2 harness to prove ``applies_to`` returns
+        False on a plugin this contract was not designed to cover
+        (issue elspeth-50509ed2bc / ADR-010 N2 Layer A).
+
+        For ``PassThroughDeclarationContract`` the non-applying scenario is
+        trivially a transform with ``passes_through_input=False`` — the sole
+        discriminator ``applies_to`` reads. The scenario still carries
+        well-formed inputs/outputs so that if a future bug caused the
+        dispatcher to invoke ``runtime_check`` despite ``applies_to=False``,
+        the method's behaviour is observable by the harness's
+        belt-and-suspenders check (``runtime_check`` MUST NOT raise this
+        contract's violation on its own declared non-fire scenario).
+        """
+        from elspeth.contracts.schema_contract import (
+            FieldContract,
+            PipelineRow,
+            SchemaContract,
+        )
+
+        def _row(fields: tuple[str, ...]) -> PipelineRow:
+            c = SchemaContract(
+                mode="OBSERVED",
+                fields=tuple(
+                    FieldContract(
+                        normalized_name=n,
+                        original_name=n,
+                        python_type=str,
+                        required=True,
+                        source="inferred",
+                        nullable=False,
+                    )
+                    for n in fields
+                ),
+                locked=True,
+            )
+            return PipelineRow(dict.fromkeys(fields, "v"), c)
+
+        class _NonPassThroughTransform:
+            name = "NonFireExample"
+            node_id = "non-fire-1"
+            passes_through_input = False  # ← the discriminator applies_to reads
+            _output_schema_config = None
+
+        inputs = RuntimeCheckInputs(
+            plugin=_NonPassThroughTransform(),
+            node_id="non-fire-1",
+            run_id="non-fire-run",
+            row_id="non-fire-row",
+            token_id="non-fire-token",
+            input_row=_row(("a", "b", "c")),
+            static_contract=frozenset({"a", "b", "c"}),
+        )
+        # Emitted rows preserve every input field — so even if runtime_check
+        # is invoked despite applies_to returning False, verify_pass_through
+        # would accept this case (no dropped fields). The harness's
+        # belt-and-suspenders assertion is then "no violation raised" rather
+        # than "no silent coercion".
+        outputs = RuntimeCheckOutputs(emitted_rows=(_row(("a", "b", "c")),))
+        return inputs, outputs
+
 
 # Module import side-effect: register with the framework. Bootstrap asserts
 # (Task 5b) that this registration actually happened before any run begins.
