@@ -94,14 +94,15 @@ class BatchReplicate(BaseTransform):
 
     name = "batch_replicate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:3e2392bc0cd96a33"
+    source_file_hash: str | None = "sha256:1f992a8acd65113f"
     config_model = BatchReplicateConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
-    # ADR-007: BatchReplicate deep-copies every input row before adding copy_index,
-    # so every emitted token is an unconditional superset of input fields. Static
-    # validator may propagate predecessor guarantees through this transform.
-    passes_through_input = True
+    # Mixed-validity batches can quarantine some input rows (e.g. copies < 1)
+    # while still succeeding for the rest of the batch. That makes the
+    # unconditional pass-through contract dishonest even though every emitted
+    # row deep-copies the originating input before adding copy_index.
+    passes_through_input = False
 
     @classmethod
     def probe_config(cls) -> dict[str, Any]:

@@ -18,11 +18,14 @@ from typing import Any, Literal, NamedTuple, Self, TypedDict
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.contracts.guarantee_propagation import compose_propagation
 from elspeth.contracts.schema import (
+    SchemaConfig,
     get_raw_node_required_fields,
     get_raw_producer_guaranteed_fields,
+    get_raw_schema_config,
     get_raw_sink_required_fields,
     raw_options_have_schema,
 )
+from elspeth.core.dag.coalesce_merge import merge_guaranteed_fields
 from elspeth.engine.orchestrator.validation import (
     _ALLOWED_FAILSINK_PLUGINS,
 )
@@ -634,8 +637,8 @@ def _check_schema_contracts(
         transforms = get_shared_plugin_manager().get_transforms()
         return frozenset(cls.name for cls in transforms if cls.passes_through_input)
 
-    def _effective_producer_guarantees(producer: _ProducerEntry) -> frozenset[str]:
-        """Return the producer guarantees Stage 1 should compare.
+    def _effective_producer_vote(producer: _ProducerEntry) -> tuple[bool, frozenset[str]]:
+        """Return (participates, guarantees) for preview propagation.
 
         Raw schema blocks are the baseline. For transform/aggregation nodes,
         prefer the plugin's computed output contract when construction succeeds;
@@ -652,18 +655,27 @@ def _check_schema_contracts(
         the pipeline rather than silently serving a permissive preview that
         would diverge from runtime rejection.
         """
+        raw_schema = get_raw_schema_config(
+            producer.options,
+            owner=_producer_owner(producer),
+        )
         raw_guaranteed = get_raw_producer_guaranteed_fields(
             producer.plugin_name,
             producer.options,
             owner=_producer_owner(producer),
         )
+        raw_participates = raw_schema is not None and raw_schema.participates_in_propagation
+        if not raw_participates and raw_guaranteed:
+            # Text-source heuristics can synthesize guarantees even when the
+            # observed-mode schema itself abstains.
+            raw_participates = True
 
         if producer.producer_id == "source":
-            return raw_guaranteed
+            return raw_participates, raw_guaranteed
 
         producer_node = node_by_id[producer.producer_id]
         if producer_node.node_type not in {"transform", "aggregation"} or producer_node.plugin is None:
-            return raw_guaranteed
+            return raw_participates, raw_guaranteed
 
         is_known_pass_through = producer_node.plugin in _known_pass_through_plugins()
 
@@ -718,21 +730,73 @@ def _check_schema_contracts(
                         )
                     )
             if is_known_pass_through:
-                return frozenset()
-            return raw_guaranteed
+                return True, frozenset()
+            return raw_participates, raw_guaranteed
 
-        if output_schema_config is None:
-            return raw_guaranteed
-
-        base = output_schema_config.get_effective_guaranteed_fields()
         if is_pass_through_instance:
+            base = output_schema_config.get_effective_guaranteed_fields() if output_schema_config is not None else frozenset()
             inherited = _intersect_predecessor_guarantees(producer_node)
             # ADR-009 §Clause 1: share the aggregation rule with graph.py.
             # Composer's producer-graph is single-upstream at this level
             # (coalesce absorbs fan-in via pre-computed output), so we pass a
             # one-element predecessor_guarantees list to compose_propagation.
-            return compose_propagation(base, [inherited])
-        return base
+            participates = output_schema_config.participates_in_propagation if output_schema_config is not None else raw_participates
+            return participates, compose_propagation(base, [inherited])
+
+        if output_schema_config is None:
+            return raw_participates, raw_guaranteed
+
+        base = output_schema_config.get_effective_guaranteed_fields()
+        return output_schema_config.participates_in_propagation, base
+
+    def _effective_producer_guarantees(producer: _ProducerEntry) -> frozenset[str]:
+        """Return the producer guarantees Stage 1 should compare."""
+        _participates, guarantees = _effective_producer_vote(producer)
+        return guarantees
+
+    def _connection_propagation_vote(connection_name: str) -> tuple[bool, frozenset[str]]:
+        """Resolve a connection's propagation vote across structural nodes.
+
+        Unlike ``_walk_to_real_producer()``, this helper is only used for
+        pass-through inheritance and therefore follows structural fan-out/fan-in
+        nodes instead of treating them as preview-stopping boundaries.
+        """
+        if connection_name not in producer_map:
+            return False, frozenset()
+        producer = producer_map[connection_name]
+
+        if producer.producer_id == "source":
+            return _effective_producer_vote(producer)
+
+        producer_node = node_by_id[producer.producer_id]
+        if producer_node.node_type == "gate":
+            return _connection_propagation_vote(producer_node.input)
+
+        if producer_node.node_type == "coalesce":
+            if not producer_node.branches:
+                return False, frozenset()
+
+            branch_schemas: dict[str, SchemaConfig] = {}
+            for branch_connection in producer_node.branches:
+                branch_participates, branch_guarantees = _connection_propagation_vote(branch_connection)
+                if not branch_participates:
+                    continue
+                branch_schemas[branch_connection] = SchemaConfig(
+                    mode="observed",
+                    fields=None,
+                    guaranteed_fields=tuple(sorted(branch_guarantees)),
+                )
+
+            if not branch_schemas:
+                return False, frozenset()
+
+            merged = merge_guaranteed_fields(
+                branch_schemas,
+                require_all=producer_node.policy == "require_all",
+            )
+            return True, frozenset(merged or ())
+
+        return _effective_producer_vote(producer)
 
     def _intersect_predecessor_guarantees(node: NodeSpec) -> frozenset[str]:
         """Mirror the runtime propagation walk in the composer's producer graph.
@@ -741,26 +805,21 @@ def _check_schema_contracts(
         and the participation predicate (``SchemaConfig.participates_in_propagation``)
         are shared with ``graph.py::_walk_effective_guaranteed_fields``. The
         traversal logic remains separate — the composer walks a
-        producer-graph (L3, single-upstream via ``_walk_to_real_producer``)
+        producer-graph (L3, connection-by-connection via
+        ``_connection_propagation_vote``)
         while graph.py walks the runtime DAG (L1, multi-predecessor). The
         two views legitimately differ; unifying traversal would pollute
         layers without eliminating duplication.
 
-        The single-upstream call at this level always consults
-        ``_effective_producer_guarantees`` on the walked-to real producer —
-        abstention semantics are absorbed at that boundary (a fully-observed
-        source with no declarations returns ``frozenset()`` which
-        ``compose_propagation`` then treats as explicit-empty at the caller).
+        For pass-through inheritance, the composer must preserve structural
+        guarantee semantics across fork gates and coalesce nodes instead of
+        treating them as preview-stopping boundaries. The recursive
+        connection vote helper follows those structural nodes and returns the
+        effective guarantee set the downstream pass-through transform should
+        intersect with its own declarations.
         """
-        upstream = _walk_to_real_producer(
-            node.input,
-            producer_map=producer_map,
-            node_by_id=node_by_id,
-            warnings=contract_warnings,
-        )
-        if upstream is None:
-            return frozenset()
-        return _effective_producer_guarantees(upstream)
+        _participates, guarantees = _connection_propagation_vote(node.input)
+        return guarantees
 
     def _format_fields(fields: frozenset[str]) -> str:
         return ", ".join(sorted(fields)) if fields else "(none)"

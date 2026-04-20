@@ -100,7 +100,19 @@ class SourceGuaranteedFieldsContract(DeclarationContract):
     payload_schema: ClassVar[type] = SourceGuaranteedFieldsPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        return bool(cast(frozenset[str], plugin.declared_guaranteed_fields))
+        if "declared_guaranteed_fields" in vars(plugin):
+            declared_guaranteed_fields = cast(
+                frozenset[str],
+                vars(plugin)["declared_guaranteed_fields"],
+            )
+            return bool(declared_guaranteed_fields)
+        if "declared_guaranteed_fields" in vars(type(plugin)):
+            declared_guaranteed_fields = cast(
+                frozenset[str],
+                vars(type(plugin))["declared_guaranteed_fields"],
+            )
+            return bool(declared_guaranteed_fields)
+        return False
 
     @implements_dispatch_site("boundary_check")
     def boundary_check(

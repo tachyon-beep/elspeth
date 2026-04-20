@@ -32,6 +32,18 @@ class TestBatchReplicateHappyPath:
         assert BatchReplicate.name == "batch_replicate"
         assert BatchReplicate.is_batch_aware is True
 
+    def test_is_not_declared_pass_through_when_invalid_rows_can_be_quarantined(self) -> None:
+        """Mixed-validity batches make unconditional pass-through dishonest.
+
+        ``process()`` can quarantine some inputs while still succeeding for the
+        rest of the batch, so the class-level declaration must stay
+        conservative until ELSPETH has a more precise partial-pass-through
+        contract.
+        """
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        assert BatchReplicate.passes_through_input is False
+
     def test_replicates_rows_by_copies_field(self, ctx: PluginContext) -> None:
         """BatchReplicate creates N copies of each row based on copies field."""
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
@@ -510,8 +522,8 @@ class TestBatchReplicateContractPreservation:
     def ctx(self) -> PluginContext:
         return make_context()
 
-    def test_output_preserves_input_contract_mode(self, ctx: PluginContext) -> None:
-        """Output contract mode should match input contract mode."""
+    def test_output_contract_mode_aligns_to_declared_output_schema(self, ctx: PluginContext) -> None:
+        """Emitted contract mode follows the transform's declared output schema."""
         from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
         from elspeth.plugins.transforms.batch_replicate import BatchReplicate
 
@@ -538,7 +550,8 @@ class TestBatchReplicateContractPreservation:
         assert result.status == "success"
         assert result.rows is not None
         output_contract = result.rows[0].contract
-        assert output_contract.mode == "FIXED"
+        assert output_contract.mode == "OBSERVED"
+        assert output_contract.locked is True
 
     def test_output_preserves_field_python_type(self, ctx: PluginContext) -> None:
         """Output contract fields preserve python_type from input contract."""

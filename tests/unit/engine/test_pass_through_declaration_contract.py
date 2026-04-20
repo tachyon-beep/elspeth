@@ -150,6 +150,40 @@ def test_derive_effective_input_fields_crashes_on_missing_contract() -> None:
         derive_effective_input_fields(_BadRow())
 
 
+def test_derive_effective_input_fields_excludes_optional_contract_fields_missing_from_payload() -> None:
+    """Effective input fields are the row's exposed keys, not all contract fields.
+
+    Coalesce/fan-in paths can carry optional branch fields in the contract while
+    omitting them from a particular row's payload. The declaration-contract
+    layer must treat those fields as absent at runtime.
+    """
+    contract = SchemaContract(
+        mode="OBSERVED",
+        fields=(
+            FieldContract(
+                normalized_name="required_field",
+                original_name="required_field",
+                python_type=str,
+                required=True,
+                source="declared",
+                nullable=False,
+            ),
+            FieldContract(
+                normalized_name="optional_branch_field",
+                original_name="optional_branch_field",
+                python_type=str,
+                required=False,
+                source="declared",
+                nullable=False,
+            ),
+        ),
+        locked=True,
+    )
+    input_row = PipelineRow({"required_field": "v"}, contract)
+
+    assert derive_effective_input_fields(input_row) == frozenset({"required_field"})
+
+
 def test_post_emission_check_preserves_orchestrationinvarianterror_on_missing_node_id() -> None:
     """B2 regression: transform.node_id=None must raise OrchestrationInvariantError."""
     c = PassThroughDeclarationContract()

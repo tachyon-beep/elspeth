@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts.errors import FrameworkBugError
 from elspeth.core.config import (
     AggregationSettings,
     CoalesceSettings,
@@ -575,7 +576,7 @@ class TestComposerRuntimeAgreement:
         self,
         tmp_path: Path,
     ) -> None:
-        """Both validators reject the shared aggregation required-input case."""
+        """Composer rejects at preview time and runtime rejects during plugin wiring."""
         csv_path = tmp_path / "input.csv"
         csv_path.write_text("line\nhello\n", encoding="utf-8")
         output_path = tmp_path / "out.csv"
@@ -638,8 +639,8 @@ class TestComposerRuntimeAgreement:
         assert not composer_result.is_valid
         assert any("value" in entry.message.lower() for entry in composer_result.errors)
 
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph = self._build_runtime_graph(
+        with pytest.raises(FrameworkBugError) as exc_info:
+            self._build_runtime_graph(
                 source_plugin="csv",
                 source_options={
                     "path": str(csv_path),
@@ -657,7 +658,6 @@ class TestComposerRuntimeAgreement:
                     "schema": {"mode": "observed"},
                 },
             )
-            graph.validate_edge_compatibility()
         assert "value" in str(exc_info.value).lower()
 
     def test_both_reject_aggregation_nested_schema_required_fields_without_upstream_guarantee(
@@ -864,6 +864,178 @@ class TestComposerRuntimeAgreement:
             graph = self._build_runtime_graph_from_settings(config)
             graph.validate_edge_compatibility()
         assert "text" in str(exc_info.value).lower()
+
+    def test_both_accept_pass_through_downstream_of_coalesce(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Pass-through preview must inherit coalesce guarantees after fan-in."""
+        csv_path = tmp_path / "input.csv"
+        csv_path.write_text("id,value\n1,2\n", encoding="utf-8")
+        output_path = tmp_path / "out.csv"
+
+        state = self._empty_state()
+        state = state.with_source(
+            SourceSpec(
+                plugin="csv",
+                on_success="gate_in",
+                options={
+                    "path": str(csv_path),
+                    "schema": {"mode": "fixed", "fields": ["id: int", "value: int"]},
+                },
+                on_validation_failure="quarantine",
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="fork_gate",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={"true": "fork", "false": "fork"},
+                fork_to=("path_a", "path_b"),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="merge_results",
+                node_type="coalesce",
+                plugin=None,
+                input="path_a",
+                on_success="merge_results",
+                on_error=None,
+                options={},
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=("path_a", "path_b"),
+                policy="best_effort",
+                merge="union",
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="pt_after_merge",
+                node_type="transform",
+                plugin="passthrough",
+                input="merge_results",
+                on_success="main",
+                on_error="discard",
+                options={"schema": {"mode": "observed"}},
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": str(output_path),
+                    "schema": {"mode": "observed", "required_fields": ["id"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(
+            EdgeSpec(
+                id="e1",
+                from_node="source",
+                to_node="fork_gate",
+                edge_type="on_success",
+                label=None,
+            )
+        )
+        state = state.with_edge(
+            EdgeSpec(
+                id="e2",
+                from_node="fork_gate",
+                to_node="merge_results",
+                edge_type="fork",
+                label="path_a",
+            )
+        )
+        state = state.with_edge(
+            EdgeSpec(
+                id="e3",
+                from_node="merge_results",
+                to_node="pt_after_merge",
+                edge_type="on_success",
+                label=None,
+            )
+        )
+
+        composer_result = state.validate()
+        assert composer_result.is_valid, composer_result.errors
+        sink_contract = next(contract for contract in composer_result.edge_contracts if contract.to_id == "output:main")
+        assert sink_contract.from_id == "pt_after_merge"
+        assert sink_contract.producer_guarantees == ("id", "value")
+        assert sink_contract.consumer_requires == ("id",)
+        assert sink_contract.satisfied is True
+
+        config = ElspethSettings(
+            source=SourceSettings(
+                plugin="csv",
+                on_success="gate_in",
+                options={
+                    "path": str(csv_path),
+                    "schema": {"mode": "fixed", "fields": ["id: int", "value: int"]},
+                    "on_validation_failure": "discard",
+                },
+            ),
+            transforms=[
+                TransformSettings(
+                    name="pt_after_merge",
+                    plugin="passthrough",
+                    input="merge_results",
+                    on_success="main",
+                    on_error="discard",
+                    options={"schema": {"mode": "observed"}},
+                )
+            ],
+            gates=[
+                GateSettings(
+                    name="fork_gate",
+                    input="gate_in",
+                    condition="True",
+                    routes={"true": "fork", "false": "fork"},
+                    fork_to=["path_a", "path_b"],
+                )
+            ],
+            coalesce=[
+                CoalesceSettings(
+                    name="merge_results",
+                    branches={"path_a": "path_a", "path_b": "path_b"},
+                    policy="best_effort",
+                    merge="union",
+                    timeout_seconds=1,
+                )
+            ],
+            sinks={
+                "main": SinkSettings(
+                    plugin="csv",
+                    on_write_failure="discard",
+                    options={
+                        "path": str(output_path),
+                        "schema": {"mode": "observed", "required_fields": ["id"]},
+                    },
+                )
+            },
+        )
+
+        graph = self._build_runtime_graph_from_settings(config)
+        graph.validate_edge_compatibility()
 
     def test_composer_warns_but_runtime_rejects_mixed_coalesce_branch_schemas(
         self,

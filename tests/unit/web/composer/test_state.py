@@ -3599,6 +3599,134 @@ class TestPassThroughComposerParity:
     def _make_edge(self, id: str, from_id: str, to_id: str) -> EdgeSpec:
         return EdgeSpec(id=id, from_node=from_id, to_node=to_id, edge_type="on_success", label=None)
 
+    def test_preview_inherits_upstream_guarantees_when_pass_through_has_no_output_schema_config(self) -> None:
+        """Successful passthrough probes still propagate inherited guarantees.
+
+        The built-in passthrough plugin does not populate
+        ``_output_schema_config``. Composer preview must therefore treat its
+        own declaration set as empty and still apply ADR-007 propagation,
+        mirroring ``ExecutionGraph.get_effective_guaranteed_fields()``.
+        """
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="source",
+                plugin="csv",
+                options={
+                    "schema": {
+                        "mode": "fixed",
+                        "fields": ["id: str", "body: str"],
+                        "guaranteed_fields": ["id", "body"],
+                    }
+                },
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "pt_node",
+                "source",
+                "main",
+                plugin="passthrough",
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "pt_node"))
+        state = state.with_edge(self._make_edge("e2", "pt_node", "main"))
+
+        result = state.validate()
+
+        assert result.is_valid
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert set(sink_contract.producer_guarantees) == {"id", "body"}
+        assert sink_contract.consumer_requires == ("body",)
+        assert sink_contract.satisfied is True
+
+    def test_preview_inherits_upstream_guarantees_through_fork_gate_into_pass_through(self) -> None:
+        """Pass-through preview must follow fork branches back to their producer."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="gate_in",
+                plugin="csv",
+                options={
+                    "schema": {
+                        "mode": "fixed",
+                        "fields": ["id: str", "body: str"],
+                    }
+                },
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="fork_gate",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={"true": "fork", "false": "fork"},
+                fork_to=("path_a", "overflow"),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "pt_node",
+                "path_a",
+                "main",
+                plugin="passthrough",
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "observed", "required_fields": ["body"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="overflow",
+                plugin="csv",
+                options={
+                    "path": "outputs/overflow.csv",
+                    "schema": {"mode": "observed"},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "fork_gate"))
+        state = state.with_edge(EdgeSpec(id="e2", from_node="fork_gate", to_node="pt_node", edge_type="fork", label="path_a"))
+        state = state.with_edge(EdgeSpec(id="e3", from_node="fork_gate", to_node="overflow", edge_type="fork", label="overflow"))
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
+        assert set(sink_contract.producer_guarantees) == {"id", "body"}
+        assert sink_contract.consumer_requires == ("body",)
+        assert sink_contract.satisfied is True
+
     def test_preview_fails_closed_when_known_pass_through_constructor_fails(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Probe failure on a known pass-through plugin → Stage 1 rejects pipeline.
 

@@ -123,14 +123,13 @@ def test_applies_to_uses_direct_attribute() -> None:
     assert contract.applies_to(plugin) is False
 
 
-def test_applies_to_on_plugin_missing_attribute_crashes() -> None:
+def test_applies_to_on_plugin_missing_attribute_returns_false() -> None:
     contract = SinkRequiredFieldsContract()
 
     class _NoAttr:
         pass
 
-    with pytest.raises(AttributeError):
-        contract.applies_to(_NoAttr())
+    assert contract.applies_to(_NoAttr()) is False
 
 
 def test_contract_claims_boundary_dispatch_site() -> None:

@@ -907,7 +907,8 @@ def derive_effective_input_fields(input_row: Any) -> frozenset[str]:
             "PipelineRow.__init__ invariant violated — every row MUST carry "
             "a non-None contract at this dispatcher call site."
         )
-    return frozenset(fc.normalized_name for fc in contract.fields)
+    payload_fields = frozenset(input_row.keys())
+    return frozenset(fc.normalized_name for fc in contract.fields if fc.normalized_name in payload_fields)
 
 
 # =============================================================================

@@ -117,7 +117,19 @@ class SinkRequiredFieldsContract(DeclarationContract):
     payload_schema: ClassVar[type] = SinkRequiredFieldsPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        return bool(cast(frozenset[str], plugin.declared_required_fields))
+        if "declared_required_fields" in vars(plugin):
+            declared_required_fields = cast(
+                frozenset[str],
+                vars(plugin)["declared_required_fields"],
+            )
+            return bool(declared_required_fields)
+        if "declared_required_fields" in vars(type(plugin)):
+            declared_required_fields = cast(
+                frozenset[str],
+                vars(type(plugin))["declared_required_fields"],
+            )
+            return bool(declared_required_fields)
+        return False
 
     @implements_dispatch_site("boundary_check")
     def boundary_check(

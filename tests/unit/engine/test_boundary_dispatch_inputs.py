@@ -17,11 +17,32 @@ from elspeth.contracts.declaration_contracts import (
     implements_dispatch_site,
     register_declaration_contract,
 )
+from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
+from elspeth.engine.executors.sink_required_fields import SinkRequiredFieldsContract
+from elspeth.engine.executors.source_guaranteed_fields import SourceGuaranteedFieldsContract
 
 
 class _Payload(TypedDict):
     note: str
+
+
+def _contract(fields: tuple[str, ...]) -> SchemaContract:
+    return SchemaContract(
+        mode="OBSERVED",
+        fields=tuple(
+            FieldContract(
+                normalized_name=name,
+                original_name=name,
+                python_type=int,
+                required=True,
+                source="inferred",
+                nullable=False,
+            )
+            for name in fields
+        ),
+        locked=True,
+    )
 
 
 class _BoundaryOnlyContract(DeclarationContract):
@@ -120,3 +141,57 @@ def test_run_boundary_checks_dispatches_only_boundary_contracts() -> None:
 
     assert _BoundaryOnlyContract.invoked == 1
     assert _PostEmissionOnlyContract.invoked == 0
+
+
+def test_run_boundary_checks_skips_sink_contract_for_source_plugin() -> None:
+    register_declaration_contract(SourceGuaranteedFieldsContract())
+    register_declaration_contract(SinkRequiredFieldsContract())
+
+    plugin = type("SourcePlugin", (), {})()
+    plugin.name = "csv"
+    plugin.node_id = "source-1"
+    plugin.declared_guaranteed_fields = frozenset({"value"})
+
+    assert (
+        run_boundary_checks(
+            inputs=BoundaryInputs(
+                plugin=plugin,
+                node_id="source-1",
+                run_id="run-1",
+                row_id="row-1",
+                token_id="token-1",
+                static_contract=frozenset({"value"}),
+                row_data={"value": 1},
+                row_contract=_contract(("value",)),
+            ),
+            outputs=BoundaryOutputs(),
+        )
+        is None
+    )
+
+
+def test_run_boundary_checks_skips_source_contract_for_sink_plugin() -> None:
+    register_declaration_contract(SourceGuaranteedFieldsContract())
+    register_declaration_contract(SinkRequiredFieldsContract())
+
+    plugin = type("SinkPlugin", (), {})()
+    plugin.name = "json"
+    plugin.node_id = "sink-1"
+    plugin.declared_required_fields = frozenset({"value"})
+
+    assert (
+        run_boundary_checks(
+            inputs=BoundaryInputs(
+                plugin=plugin,
+                node_id="sink-1",
+                run_id="run-1",
+                row_id="row-1",
+                token_id="token-1",
+                static_contract=frozenset({"value"}),
+                row_data={"value": 1},
+                row_contract=None,
+            ),
+            outputs=BoundaryOutputs(),
+        )
+        is None
+    )

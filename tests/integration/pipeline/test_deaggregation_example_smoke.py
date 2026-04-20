@@ -127,13 +127,11 @@ class TestDeaggregationExampleSmoke:
 
 @pytest.fixture
 def observed_agg_example_dir(tmp_path: Path) -> Path:
-    """Variant of deaggregation example using `mode: observed` on the aggregation.
+    """Variant using `mode: observed` on the aggregation.
 
-    Pins ADR-007 end-to-end: without propagation, this would fail static
-    validation because the aggregation guarantees only `copy_index` and the
-    sink requires the full {id, name, copies, category, copy_index} set.
-    With `passes_through_input=True` on BatchReplicate (Phase A annotation),
-    the validator walks through the aggregation to the source's guarantees.
+    This intentionally omits the replicated input fields from the aggregation's
+    explicit schema. The pipeline should now fail DAG-time validation unless
+    the config truthfully declares those preserved fields.
     """
     example_src = Path("examples/deaggregation")
     example_dst = tmp_path / "deaggregation_observed"
@@ -199,29 +197,26 @@ landscape:
     return example_dst
 
 
-class TestDeaggregationObservedAggregationPassesAfterPropagation:
-    """ADR-007 end-to-end: observed-mode aggregation + BatchReplicate is valid."""
+class TestDeaggregationObservedAggregationRequiresExplicitSchema:
+    """Observed-mode BatchReplicate must not inherit undeclared fields."""
 
-    def test_observed_aggregation_plus_batch_replicate_validates_and_runs(self, observed_agg_example_dir: Path) -> None:
-        """Pipeline with observed-mode aggregation upstream of BatchReplicate runs successfully.
+    def test_observed_aggregation_plus_batch_replicate_is_rejected(self, observed_agg_example_dir: Path) -> None:
+        """Observed-mode config must not validate via BatchReplicate inheritance."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import load_settings
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
-        Regression guard: the deaggregation ticket (elspeth-87f6d5dea5) was
-        filed three times because the original test suite pinned the
-        *bug-report shape* (named divergences) rather than the *bug-class
-        shape* (pass-through propagation). This test pins the architectural
-        fix itself — a pipeline that would have been rejected without
-        ADR-007 now runs cleanly end-to-end.
-        """
-        from elspeth.cli_helpers import bootstrap_and_run
+        config = load_settings(observed_agg_example_dir / "settings.yaml")
+        plugins = instantiate_plugins_from_config(config)
 
-        result = bootstrap_and_run(observed_agg_example_dir / "settings.yaml")
-
-        assert result.status.name == "COMPLETED"
-        assert result.rows_processed == 6
-
-        output_csv = observed_agg_example_dir / "output" / "replicated.csv"
-        assert output_csv.exists()
-        with output_csv.open(newline="") as f:
-            rows = list(csv.DictReader(f))
-        assert rows, "output should not be empty"
-        assert set(rows[0].keys()) == {"id", "name", "copies", "category", "copy_index"}
+        with pytest.raises(GraphValidationError, match=r"does not guarantee"):
+            graph = ExecutionGraph.from_plugin_instances(
+                source=plugins.source,
+                source_settings=plugins.source_settings,
+                transforms=plugins.transforms,
+                sinks=plugins.sinks,
+                aggregations=plugins.aggregations,
+                gates=list(config.gates),
+                coalesce_settings=list(config.coalesce) if config.coalesce else None,
+            )
+            graph.validate_edge_compatibility()
