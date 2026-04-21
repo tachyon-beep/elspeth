@@ -28,7 +28,7 @@ from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts.contexts import TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
-from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig, PluginConfigError
@@ -61,11 +61,20 @@ class JSONExplodeConfig(DataPluginConfig):
     output_field: str = Field(default="item", description="Name for the exploded element")
     include_index: bool = Field(default=True, description="Whether to include item_index field")
 
-    @field_validator("array_field", "output_field")
+    @field_validator("array_field")
     @classmethod
-    def _reject_empty(cls, v: str, info: Any) -> str:
-        if not v:
-            raise ValueError(f"{info.field_name} must not be empty")
+    def _validate_array_field(cls, v: str, info: Any) -> str:
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} must be non-empty")
+        return v
+
+    @field_validator("output_field")
+    @classmethod
+    def _validate_output_field(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("output_field must be non-empty")
+        if not v.isidentifier():
+            raise ValueError(f"output_field must be a valid Python identifier, got {v!r}")
         return v
 
     @model_validator(mode="after")
@@ -77,6 +86,29 @@ class JSONExplodeConfig(DataPluginConfig):
                 "output_field='item_index' conflicts with the auto-generated index field "
                 "when include_index=True — the index would overwrite the exploded item"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _require_statically_resolvable_array_field_when_output_contract_depends_on_it(self) -> JSONExplodeConfig:
+        """Fail closed when static output-contract derivation cannot resolve aliases.
+
+        Runtime row access can resolve original headers through ``PipelineRow.contract``,
+        but constructor-time contract propagation only sees normalized schema metadata.
+        When guaranteed fields or explicit schema fields participate in output-contract
+        derivation, the consumed array field must already be expressed in that same
+        normalized namespace.
+        """
+        static_output_inputs: set[str] = set(self.schema_config.guaranteed_fields or ())
+        if self.schema_config.fields is not None:
+            static_output_inputs.update(field.name for field in self.schema_config.fields)
+
+        if static_output_inputs and self.array_field not in static_output_inputs:
+            raise ValueError(
+                "array_field must use the normalized field name when schema declares "
+                "guaranteed_fields or explicit fields for output-contract propagation. "
+                f"Got {self.array_field!r}; known normalized fields are {sorted(static_output_inputs)!r}."
+            )
+
         return self
 
 
@@ -112,7 +144,7 @@ class JSONExplode(BaseTransform):
 
     name = "json_explode"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:100c275247f058d6"
+    source_file_hash: str | None = "sha256:f2fde1d176101376"
     config_model = JSONExplodeConfig
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
 
@@ -179,9 +211,33 @@ class JSONExplode(BaseTransform):
         incorrectly retains array_field in guaranteed_fields.
         """
         base_guaranteed = set(cfg.schema_config.guaranteed_fields or ())
+        output_field_defs = cfg.schema_config.fields
 
         # Remove array_field from output guarantees (it's consumed at runtime)
         base_guaranteed.discard(cfg.array_field)
+
+        if cfg.schema_config.fields is not None:
+            kept_fields = tuple(field for field in cfg.schema_config.fields if field.name != cfg.array_field)
+            extra_fields: list[FieldDefinition] = []
+            if all(field.name != cfg.output_field for field in kept_fields):
+                extra_fields.append(
+                    FieldDefinition(
+                        name=cfg.output_field,
+                        field_type="any",
+                        required=True,
+                        nullable=False,
+                    )
+                )
+            if cfg.include_index and all(field.name != "item_index" for field in kept_fields):
+                extra_fields.append(
+                    FieldDefinition(
+                        name="item_index",
+                        field_type="int",
+                        required=True,
+                        nullable=False,
+                    )
+                )
+            output_field_defs = (*kept_fields, *extra_fields)
 
         # Add declared output fields (output_field + optionally item_index)
         output_fields = base_guaranteed | self.declared_output_fields
@@ -196,7 +252,7 @@ class JSONExplode(BaseTransform):
 
         return SchemaConfig(
             mode=cfg.schema_config.mode,
-            fields=cfg.schema_config.fields,
+            fields=output_field_defs,
             guaranteed_fields=guaranteed_fields_result,
             audit_fields=cfg.schema_config.audit_fields,
             required_fields=cfg.schema_config.required_fields,

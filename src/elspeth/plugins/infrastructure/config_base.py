@@ -62,6 +62,34 @@ class PluginConfigError(Exception):
         self.component_type: str | None = component_type
 
 
+def _format_validation_error_location(loc: tuple[Any, ...]) -> str:
+    """Render a Pydantic error location as a stable user-facing field path."""
+    if not loc:
+        return "config"
+
+    parts: list[str] = []
+    for item in loc:
+        match item:
+            case int() as index:
+                if parts:
+                    parts[-1] = f"{parts[-1]}[{index}]"
+                else:
+                    parts.append(f"[{index}]")
+            case _:
+                parts.append(str(item))
+    return ".".join(parts)
+
+
+def _format_validation_error_cause(exc: ValidationError) -> str:
+    """Build a class-name-free validation summary from structured Pydantic data."""
+    lines: list[str] = []
+    for error in exc.errors():
+        location = _format_validation_error_location(tuple(error["loc"]))
+        message = error["msg"]
+        lines.append(f"{location}: {message}")
+    return "\n".join(lines)
+
+
 def _validate_schema_config(value: Any, *, require_dict: bool) -> SchemaConfig | None:
     """Validate and parse schema config from dict or pass through SchemaConfig instance.
 
@@ -191,9 +219,9 @@ class PluginConfig(BaseModel):
             # model_validate handles the schema alias and field_validator parses dicts
             return cls.model_validate(config)
         except ValidationError as e:
-            _err_fields["cause"] = str(e)
+            _err_fields["cause"] = _format_validation_error_cause(e)
             raise PluginConfigError(
-                f"Invalid configuration for {cls.__name__}: {e}",
+                f"Invalid configuration for {cls.__name__}: {_err_fields['cause']}",
                 **_err_fields,
             ) from e
         except ValueError as e:
@@ -359,8 +387,14 @@ def validate_headers_value(v: str | dict[str, str] | None) -> str | dict[str, st
     if v is None:
         return v
     if isinstance(v, dict):
+        from elspeth.core.identifiers import validate_field_names
+
         if not v:
             raise ValueError("headers custom mapping must not be empty — use 'normalized' or 'original' for non-custom modes")
+        validate_field_names(list(v.keys()), "headers custom mapping keys")
+        for source_name, target_name in v.items():
+            if not target_name.strip():
+                raise ValueError(f"headers custom mapping value for {source_name!r} must not be empty or whitespace-only")
         targets = list(v.values())
         duplicates = [t for t in targets if targets.count(t) > 1]
         if duplicates:

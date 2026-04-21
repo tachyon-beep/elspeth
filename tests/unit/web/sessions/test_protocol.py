@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.web.sessions.protocol import (
     LEGAL_RUN_TRANSITIONS,
     SESSION_RUN_STATUS_VALUES,
@@ -59,6 +60,17 @@ class TestChatMessageRecord:
             created_at=datetime.now(UTC),
         )
         assert record.tool_calls is None
+
+    def test_invalid_role_raises_audit_integrity_error(self) -> None:
+        with pytest.raises(AuditIntegrityError, match=r"chat_messages\.role is 'root'"):
+            ChatMessageRecord(
+                id=uuid4(),
+                session_id=uuid4(),
+                role="root",  # type: ignore[arg-type]
+                content="Hello",
+                tool_calls=None,
+                created_at=datetime.now(UTC),
+            )
 
 
 class TestCompositionStateData:
@@ -135,6 +147,24 @@ class TestRunRecord:
         assert frozenset(LEGAL_RUN_TRANSITIONS.keys()) == SESSION_RUN_STATUS_VALUES
         assert all(allowed.issubset(SESSION_RUN_STATUS_VALUES) for allowed in LEGAL_RUN_TRANSITIONS.values())
         assert frozenset({"completed", "failed", "cancelled"}) == SESSION_TERMINAL_RUN_STATUS_VALUES
+
+    def test_invalid_status_raises_audit_integrity_error(self) -> None:
+        with pytest.raises(AuditIntegrityError, match=r"runs\.status is 'ready'"):
+            RunRecord(
+                id=uuid4(),
+                session_id=uuid4(),
+                state_id=uuid4(),
+                status="ready",  # type: ignore[arg-type]
+                started_at=datetime.now(UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+                pipeline_yaml=None,
+            )
 
 
 class TestRunAlreadyActiveError:

@@ -121,6 +121,13 @@ class TestValidateRegexSafety:
         with pytest.raises(ValueError, match="nested quantifiers"):
             _validate_regex_safety("(?:a+)+")
 
+    def test_rejects_nested_quantifier_brace_plus(self) -> None:
+        """(a{2,})+ must be rejected — brace quantifiers are still nested repetition."""
+        from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
+
+        with pytest.raises(ValueError, match="nested quantifiers"):
+            _validate_regex_safety("(a{2,})+")
+
     def test_accepts_simple_quantifier(self) -> None:
         """a+ is a simple quantifier, not nested."""
         from elspeth.plugins.transforms.keyword_filter import _validate_regex_safety
@@ -173,6 +180,21 @@ class TestValidateRegexSafety:
                     "schema": {"mode": "observed"},
                 }
             )
+
+    @pytest.mark.parametrize("pattern", [r"(\+)+", r"(\*)+", r"(a\+)+"])
+    def test_instantiation_accepts_escaped_literal_quantifier_patterns(self, pattern: str) -> None:
+        """Escaped literal metacharacters are safe and must pass config validation."""
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [pattern],
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        assert [compiled.pattern for _, compiled in transform._compiled_patterns] == [pattern]
 
 
 class TestKeywordFilterInstantiation:
@@ -243,6 +265,24 @@ class TestKeywordFilterInstantiation:
                     "schema": {"mode": "observed"},
                 }
             )
+
+    def test_transform_initializes_schema_contract_state_for_pass_through_checks(self) -> None:
+        """Pass-through KeywordFilter instances must expose a typed output schema contract."""
+        from elspeth.engine.executors.schema_config_mode import SchemaConfigModeContract
+        from elspeth.plugins.transforms.keyword_filter import KeywordFilter
+
+        transform = KeywordFilter(
+            {
+                "fields": ["content"],
+                "blocked_patterns": [r"\bblocked\b"],
+                "schema": {"mode": "fixed", "fields": ["id: int", "content: str"]},
+            }
+        )
+
+        assert transform._schema_config is not None
+        assert transform._output_schema_config is not None
+        assert sorted(transform._output_schema_config.get_effective_guaranteed_fields()) == ["content", "id"]
+        assert SchemaConfigModeContract().applies_to(transform) is True
 
 
 class TestKeywordFilterProcessing:

@@ -10,12 +10,26 @@ from pydantic import ValidationError
 
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.transforms.truncate import Truncate, TruncateConfig
-from elspeth.testing import make_pipeline_row
+from elspeth.testing import make_field, make_pipeline_row
 from tests.fixtures.factories import make_source_context
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 OBSERVED_SCHEMA_CONFIG = SchemaConfig.from_dict(DYNAMIC_SCHEMA)
+
+
+def _make_alias_mapped_row(value: str = "abcdefghijk") -> PipelineRow:
+    contract = SchemaContract(
+        mode="OBSERVED",
+        fields=(
+            make_field("value", str, original_name="Value Text", required=False, source="inferred"),
+            make_field("id", int, original_name="ID", required=False, source="inferred"),
+        ),
+        locked=True,
+    )
+    return PipelineRow({"value": value, "id": 1}, contract)
 
 
 class TestTruncateConfig:
@@ -143,6 +157,18 @@ class TestTruncateBehavior:
         assert "title" in result.success_reason["fields_modified"]
         assert "desc" not in result.success_reason["fields_modified"]
 
+    def test_success_reason_uses_normalized_field_name_for_original_header_config(
+        self,
+        ctx: PluginContext,
+    ) -> None:
+        transform = Truncate({"fields": {"Value Text": 5}, "schema": DYNAMIC_SCHEMA})
+
+        result = transform.process(_make_alias_mapped_row(), ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        assert result.success_reason["fields_modified"] == ["value"]
+
     def test_empty_fields_config_passes_through(self, ctx: PluginContext) -> None:
         """No fields configured = no truncation, just passthrough."""
         transform = Truncate({"fields": {}, "schema": DYNAMIC_SCHEMA})
@@ -189,3 +215,20 @@ class TestTruncateBehavior:
         assert result.row is not None
         assert result.row.contract.mode == "FIXED"
         assert result.row.contract.locked is True
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"value": 5, "Value Text": 10},
+            {"Value Text": 10, "value": 5},
+        ],
+    )
+    def test_duplicate_aliases_for_same_logical_field_raise_plugin_config_error(
+        self,
+        ctx: PluginContext,
+        fields: dict[str, int],
+    ) -> None:
+        transform = Truncate({"fields": fields, "schema": DYNAMIC_SCHEMA})
+
+        with pytest.raises(PluginConfigError, match="duplicate logical field"):
+            transform.process(_make_alias_mapped_row(), ctx)

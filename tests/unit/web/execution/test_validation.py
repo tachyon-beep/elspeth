@@ -464,7 +464,9 @@ sinks:
         assert result.is_valid is False
         assert _check(result, "settings_load").passed is True
         assert _check(result, "plugin_instantiation").passed is False
-        assert any("textsourceconfig" in e.message.lower() for e in result.errors)
+        assert any("source 'text'" in e.message.lower() for e in result.errors)
+        assert all("textsourceconfig" not in e.message.lower() for e in result.errors)
+        assert all("pydantic.dev" not in e.message.lower() for e in result.errors)
         assert any("path" in e.message.lower() for e in result.errors)
         assert any("schema" in e.message.lower() for e in result.errors)
         assert any("column" in e.message.lower() for e in result.errors)

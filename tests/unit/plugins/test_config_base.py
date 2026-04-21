@@ -13,6 +13,7 @@ from elspeth.plugins.infrastructure.config_base import (
     PathConfig,
     PluginConfig,
     PluginConfigError,
+    SinkPathConfig,
 )
 
 # Helper to create a dynamic schema for tests
@@ -45,6 +46,22 @@ class TestPluginConfig:
         assert "Invalid configuration for MyConfig" in str(exc_info.value)
         assert exc_info.value.__cause__ is not None
         assert isinstance(exc_info.value.__cause__, ValidationError)
+
+    def test_from_dict_exposes_sanitized_cause_without_model_banner(self) -> None:
+        """cause omits Pydantic's model banner and docs URL."""
+
+        class MyConfig(PluginConfig):
+            required_field: str
+
+        with pytest.raises(PluginConfigError) as exc_info:
+            MyConfig.from_dict({})
+
+        cause = exc_info.value.cause
+        assert cause is not None
+        assert "required_field" in cause
+        assert "Field required" in cause
+        assert "validation error for MyConfig" not in cause
+        assert "pydantic.dev" not in cause
 
     def test_from_dict_success(self) -> None:
         """from_dict should return valid config on success."""
@@ -421,6 +438,38 @@ class TestSourceDataConfig:
         assert config.path == "data/input.csv"
         assert config.schema_config is not None
         assert config.schema_config.mode == "fixed"
+
+
+class TestSinkPathConfigHeaders:
+    """Tests for SinkPathConfig header output validation."""
+
+    def test_custom_headers_reject_non_normalized_mapping_keys(self) -> None:
+        """CUSTOM header mappings must use normalized field names as keys."""
+        with pytest.raises(
+            PluginConfigError,
+            match=r"headers custom mapping keys\[0\].*not a valid Python identifier",
+        ):
+            SinkPathConfig.from_dict(
+                {
+                    "path": "out.csv",
+                    "schema": {"mode": "observed"},
+                    "headers": {"Customer ID": "CID"},
+                }
+            )
+
+    def test_custom_headers_reject_blank_output_names(self) -> None:
+        """CUSTOM header mappings must not emit blank or whitespace-only headers."""
+        with pytest.raises(
+            PluginConfigError,
+            match=r"headers custom mapping value for 'customer_id' must not be empty or whitespace-only",
+        ):
+            SinkPathConfig.from_dict(
+                {
+                    "path": "out.csv",
+                    "schema": {"mode": "observed"},
+                    "headers": {"customer_id": "   "},
+                }
+            )
 
 
 class TestAzureAuthConfigValidator:

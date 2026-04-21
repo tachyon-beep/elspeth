@@ -1630,3 +1630,51 @@ class TestExpressionParserDictContext:
         """Empty allowed_names list is rejected."""
         with pytest.raises(ValueError, match="must not be empty"):
             ExpressionParser("True", allowed_names=[])
+
+
+class TestExpressionParserBoundaryGuards:
+    """Regression tests for boundary validation holes in ExpressionParser."""
+
+    def test_reject_bare_allowed_name(self) -> None:
+        """Allowed namespaces must be accessed through subscripts or .get()."""
+        with pytest.raises(ExpressionSecurityError, match="Bare allowed name: 'row'"):
+            ExpressionParser("row")
+
+    def test_reject_allowed_name_tautology(self) -> None:
+        """Whole-context comparisons like row == row must be rejected."""
+        with pytest.raises(ExpressionSecurityError, match="Bare allowed name: 'row'"):
+            ExpressionParser("row == row")
+
+    def test_reject_custom_allowed_name_tautology(self) -> None:
+        """Custom namespaces cannot be used as standalone comparison values."""
+        with pytest.raises(ExpressionSecurityError, match="Bare allowed name: 'env'"):
+            ExpressionParser(
+                "env == env",
+                allowed_names=["collections", "dependency_runs", "env"],
+            )
+
+    def test_reject_safe_builtin_on_bare_namespace(self) -> None:
+        """Safe builtins cannot consume a whole namespace object."""
+        with pytest.raises(ExpressionSecurityError, match="Bare allowed name: 'row'"):
+            ExpressionParser("len(row) > 0")
+
+    def test_reject_bare_safe_builtin_name(self) -> None:
+        """Builtin identifiers are only valid as call targets."""
+        with pytest.raises(ExpressionSecurityError, match="Bare builtin name: 'len'"):
+            ExpressionParser("len")
+
+    def test_reject_non_finite_float_literal(self) -> None:
+        """Float literals that parse to infinity must fail validation."""
+        with pytest.raises(ExpressionSecurityError, match="Non-finite float literal"):
+            ExpressionParser("1e309")
+
+    def test_reject_negative_non_finite_float_literal(self) -> None:
+        """Unary minus on an infinite literal must still fail validation."""
+        with pytest.raises(ExpressionSecurityError, match="Non-finite float literal"):
+            ExpressionParser("-1e309")
+
+    def test_reject_overflowing_binary_result(self) -> None:
+        """Arithmetic overflow must not return inf from expression evaluation."""
+        parser = ExpressionParser("1e308 * 10")
+        with pytest.raises(ExpressionEvaluationError, match="non-finite float"):
+            parser.evaluate({})

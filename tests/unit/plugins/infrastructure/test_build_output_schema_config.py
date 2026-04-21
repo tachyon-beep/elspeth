@@ -77,6 +77,6 @@ class TestBuildOutputSchemaConfig:
         result = transform._build_output_schema_config(base)
         assert result.required_fields == ("req_field",)
 
-    def test_class_attribute_defaults_to_none(self):
+    def test_keyword_filter_initializes_output_schema_config(self):
         transform = _make_minimal_transform()
-        assert transform._output_schema_config is None
+        assert transform._output_schema_config is not None

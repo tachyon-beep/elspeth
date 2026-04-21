@@ -290,6 +290,15 @@ class TestValueTransformConfig:
                 schema_config=OBSERVED_SCHEMA_CONFIG,
             )
 
+    def test_rejects_non_finite_expression_literal(self) -> None:
+        from elspeth.plugins.transforms.value_transform import ValueTransformConfig
+
+        with pytest.raises(ValidationError, match="Non-finite float literal"):
+            ValueTransformConfig(
+                operations=[{"target": "huge", "expression": "1e309"}],
+                schema_config=OBSERVED_SCHEMA_CONFIG,
+            )
+
     def test_allows_duplicate_targets(self) -> None:
         from elspeth.plugins.transforms.value_transform import ValueTransformConfig
 

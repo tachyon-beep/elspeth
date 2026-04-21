@@ -406,6 +406,51 @@ class TestJSONExplodeConfiguration:
                 }
             )
 
+    @pytest.mark.parametrize(
+        ("output_field", "match"),
+        [
+            ("Line Item", "valid Python identifier"),
+            ("Order ID", "valid Python identifier"),
+            ("   ", "must be non-empty"),
+        ],
+    )
+    def test_rejects_invalid_output_field_names(self, output_field: str, match: str) -> None:
+        """output_field creates a new pipeline field and must be normalized."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        with pytest.raises(PluginConfigError, match=match):
+            JSONExplode(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "array_field": "items",
+                    "output_field": output_field,
+                }
+            )
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            {"mode": "observed", "guaranteed_fields": ["id", "line_items"]},
+            {"mode": "fixed", "fields": ["id: int", "line_items: any"]},
+            {"mode": "flexible", "fields": ["id: int", "line_items: any"]},
+        ],
+    )
+    def test_rejects_original_header_array_field_when_schema_participates_in_contract_propagation(
+        self,
+        schema: dict[str, object],
+    ) -> None:
+        """Static contract generation cannot safely resolve original-header aliases."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        with pytest.raises(PluginConfigError, match=r"array_field.*normalized"):
+            JSONExplode(
+                {
+                    "schema": schema,
+                    "array_field": "Line Items",
+                    "output_field": "item",
+                }
+            )
+
 
 class TestJSONExplodeOutputSchema:
     """Tests for output schema behavior of shape-changing transforms.

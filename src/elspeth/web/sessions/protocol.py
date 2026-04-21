@@ -18,11 +18,14 @@ from types import MappingProxyType
 from typing import Any, Literal, Protocol, get_args, runtime_checkable
 from uuid import UUID
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import freeze_fields
 
+ChatMessageRole = Literal["user", "assistant", "system", "tool"]
 SessionRunStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
 TerminalSessionRunStatus = Literal["completed", "failed", "cancelled"]
 
+CHAT_MESSAGE_ROLE_VALUES: frozenset[str] = frozenset(get_args(ChatMessageRole))
 SESSION_RUN_STATUS_VALUES: frozenset[str] = frozenset(get_args(SessionRunStatus))
 SESSION_TERMINAL_RUN_STATUS_VALUES: frozenset[str] = frozenset(get_args(TerminalSessionRunStatus))
 
@@ -80,13 +83,15 @@ class ChatMessageRecord:
 
     id: UUID
     session_id: UUID
-    role: Literal["user", "assistant", "system", "tool"]
+    role: ChatMessageRole
     content: str
     tool_calls: Sequence[Mapping[str, Any]] | None
     created_at: datetime
     composition_state_id: UUID | None = None
 
     def __post_init__(self) -> None:
+        if self.role not in CHAT_MESSAGE_ROLE_VALUES:
+            raise AuditIntegrityError(f"Tier 1: chat_messages.role is {self.role!r}, expected one of {sorted(CHAT_MESSAGE_ROLE_VALUES)}")
         if self.tool_calls is not None:
             freeze_fields(self, "tool_calls")
 
@@ -183,6 +188,10 @@ class RunRecord:
     landscape_run_id: str | None
     pipeline_yaml: str | None
 
+    def __post_init__(self) -> None:
+        if self.status not in SESSION_RUN_STATUS_VALUES:
+            raise AuditIntegrityError(f"Tier 1: runs.status is {self.status!r}, expected one of {sorted(SESSION_RUN_STATUS_VALUES)}")
+
 
 class InvalidForkTargetError(Exception):
     """Raised when attempting to fork from a non-user message.
@@ -237,7 +246,7 @@ class SessionServiceProtocol(Protocol):
     async def add_message(
         self,
         session_id: UUID,
-        role: Literal["user", "assistant", "system", "tool"],
+        role: ChatMessageRole,
         content: str,
         tool_calls: Sequence[Mapping[str, Any]] | None = None,
         composition_state_id: UUID | None = None,
