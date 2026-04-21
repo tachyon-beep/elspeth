@@ -24,6 +24,7 @@ import pytest
 # For node registration
 from elspeth.contracts import NodeType, RouteDestination, RowOutcome, RowResult, SourceRow, TokenInfo, TransformProtocol, TransformResult
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.declaration_contracts import _attach_contract_name_from_dispatcher
 from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingKind,
@@ -551,7 +552,7 @@ class TestProcessRowNoTransforms:
                 },
                 message="source boundary failed",
             )
-            violation._attach_contract_name("source_guaranteed_fields")
+            _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
             raise violation
 
         with (
@@ -602,7 +603,7 @@ class TestProcessRowNoTransforms:
                 },
                 message="source boundary failed",
             )
-            violation._attach_contract_name("source_guaranteed_fields")
+            _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
             raise violation
 
         with (
@@ -647,7 +648,7 @@ class TestProcessRowNoTransforms:
                 },
                 message="source boundary failed",
             )
-            violation._attach_contract_name("source_guaranteed_fields")
+            _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
             raise violation
 
         with (
@@ -686,7 +687,7 @@ class TestProcessRowNoTransforms:
                 },
                 message="source boundary failed",
             )
-            violation._attach_contract_name("source_guaranteed_fields")
+            _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
             raise violation
 
         with (
@@ -731,7 +732,7 @@ class TestProcessRowNoTransforms:
                 },
                 message="source boundary failed",
             )
-            violation._attach_contract_name("source_guaranteed_fields")
+            _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
             raise violation
 
         with (
@@ -770,7 +771,7 @@ class TestProcessRowNoTransforms:
                 },
                 message="source boundary failed",
             )
-            violation._attach_contract_name("source_guaranteed_fields")
+            _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
             raise violation
 
         with (
@@ -797,6 +798,110 @@ class TestProcessRowNoTransforms:
         assert states[0].status == NodeStateStatus.FAILED
         assert len(outcomes) == 1
         assert outcomes[0].outcome == RowOutcome.FAILED.value
+
+    def test_batch_flush_token_completed_telemetry_failure_does_not_interrupt_failed_audit_recording(self) -> None:
+        """Best-effort telemetry must not interrupt per-token FAILED batch-flush audit writes."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        transform = _make_mock_transform(node_id="aggregate-1", name="batch-transform")
+        token_a = make_token_info(row_id="row-a", token_id="token-a", data={"value": 1})
+        token_b = make_token_info(row_id="row-b", token_id="token-b", data={"value": 2})
+        violation = SourceGuaranteedFieldsViolation(
+            plugin="batch-transform",
+            node_id="aggregate-1",
+            run_id="test-run",
+            row_id="row-a",
+            token_id="token-a",
+            payload={
+                "declared": ["customer_id"],
+                "runtime_observed": [],
+                "missing": ["customer_id"],
+            },
+            message="batch flush failed",
+        )
+        _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
+        fctx = _FlushContext(
+            node_id=NodeID("aggregate-1"),
+            transform=transform,
+            settings=AggregationSettings(
+                name="agg",
+                plugin="batch-plugin",
+                input="source",
+                on_error="discard",
+                trigger={"count": 2},
+            ),
+            buffered_tokens=(token_a, token_b),
+            batch_id="batch-1",
+            error_msg="batch flush failed",
+            expand_parent_token=token_a,
+            triggering_token=token_b,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        with (
+            patch.object(factory.data_flow, "record_token_outcome") as mock_record_token_outcome,
+            patch.object(processor, "_emit_token_completed", side_effect=RuntimeError("telemetry down")),
+        ):
+            processor._record_flush_violation(fctx, violation)
+
+        assert mock_record_token_outcome.call_count == 2
+        recorded_refs = {
+            call.kwargs["ref"].token_id
+            for call in mock_record_token_outcome.call_args_list
+        }
+        assert recorded_refs == {"token-a", "token-b"}
+
+    def test_batch_flush_non_recorder_recording_bug_propagates_unmodified(self) -> None:
+        """Only recorder failures become AuditIntegrityError on batch-flush auto-fail."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        transform = _make_mock_transform(node_id="aggregate-1", name="batch-transform")
+        token_a = make_token_info(row_id="row-a", token_id="token-a", data={"value": 1})
+        token_b = make_token_info(row_id="row-b", token_id="token-b", data={"value": 2})
+        violation = SourceGuaranteedFieldsViolation(
+            plugin="batch-transform",
+            node_id="aggregate-1",
+            run_id="test-run",
+            row_id="row-a",
+            token_id="token-a",
+            payload={
+                "declared": ["customer_id"],
+                "runtime_observed": [],
+                "missing": ["customer_id"],
+            },
+            message="batch flush failed",
+        )
+        _attach_contract_name_from_dispatcher(violation, "source_guaranteed_fields")
+        fctx = _FlushContext(
+            node_id=NodeID("aggregate-1"),
+            transform=transform,
+            settings=AggregationSettings(
+                name="agg",
+                plugin="batch-plugin",
+                input="source",
+                on_error="discard",
+                trigger={"count": 2},
+            ),
+            buffered_tokens=(token_a, token_b),
+            batch_id="batch-1",
+            error_msg="batch flush failed",
+            expand_parent_token=token_a,
+            triggering_token=token_b,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+        invariant_failure = RuntimeError("wrong-run token ownership")
+
+        with (
+            patch.object(factory.data_flow, "record_token_outcome", side_effect=invariant_failure),
+            patch.object(processor, "_emit_token_completed") as mock_emit,
+            pytest.raises(RuntimeError, match="wrong-run token ownership") as exc_info,
+        ):
+            processor._record_flush_violation(fctx, violation)
+
+        assert exc_info.value is invariant_failure
+        mock_emit.assert_not_called()
 
 
 # =============================================================================

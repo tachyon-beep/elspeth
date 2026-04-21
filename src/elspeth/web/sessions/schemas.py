@@ -13,12 +13,15 @@ than globally; see ``web/blobs/schemas.py`` for the companion pattern.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
 import pydantic
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
+
+from elspeth.web.sessions.protocol import SessionRunStatus
 
 
 class _StrictResponse(BaseModel):
@@ -67,7 +70,7 @@ class ChatMessageResponse(_StrictResponse):
     session_id: str
     role: str
     content: str
-    tool_calls: Any | None = None
+    tool_calls: Mapping[str, Any] | None = None
     created_at: datetime
     composition_state_id: str | None = None
 
@@ -94,17 +97,21 @@ class ValidationEntryResponse(_StrictResponse):
     severity: str
 
 
+type CompositionObject = dict[str, JsonValue]
+type CompositionObjectList = list[CompositionObject]
+
+
 class CompositionStateResponse(_StrictResponse):
     """Response for composition state endpoints."""
 
     id: str
     session_id: str
     version: int
-    source: Any | None = None
-    nodes: list[Any] | None = None
-    edges: list[Any] | None = None
-    outputs: list[Any] | None = None
-    metadata: Any | None = None
+    source: CompositionObject | None = None
+    nodes: CompositionObjectList | None = None
+    edges: CompositionObjectList | None = None
+    outputs: CompositionObjectList | None = None
+    metadata: CompositionObject | None = None
     is_valid: bool
     validation_errors: list[str] | None = None
     validation_warnings: list[ValidationEntryResponse] | None = None
@@ -139,7 +146,7 @@ class RunResponse(_StrictResponse):
 
     id: str
     session_id: str
-    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    status: SessionRunStatus
     rows_processed: int
     rows_failed: int
     started_at: datetime

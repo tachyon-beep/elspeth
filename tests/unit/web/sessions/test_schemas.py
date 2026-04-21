@@ -189,6 +189,12 @@ class TestSessionStrictCoercionRejected:
         with pytest.raises(ValidationError):
             ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
 
+    def test_chat_message_response_rejects_non_mapping_tool_calls(self) -> None:
+        kwargs = _valid_chat_message_kwargs()
+        kwargs["tool_calls"] = ["set_source"]
+        with pytest.raises(ValidationError):
+            ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
+
     def test_composition_state_response_rejects_string_int_version(self) -> None:
         kwargs = _valid_composition_state_kwargs()
         kwargs["version"] = "1"
@@ -198,6 +204,30 @@ class TestSessionStrictCoercionRejected:
     def test_composition_state_response_rejects_string_bool_is_valid(self) -> None:
         kwargs = _valid_composition_state_kwargs()
         kwargs["is_valid"] = "true"
+        with pytest.raises(ValidationError):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_non_mapping_source(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["source"] = "csv"
+        with pytest.raises(ValidationError):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_non_mapping_node_entry(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["nodes"] = ["node-1"]
+        with pytest.raises(ValidationError):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_nested_non_json_source_value(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["source"] = {"type": "csv", "bad": object()}
+        with pytest.raises(ValidationError):
+            CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
+
+    def test_composition_state_response_rejects_nested_non_json_metadata_value(self) -> None:
+        kwargs = _valid_composition_state_kwargs()
+        kwargs["metadata"] = {"name": "demo", "bad": object()}
         with pytest.raises(ValidationError):
             CompositionStateResponse(**kwargs)  # type: ignore[arg-type]
 

@@ -891,7 +891,19 @@ class RowProcessor:
                     f"Recorder failure: {type(record_failure).__name__}: {record_failure}. "
                     f"Original violation: {violation!s}"
                 ) from record_failure
-            self._emit_token_completed(token, RowOutcome.FAILED)
+            try:
+                self._emit_token_completed(token, RowOutcome.FAILED)
+            except Exception as telemetry_failure:
+                logger.exception(
+                    "TokenCompleted telemetry failed after batch-flush audit completion; preserving original batch-flush violation",
+                    extra={
+                        "run_id": self._run_id,
+                        "token_id": token.token_id,
+                        "transform_node_id": fctx.node_id,
+                        "transform_name": fctx.transform.name,
+                        "telemetry_error_type": type(telemetry_failure).__name__,
+                    },
+                )
 
     def _route_empty_emission_results(
         self,
@@ -1701,6 +1713,14 @@ class RowProcessor:
         Used during resume when rows were created in the original run
         but need to be reprocessed. Unlike process_row(), this does NOT
         create a new row record - only a new token.
+
+        Resume intentionally does NOT re-run source-boundary contracts here.
+        The resumed row payload already crossed the source boundary in the
+        original run, and resume replays persisted ``PipelineRow`` payloads
+        through ``NullSource`` rather than reopening the original source
+        plugin. The resume path therefore inherits source-boundary evidence
+        from the original run and must verify runtime-VAL manifest equality
+        before any resumed rows are loaded.
 
         Args:
             row_id: Existing row ID in the database
