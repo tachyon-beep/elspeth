@@ -287,6 +287,62 @@ class TestSingleQuerySuccess:
         # Multi-query adds query-prefixed fields
         assert any(k.startswith("quality_") or k.startswith("relevance_") for k in result.row.to_dict())
 
+    def test_multi_query_success_preserves_original_input_fields(self) -> None:
+        """Multi-query success must remain truthful for pass-through input fields."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        config = _make_multi_query_config(
+            provider="azure",
+            template="Classify: {{ row.text_content }}",
+        )
+        transform = LLMTransform(config)
+        mock_provider = Mock(spec=LLMProvider)
+        mock_provider.execute_query.return_value = LLMQueryResult(
+            content='{"score": 1}',
+            usage=TokenUsage.known(1, 1),
+            model="gpt-4o",
+            finish_reason=FinishReason.STOP,
+        )
+        transform._provider = mock_provider
+
+        row = _make_row({"text": "hello", "baseline": "kept"})
+        result = transform._process_row(row, _make_ctx())
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["baseline"] == "kept"
+        assert result.row["text"] == "hello"
+
+
+class TestInvariantProbeExecution:
+    """Focused regressions for the transform-owned invariant probe seam."""
+
+    def test_forward_probe_restores_existing_provider_and_close_remains_safe(self) -> None:
+        """The invariant probe must not clobber a provider already attached to the transform."""
+        from elspeth.plugins.transforms.llm.transform import LLMTransform
+
+        transform = LLMTransform(LLMTransform.probe_config())
+        original_provider = Mock(spec=LLMProvider)
+        transform._provider = original_provider
+
+        result = transform.execute_forward_invariant_probe(
+            transform.forward_invariant_probe_rows(
+                _make_row({"baseline": "kept"}),
+            ),
+            _make_ctx(),
+        )
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["baseline"] == "kept"
+        assert result.row["llm_probe_text"] == "probe request"
+        assert result.row["llm_response"] == "probe response"
+        assert transform._provider is original_provider
+        original_provider.execute_query.assert_not_called()
+
+        transform.close()
+        original_provider.close.assert_called_once()
+
 
 # ---------------------------------------------------------------------------
 # Truncation detection

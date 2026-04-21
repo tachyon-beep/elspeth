@@ -35,6 +35,7 @@ from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.freeze import freeze_fields
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
+from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.infrastructure.clients.llm import ContextLengthError, LLMClientError
@@ -53,7 +54,13 @@ from elspeth.plugins.transforms.llm import (
 from elspeth.plugins.transforms.llm.base import LLMConfig
 from elspeth.plugins.transforms.llm.langfuse import LangfuseTracer, create_langfuse_tracer
 from elspeth.plugins.transforms.llm.multi_query import QuerySpec, ResponseFormat, resolve_queries
-from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, ParsedFinishReason, UnrecognizedFinishReason
+from elspeth.plugins.transforms.llm.provider import (
+    FinishReason,
+    LLMProvider,
+    LLMQueryResult,
+    ParsedFinishReason,
+    UnrecognizedFinishReason,
+)
 from elspeth.plugins.transforms.llm.providers.azure import AzureLLMProvider, AzureOpenAIConfig, _configure_azure_monitor
 from elspeth.plugins.transforms.llm.providers.openrouter import OpenRouterConfig, OpenRouterLLMProvider
 from elspeth.plugins.transforms.llm.templates import PromptTemplate
@@ -992,9 +999,11 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
 
     name = "llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:ef3166cad9d59717"
+    source_file_hash: str | None = "sha256:6279c8fd19b1c53d"
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     config_model = LLMConfig  # Base; get_config_model dispatches to provider-specific
+    passes_through_input = True
+    _provider: LLMProvider | None
 
     @classmethod
     def get_config_model(cls, config: dict[str, Any] | None = None) -> type[LLMConfig]:
@@ -1064,6 +1073,72 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
             if "provider" not in required:
                 required.append("provider")
         return schema
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal no-network config for the ADR-009 forward invariant."""
+        return {
+            "provider": "openrouter",
+            "api_key": "probe-key",
+            "model": "openai/gpt-4o-mini",
+            "template": "{{ row.llm_probe_text }}",
+            "schema": {"mode": "observed"},
+            "required_input_fields": [],
+        }
+
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Inject a deterministic prompt field for invariant probing."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="llm_probe_text",
+                value="probe request",
+            )
+        ]
+
+    def execute_forward_invariant_probe(
+        self,
+        probe_rows: list[PipelineRow],
+        ctx: Any,
+    ) -> TransformResult:
+        """Exercise the real LLM row path with a lifecycle-safe fake provider."""
+        if len(probe_rows) != 1:
+            raise FrameworkBugError(
+                f"{self.__class__.__name__}.execute_forward_invariant_probe() "
+                f"received {len(probe_rows)} rows; LLM invariant probes require exactly 1 row."
+            )
+
+        class _InvariantProvider:
+            def execute_query(
+                self,
+                messages: list[dict[str, str]],
+                *,
+                model: str,
+                temperature: float,
+                max_tokens: int | None,
+                state_id: str,
+                token_id: str,
+                response_format: object | None = None,
+            ) -> LLMQueryResult:
+                del messages, model, temperature, max_tokens, state_id, token_id, response_format
+                return LLMQueryResult(
+                    content="probe response",
+                    usage=TokenUsage.known(1, 1),
+                    model="probe-model",
+                    finish_reason=FinishReason.STOP,
+                )
+
+            def close(self) -> None:
+                return None
+
+        original_provider = self._provider
+        probe_provider = _InvariantProvider()
+        try:
+            self._provider = probe_provider
+            return self._process_row(probe_rows[0], ctx)
+        finally:
+            self._provider = original_provider
+            probe_provider.close()
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
