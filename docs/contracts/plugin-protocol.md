@@ -451,6 +451,16 @@ class JSONExplode(BaseTransform):
 - `success_multi([])` is invalid (no silent drops) - use `success_empty()` for intentional zero emission
 - If `passes_through_input=True` and zero emission is intentional, the transform must also declare `can_drop_rows=True`
 
+For ADR-009 invariant coverage, a transform participates through three hooks:
+`probe_config()`, `forward_invariant_probe_rows()` /
+`backward_invariant_probe_rows()`, and
+`execute_forward_invariant_probe()` /
+`execute_backward_invariant_probe()`. The harness owns discovery and
+assertions; the transform owns how to instantiate, shape, and execute a
+hermetic representative probe. This keeps external-call and
+`BatchTransformMixin` transforms from forcing transport-specific branches into
+the invariant harness itself.
+
 #### Zero-Emission Filters
 
 Transforms that intentionally emit zero rows must use `TransformResult.success_empty(...)`.

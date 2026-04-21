@@ -4,9 +4,9 @@ Three tests here:
 
 - **Forward invariant** (`test_annotated_transforms_preserve_input_fields`):
   For every registered ``passes_through_input=True`` transform, runs
-  Hypothesis-generated probe rows through ``process()`` and asserts every
-  emitted row preserves every input field (contract AND payload). Fails CI
-  on mis-annotation.
+  Hypothesis-generated probe rows through the transform-owned invariant
+  execution hook and asserts every emitted row preserves every input field
+  (contract AND payload). Fails CI on mis-annotation.
 
 - **Backward invariant** (``test_non_pass_through_transforms_do_drop_fields``):
   Fails CI when a non-annotated transform that opted into probing (i.e.
@@ -103,7 +103,7 @@ def _probe_instantiate(cls: type[BaseTransform]) -> BaseTransform:
             reason = f"{cls.__name__}.probe_config() not implemented (non-pass-through transform has not opted into invariant probing)."
         raise _UnprobeableTransform(reason=reason) from exc
     try:
-        return cls(config=config)
+        return cls(config)
     except TypeError as exc:
         raise _UnprobeableTransform(reason=f"{cls.__name__}.__init__ rejected probe_config() output: {exc}") from exc
 
@@ -194,20 +194,10 @@ def test_annotated_transforms_preserve_input_fields(
 
     probe_rows = transform.forward_invariant_probe_rows(row)
 
-    # Batch-aware transforms receive list[PipelineRow]; single-token transforms
-    # receive PipelineRow. ``forward_invariant_probe_rows()`` lets
-    # config-sensitive pass-through transforms adapt the generic probe into a
-    # representative success-path shape.
-    try:
-        if transform.is_batch_aware:
-            result = transform.process(probe_rows, _probe_context(transform))  # type: ignore[arg-type]
-        else:
-            assert len(probe_rows) == 1, (
-                f"{_annotated_cls.__name__}.forward_invariant_probe_rows() must return exactly 1 row for non-batch transforms."
-            )
-            result = transform.process(probe_rows[0], _probe_context(transform))
-    except (TypeError, AttributeError) as exc:
-        pytest.skip(f"{_annotated_cls.__name__}: probe invocation rejected: {exc}")
+    result = transform.execute_forward_invariant_probe(
+        probe_rows,
+        _probe_context(transform),
+    )
 
     if result.status != "success":
         # Legitimate processing error on this probe (e.g., quarantine). Not
@@ -318,13 +308,10 @@ def test_non_pass_through_transforms_do_drop_fields(
         nonlocal probes_preserved, probe_count
         probe_count += 1
         probe_rows = transform.backward_invariant_probe_rows(probe)
-        if transform.is_batch_aware:
-            result = transform.process(probe_rows, _probe_context(transform))  # type: ignore[arg-type]
-        else:
-            assert len(probe_rows) == 1, (
-                f"{_non_pass_through_cls.__name__}.backward_invariant_probe_rows() must return exactly 1 row for non-batch transforms."
-            )
-            result = transform.process(probe_rows[0], _probe_context(transform))
+        result = transform.execute_backward_invariant_probe(
+            probe_rows,
+            _probe_context(transform),
+        )
         if result.status != "success":
             return
         emitted_rows = _emitted_rows_from_result(result)

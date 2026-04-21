@@ -308,9 +308,10 @@ class BaseTransform(ABC):
         transform that later gains the annotation is caught immediately by
         the skip-rate budget test, not silently excluded from governance.
 
-        The returned dict is passed directly to ``cls(config=...)``. It must
-        not require external services, network calls, or credentials — the
-        invariant harness runs in CI and probes transforms in isolation.
+        The returned dict is passed directly to ``cls(...)`` using the same
+        positional constructor contract as ``PluginManager.create_transform()``.
+        It must not require external services, network calls, or credentials —
+        the invariant harness runs in CI and probes transforms in isolation.
         """
         raise NotImplementedError(
             f"{cls.__name__}.probe_config() is not implemented. "
@@ -337,6 +338,42 @@ class BaseTransform(ABC):
         to supply a more representative shape.
         """
         return [probe]
+
+    def execute_forward_invariant_probe(
+        self,
+        probe_rows: list[PipelineRow],
+        ctx: Any,
+    ) -> TransformResult:
+        """Execute the forward invariant probe using the production path.
+
+        Default behavior mirrors runtime dispatch:
+        - batch-aware transforms receive the full probe row list
+        - single-row transforms must receive exactly one probe row
+
+        Transforms with transport or concurrency seams that cannot be exercised
+        via plain ``process()`` override this hook rather than teaching the
+        invariant harness about plugin-specific internals.
+        """
+        if self.is_batch_aware:
+            return self.process(probe_rows, ctx)  # type: ignore[arg-type]
+        if len(probe_rows) != 1:
+            raise FrameworkBugError(
+                f"{self.__class__.__name__}.execute_forward_invariant_probe() received {len(probe_rows)} rows for a non-batch transform."
+            )
+        return self.process(probe_rows[0], ctx)
+
+    def execute_backward_invariant_probe(
+        self,
+        probe_rows: list[PipelineRow],
+        ctx: Any,
+    ) -> TransformResult:
+        """Execute the backward invariant probe.
+
+        Defaults to the same execution path as the forward probe. Non-pass-through
+        transforms can override this when their representative drop path needs a
+        special local seam.
+        """
+        return self.execute_forward_invariant_probe(probe_rows, ctx)
 
     @staticmethod
     def _augment_invariant_probe_row(
