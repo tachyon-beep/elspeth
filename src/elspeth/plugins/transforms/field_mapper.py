@@ -82,8 +82,19 @@ class FieldMapper(BaseTransform):
 
     name = "field_mapper"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:4ba24e1591bd27f8"
+    source_file_hash: str | None = "sha256:00c77ea8ef276fdc"
     config_model = FieldMapperConfig
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 backward invariant."""
+        return {
+            "schema": {"mode": "observed"},
+            "mapping": {
+                "field_mapper_probe_source": "field_mapper_probe_target",
+            },
+            "strict": True,
+        }
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -107,6 +118,16 @@ class FieldMapper(BaseTransform):
             adds_fields=True,
         )
         self._output_schema_config = self._build_field_mapper_output_schema_config(cfg)
+
+    def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Exercise the real rename/drop path for the backward invariant."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="field_mapper_probe_source",
+                value="mapped",
+            )
+        ]
 
     def _build_field_mapper_output_schema_config(self, cfg: FieldMapperConfig) -> SchemaConfig:
         """Build output schema config reflecting the mapped output shape.

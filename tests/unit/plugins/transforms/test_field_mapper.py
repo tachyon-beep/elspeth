@@ -236,6 +236,24 @@ class TestFieldMapper:
         assert result.row is not None
         assert result.row.to_dict() == row
 
+    def test_backward_probe_rows_drop_mapped_source_field(self, ctx: PluginContext) -> None:
+        """Backward invariant probe keeps the real rename/drop path under test."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(FieldMapper.probe_config())
+        probe = make_pipeline_row({"baseline": "kept"})
+
+        result = transform.execute_backward_invariant_probe(
+            transform.backward_invariant_probe_rows(probe),
+            ctx,
+        )
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["baseline"] == "kept"
+        assert result.row["field_mapper_probe_target"] == "mapped"
+        assert "field_mapper_probe_source" not in result.row.to_dict()
+
     def test_requires_schema_config(self) -> None:
         """FieldMapper requires schema configuration."""
         from elspeth.plugins.infrastructure.config_base import PluginConfigError

@@ -112,9 +112,17 @@ class JSONExplode(BaseTransform):
 
     name = "json_explode"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:39fd3d4895ab2112"
+    source_file_hash: str | None = "sha256:100c275247f058d6"
     config_model = JSONExplodeConfig
     creates_tokens = True  # CRITICAL: enables new token creation for deaggregation
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 backward invariant."""
+        return {
+            "schema": {"mode": "observed"},
+            "array_field": "json_explode_items",
+        }
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize the JSONExplode transform.
@@ -152,6 +160,16 @@ class JSONExplode(BaseTransform):
             adds_fields=True,
         )
         self._output_schema_config = self._build_json_explode_output_schema_config(cfg)
+
+    def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Exercise the real array-consumption path for the backward invariant."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name=self._array_field,
+                value=["only-item"],
+            )
+        ]
 
     def _build_json_explode_output_schema_config(self, cfg: JSONExplodeConfig) -> SchemaConfig:
         """Build output schema config excluding array_field.

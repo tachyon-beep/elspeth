@@ -207,6 +207,25 @@ class TestJSONExplodeHappyPath:
         assert result.rows[0].to_dict() == {"id": 1, "item": "a", "item_index": 0}
         assert result.rows[1].to_dict() == {"id": 1, "item": "b", "item_index": 1}
 
+    def test_backward_probe_rows_drop_array_field(self, ctx: PluginContext) -> None:
+        """Backward invariant probe drives the real deaggregation path."""
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(JSONExplode.probe_config())
+        probe = make_pipeline_row({"baseline": "kept"})
+
+        result = transform.execute_backward_invariant_probe(
+            transform.backward_invariant_probe_rows(probe),
+            ctx,
+        )
+
+        assert result.status == "success"
+        assert result.rows is not None
+        assert len(result.rows) == 1
+        assert result.rows[0]["baseline"] == "kept"
+        assert result.rows[0]["item"] == "only-item"
+        assert "json_explode_items" not in result.rows[0].to_dict()
+
 
 class TestJSONExplodeTypeViolations:
     """Tests for type violations - these should CRASH, not return errors.

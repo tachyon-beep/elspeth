@@ -95,9 +95,18 @@ class BatchStats(BaseTransform):
 
     name = "batch_stats"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:8bb9dd818321b8c1"
+    source_file_hash: str | None = "sha256:418cf32faea4be0d"
     config_model = BatchStatsConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 backward invariant."""
+        return {
+            "schema": {"mode": "observed"},
+            "value_field": "batch_stats_probe_value",
+            "compute_mean": True,
+        }
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -156,6 +165,16 @@ class BatchStats(BaseTransform):
             adds_fields=True,
         )
         self._output_schema_config = self._build_output_schema_config(schema_config)
+
+    def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Exercise the real aggregate output path for the backward invariant."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name=self._value_field,
+                value=1.0,
+            )
+        ]
 
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
         self, rows: list[PipelineRow], ctx: TransformContext

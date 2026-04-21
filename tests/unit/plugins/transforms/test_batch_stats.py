@@ -158,6 +158,24 @@ class TestBatchStatsHappyPath:
         with pytest.raises(TypeError, match="must be numeric"):
             transform.process(rows, ctx)
 
+    def test_backward_probe_rows_drop_original_fields_for_invariant_harness(self, ctx: PluginContext) -> None:
+        """Backward invariant probe exercises the aggregate output path, not passthrough."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats(BatchStats.probe_config())
+        probe = _make_row({"baseline": "kept"})
+
+        result = transform.execute_backward_invariant_probe(
+            transform.backward_invariant_probe_rows(probe),
+            ctx,
+        )
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert "baseline" not in result.row
+        assert result.row["count"] == 1
+        assert result.row["sum"] == 1.0
+
 
 class TestBatchStatsOutputSchema:
     """Tests for output schema behavior of shape-changing transforms.

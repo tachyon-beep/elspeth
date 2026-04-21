@@ -120,6 +120,9 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/transforms/truncate.py:Truncate.probe_config:return"
   - "src/elspeth/plugins/transforms/type_coerce.py:TypeCoerce.probe_config:return"
   - "src/elspeth/plugins/transforms/value_transform.py:ValueTransform.probe_config:return"
+  - "src/elspeth/plugins/transforms/batch_stats.py:BatchStats.probe_config:return"
+  - "src/elspeth/plugins/transforms/field_mapper.py:FieldMapper.probe_config:return"
+  - "src/elspeth/plugins/transforms/json_explode.py:JSONExplode.probe_config:return"
 
   # Plugin implementations - config input
   - "src/elspeth/plugins/sinks/chroma_sink.py:ChromaSink.__init__:config"
