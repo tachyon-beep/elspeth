@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed, wait
 from dataclasses import dataclass
 from threading import Event, Lock, Semaphore
 from typing import Any
 
-import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import TransformErrorReason, TransformResult
 from elspeth.contracts.engine import BufferEntry
 from elspeth.contracts.errors import PluginRetryableError
@@ -256,7 +255,12 @@ class PooledExecutor:
         # The ReorderBuffer uses sequential indices, so concurrent batches
         # would interleave indices and cause results to be returned to the wrong caller
         with self._batch_lock:
-            return self._execute_batch_locked(contexts, process_fn)
+            self._buffer = ReorderBuffer()
+            try:
+                return self._execute_batch_locked(contexts, process_fn)
+            except Exception:
+                self._buffer = ReorderBuffer()
+                raise
 
     def _execute_batch_locked(
         self,
@@ -329,19 +333,9 @@ class PooledExecutor:
             buffer_idx = futures[future]
             try:
                 _returned_idx, result = future.result()
-            except contract_errors.TIER_1_ERRORS:
-                raise  # Tier 1 errors must crash — not row-level errors
-            except Exception as exc:
-                # Complete the buffer slot with a deterministic error so the
-                # reorder buffer stays consistent.  Without this, the slot is
-                # permanently occupied and the pool eventually exhausts.
-                result = TransformResult.error(
-                    {
-                        "reason": "unexpected_pool_error",
-                        "error": f"{type(exc).__name__}: {exc}",
-                    },
-                    retryable=False,
-                )
+            except Exception:
+                self._drain_failed_batch_futures(futures)
+                raise
 
             # Complete in buffer (may be out of order)
             self._buffer.complete(buffer_idx, result)
@@ -365,6 +359,14 @@ class PooledExecutor:
         self._capture_completion_stats()
 
         return entries
+
+    def _drain_failed_batch_futures(self, futures: Mapping[Future[tuple[int, TransformResult]], int]) -> None:
+        """Drain/cancel outstanding futures before propagating a batch-crashing exception."""
+        for future in futures:
+            if future.done():
+                continue
+            future.cancel()
+        wait(futures)
 
     def _wait_for_dispatch_gate(self) -> None:
         """Wait until we're allowed to dispatch, ensuring global pacing.

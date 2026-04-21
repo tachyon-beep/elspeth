@@ -881,7 +881,7 @@ class RowProcessor:
                     error_hash=error_hash,
                     context=per_token_audit_payload,
                 )
-            except Exception as record_failure:
+            except LandscapeRecordError as record_failure:
                 raise AuditIntegrityError(
                     f"Failed to record {type(violation).__name__} FAILED outcome "
                     f"for token {token.token_id!r} in batch flush "

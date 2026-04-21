@@ -6,6 +6,8 @@ import time
 from threading import Lock
 from typing import Any
 
+import pytest
+
 from elspeth.contracts import TransformResult
 from elspeth.plugins.infrastructure.pooling import BufferEntry, CapacityError, PoolConfig, PooledExecutor, RowContext
 from elspeth.testing import make_pipeline_row
@@ -1133,9 +1135,8 @@ class TestPooledExecutorShutdownRace:
 class TestPooledExecutorFutureException:
     """Regression tests: unguarded future.result() leaves buffer corrupt."""
 
-    def test_future_exception_completes_buffer_slot_with_error(self) -> None:
-        """When a future raises an unexpected exception, the buffer slot must
-        be completed with an error TransformResult instead of leaking."""
+    def test_future_exception_propagates_plainly_and_executor_recovers(self) -> None:
+        """Unexpected worker exceptions must crash the batch, not become row errors."""
         config = PoolConfig(pool_size=3)
         executor = PooledExecutor(config)
 
@@ -1149,25 +1150,26 @@ class TestPooledExecutorFutureException:
 
         contexts = [RowContext(row={"idx": i}, state_id=f"s_{i}", row_index=i) for i in range(3)]
 
-        entries = executor.execute_batch(contexts, exploding_process)
+        with pytest.raises(RuntimeError, match="Unexpected kaboom"):
+            executor.execute_batch(contexts, exploding_process)
 
-        assert len(entries) == 3
         assert executor.pending_count == 0
 
-        # The exploding row should have an error result, not crash the batch
-        error_entries = [e for e in entries if e.result.status == "error"]
-        assert len(error_entries) == 1
-        assert error_entries[0].result.reason is not None
-        assert "unexpected_pool_error" in error_entries[0].result.reason["reason"]
+        recovery_entries = executor.execute_batch(
+            [RowContext(row={"idx": 99}, state_id="s_99", row_index=0)],
+            lambda row, state_id: TransformResult.success(
+                make_pipeline_row(dict(row)),
+                success_reason={"action": "recovered"},
+            ),
+        )
 
-        # Other rows should succeed normally
-        success_entries = [e for e in entries if e.result.status == "success"]
-        assert len(success_entries) == 2
+        assert len(recovery_entries) == 1
+        assert recovery_entries[0].result.status == "success"
 
         executor.shutdown()
 
-    def test_all_futures_exploding_returns_all_errors(self) -> None:
-        """When every future raises, all buffer slots get error results."""
+    def test_all_futures_exploding_propagates_plainly_and_clears_buffer(self) -> None:
+        """Even if every future crashes, the original exception must propagate."""
         config = PoolConfig(pool_size=2)
         executor = PooledExecutor(config)
 
@@ -1176,10 +1178,9 @@ class TestPooledExecutorFutureException:
 
         contexts = [RowContext(row={"idx": i}, state_id=f"s_{i}", row_index=i) for i in range(4)]
 
-        entries = executor.execute_batch(contexts, always_explode)
+        with pytest.raises(ValueError, match=r"Row [0-9] failed"):
+            executor.execute_batch(contexts, always_explode)
 
-        assert len(entries) == 4
         assert executor.pending_count == 0
-        assert all(e.result.status == "error" for e in entries)
 
         executor.shutdown()

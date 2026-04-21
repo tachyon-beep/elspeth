@@ -401,6 +401,16 @@ def test_serialize_plugin_name_raises_when_plugin_name_missing() -> None:
         _serialize_plugin_name(_NamelessPlugin())
 
 
+def test_serialize_plugin_name_raises_when_plugin_name_empty() -> None:
+    from elspeth.contracts.errors import FrameworkBugError
+
+    class _EmptyNamePlugin:
+        name = ""
+
+    with pytest.raises(FrameworkBugError, match=r"empty plugin\.name"):
+        _serialize_plugin_name(_EmptyNamePlugin())
+
+
 def test_aggregate_to_audit_dict_carries_children() -> None:
     """Aggregate's to_audit_dict emits is_aggregate=True and the full
     violations list — no contract_name field (C5 closure)."""

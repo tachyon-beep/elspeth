@@ -21,6 +21,7 @@ from elspeth.contracts.errors import AuditIntegrityError, PassThroughContractVio
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.contracts.types import NodeID
 from elspeth.core.config import AggregationSettings, TriggerConfig
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.engine.processor import _FlushContext
 from elspeth.testing import make_contract, make_token_info
 
@@ -98,7 +99,7 @@ def test_recorder_failure_mid_loop_raises_audit_integrity_error() -> None:
     original_record = processor._data_flow.record_token_outcome
 
     def _faulty_recorder(*args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError("simulated audit DB outage")
+        raise LandscapeRecordError("simulated audit DB outage")
 
     processor._data_flow.record_token_outcome = _faulty_recorder  # type: ignore[assignment]
 
@@ -125,7 +126,7 @@ def test_recorder_failure_mid_loop_raises_audit_integrity_error() -> None:
 
     # The __cause__ chain points back to the recorder failure.
     cause = exc_info.value.__cause__
-    assert isinstance(cause, RuntimeError)
+    assert isinstance(cause, LandscapeRecordError)
     assert "simulated audit DB outage" in str(cause)
 
     # The error message includes the original violation summary.
@@ -133,4 +134,62 @@ def test_recorder_failure_mid_loop_raises_audit_integrity_error() -> None:
     assert "INCOMPLETE" in str(exc_info.value)
 
     # Restore the recorder.
+    processor._data_flow.record_token_outcome = original_record  # type: ignore[assignment]
+
+
+def test_non_landscape_recorder_bug_mid_loop_propagates_plainly() -> None:
+    """Non-recorder bugs must keep their original type during flush violation recording."""
+    from elspeth.engine.processor import DAGTraversalContext, RowProcessor
+    from elspeth.engine.spans import SpanFactory
+    from tests.fixtures.landscape import make_recorder_with_run
+
+    setup = make_recorder_with_run(
+        run_id="test-run",
+        source_node_id="source-0",
+        source_plugin_name="test-source",
+    )
+    traversal = DAGTraversalContext(
+        node_step_map={NodeID("source-0"): 0, NodeID("agg-node"): 1},
+        node_to_plugin={},
+        first_transform_node_id=None,
+        node_to_next={NodeID("source-0"): None, NodeID("agg-node"): None},
+        coalesce_node_map={},
+    )
+    processor = RowProcessor(
+        execution=setup.factory.execution,
+        data_flow=setup.factory.data_flow,
+        span_factory=SpanFactory(),
+        run_id="test-run",
+        source_node_id=NodeID("source-0"),
+        source_on_success="default",
+        traversal=traversal,
+    )
+    original_record = processor._data_flow.record_token_outcome
+
+    def _faulty_recorder(*args: Any, **kwargs: Any) -> Any:
+        raise ValueError("recorder validation bug")
+
+    processor._data_flow.record_token_outcome = _faulty_recorder  # type: ignore[assignment]
+
+    transform = Mock(spec=TransformProtocol)
+    transform.node_id = "agg-node"
+    transform.name = "faulty-test"
+    transform.on_error = "discard"
+    transform.on_success = None
+    transform.is_batch_aware = True
+    transform.creates_tokens = False
+    transform.declared_output_fields = frozenset()
+    transform.declared_input_fields = frozenset()
+    transform.passes_through_input = True
+    transform.can_drop_rows = False
+    transform._output_schema_config = None
+
+    contract = make_contract(fields={"x": int}, mode="OBSERVED")
+    tokens = [make_token_info(token_id=f"t{i}", row_id=f"row-t{i}").with_updated_data(PipelineRow({"x": i}, contract)) for i in range(3)]
+    fctx = _make_fctx(transform=transform, tokens=tokens)
+    violation = _make_violation("faulty-test", tokens[-1])
+
+    with pytest.raises(ValueError, match="recorder validation bug"):
+        processor._record_flush_violation(fctx, violation)
+
     processor._data_flow.record_token_outcome = original_record  # type: ignore[assignment]

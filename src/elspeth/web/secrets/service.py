@@ -27,6 +27,9 @@ _slog = structlog.get_logger()
 _FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS = 60.0
 _fingerprint_missing_last_logged_at: float | None = None
 _fingerprint_missing_suppressed = 0
+_SECRET_DECRYPTION_LOG_INTERVAL_SECONDS = 60.0
+_secret_decryption_last_logged_at: float | None = None
+_secret_decryption_suppressed = 0
 
 
 def _log_fingerprint_missing_rate_limited() -> None:
@@ -69,6 +72,40 @@ def _log_fingerprint_missing_rate_limited() -> None:
             "the deployment environment is fixed."
         ),
         emit_interval_seconds=_FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS,
+        suppressed_since_last_emit=suppressed_since_last_emit,
+    )
+
+
+def _log_secret_decryption_rate_limited() -> None:
+    """Emit a rate-limited breadcrumb when resolve() swallows SecretDecryptionError.
+
+    Mirrors ``_log_fingerprint_missing_rate_limited``: the pipeline-path
+    contract still requires ``resolve()`` to collapse unresolvable refs
+    into ``None``, but operators need a deployment-visible signal when
+    stored secrets have become unreadable after key rotation or corruption.
+    """
+    global _secret_decryption_last_logged_at, _secret_decryption_suppressed
+
+    now_monotonic = time.monotonic()
+    if (
+        _secret_decryption_last_logged_at is not None
+        and now_monotonic - _secret_decryption_last_logged_at < _SECRET_DECRYPTION_LOG_INTERVAL_SECONDS
+    ):
+        _secret_decryption_suppressed += 1
+        return
+
+    suppressed_since_last_emit = _secret_decryption_suppressed
+    _secret_decryption_last_logged_at = now_monotonic
+    _secret_decryption_suppressed = 0
+    _slog.error(
+        "secret_resolve_decryption_failed",
+        detail=(
+            "A stored web secret exists but cannot be decrypted with the current "
+            "server key material; affected calls to WebSecretService.resolve() "
+            "will return None until the secret is re-saved or the deployment "
+            "key configuration is restored."
+        ),
+        emit_interval_seconds=_SECRET_DECRYPTION_LOG_INTERVAL_SECONDS,
         suppressed_since_last_emit=suppressed_since_last_emit,
     )
 
@@ -160,7 +197,10 @@ class WebSecretService:
             # ``set_user_secret`` write path.
             _log_fingerprint_missing_rate_limited()
             return None
-        except (SecretNotFoundError, SecretDecryptionError):
+        except SecretDecryptionError:
+            _log_secret_decryption_rate_limited()
+            return None
+        except SecretNotFoundError:
             return None
 
     def check_user_ref_resolvable(

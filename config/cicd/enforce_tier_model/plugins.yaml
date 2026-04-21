@@ -210,10 +210,10 @@ allow_hits:
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=8f58d0599dfaf961
+- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=281f28276f1c2b45
   owner: bugfix
-  reason: Thread pool may be shut down concurrently; RuntimeError caught to complete buffer slot with error result
-  safety: Buffer slot filled with deterministic error result; row gets proper error instead of silent drop
+  reason: Thread pool may be shut down concurrently during submit(); RuntimeError is translated into deterministic per-row shutdown results so submission-order slots are still completed
+  safety: Catch scope is RuntimeError-only; reserved buffer slots are completed with explicit shutdown_requested errors while unrelated exception types still propagate
   expires: '2026-05-17'
 - key: plugins/infrastructure/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:fp=50feaf5319858c5d
   owner: architecture
@@ -270,11 +270,6 @@ allow_hits:
   reason: Telemetry emission failure - must not crash main request flow
   safety: Logged and continues - telemetry is non-critical to HTTP processing
   expires: '2026-05-06'
-- key: plugins/infrastructure/pooling/executor.py:R4:PooledExecutor:_execute_batch_locked:fp=60b6584101331f73
-  owner: bugfix
-  reason: Worker thread can raise any exception type — must catch broadly to prevent buffer slot leak (FrameworkBugError/AuditIntegrityError re-raised before this catch)
-  safety: Exception converted to TransformResult.error (row gets quarantined), buffer stays consistent; framework errors re-raised above
-  expires: '2026-06-08'
 - key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=62d056151ce64838
   owner: refactor
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping

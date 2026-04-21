@@ -406,49 +406,58 @@ allow_hits:
   reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
   safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=2e5b2c59c17e0e70
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=3bb74cad6537cda7
+  owner: web-secrets
+  reason: |
+    FingerprintKeyMissingError is handled separately so resolve() can keep
+    its "unresolvable ref -> None" contract while still emitting the
+    deployment breadcrumb. The caller (resolve_secret_refs in
+    core/secrets.py) aggregates None returns into a single
+    SecretResolutionError; letting the typed fingerprint-key error escape
+    here would break that batch-validation behavior for composer
+    wire-secret-ref probes.
+  safety: |
+    None return matches the documented aggregation contract. The
+    rate-limited slog breadcrumb preserves operator visibility with a
+    suppressed-call count, while all unrelated exception classes continue
+    to propagate. Regression coverage:
+    test_resolve_re_emits_after_rate_limit_window_when_fingerprint_key_missing,
+    test_resolve_suppresses_repeated_logs_within_rate_limit_window, and
+    test_resolve_emits_breadcrumb_only_for_fingerprint_missing_not_generic_miss.
+  expires: null
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=9290898b9e743e9d
+  owner: web-secrets
+  reason: |
+    SecretDecryptionError is handled separately from TOCTOU misses so
+    resolve() keeps its "unresolvable ref -> None" contract while emitting
+    a deployment breadcrumb when a stored secret becomes unreadable after
+    key rotation or ciphertext corruption. This prevents the pipeline
+    validation path from collapsing the typed failure into a silent miss
+    with no operator-visible signal.
+  safety: |
+    None return matches the aggregation contract. Breadcrumb emission is
+    rate-limited at module scope so repeated failures produce periodic
+    operator signals without flooding logs, and unrelated exception types
+    still propagate. Regression coverage:
+    test_resolve_re_emits_after_rate_limit_window_when_secret_cannot_be_decrypted,
+    and test_resolve_emits_decryption_breadcrumb_only_for_secret_decryption_error.
+  expires: null
+- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=2d7315125baeccd8
   owner: web-secrets
   reason: |
     TOCTOU boundary — resolve() runs has-check and get-call across multiple
     independent DB connections (user path) or env-var reads (server path).
     A concurrent DELETE /api/secrets/{name} or env-var clear landing in the
     race window makes get_secret raise SecretNotFoundError even though the
-    has-check saw the row/value. The documented contract is "Returns None
-    for missing secrets" — the caller (resolve_secret_refs in
-    core/secrets.py) aggregates missing refs and translates them into a
-    SecretResolutionError at batch boundary. Letting SecretNotFoundError
-    or SecretDecryptionError escape from resolve() propagates as HTTP 500
-    instead of the intended aggregated missing-ref error, violating the
-    contract load-bearing for /api/secrets/validate and composer
-    wire-secret-ref probes.
+    record/value existed when the probe ran. The documented contract is
+    "Returns None for missing secrets" so callers can aggregate all bad
+    refs into one SecretResolutionError at batch boundary.
   safety: |
-    Exception is converted into None only for SecretNotFoundError and
-    SecretDecryptionError; other exception classes (SQLAlchemyError,
-    OSError, RuntimeError from fingerprint computation, etc.) continue to
-    propagate.  The None return is behaviorally identical to the LBYL-miss
-    branches above it, which callers already handle as "ref absent at this
-    scope" in the missing-ref aggregation. Regression coverage:
-    TestHasRefResolveInvariant.test_resolve_returns_none_when_user_secret_deleted_between_has_and_get
-    and test_resolve_returns_none_when_server_env_cleared_between_has_and_get.
-  expires: null
-- key: web/secrets/service.py:R6:WebSecretService:resolve:fp=b26443a3d6d31bb6
-  owner: web-secrets
-  reason: |
-    FingerprintKeyMissingError is handled separately (rather than inside the
-    TOCTOU-bucket catch below) so the rate-limited deployment breadcrumb
-    can fire.  The None return preserves the same aggregation contract
-    (resolve() returning None for unresolvable refs), but the deployment
-    misconfiguration — ELSPETH_FINGERPRINT_KEY unset — is no longer silent
-    to operators.  See _log_fingerprint_missing_rate_limited().
-  safety: |
-    None return matches the aggregation contract (TOCTOU catch below).
-    Breadcrumb is rate-limited at module scope so flood of resolve calls
-    against a misconfigured deployment emits periodic slog.error events
-    with a suppressed-call count, not one per call. Other exception
-    classes (SQLAlchemyError, OSError) still propagate. Regression coverage:
-    test_resolve_re_emits_after_rate_limit_window_when_fingerprint_key_missing,
-    test_resolve_suppresses_repeated_logs_within_rate_limit_window, and
-    test_resolve_emits_breadcrumb_only_for_fingerprint_missing_not_generic_miss.
+    Exception is converted into None only for SecretNotFoundError; other
+    exception classes continue to propagate. The None return is
+    behaviorally identical to the ordinary miss branches above it and is
+    pinned by the resolve/has_ref invariant regressions covering user-row
+    deletion and server env-var clearing between the probe and the fetch.
   expires: null
 - key: web/execution/validation.py:R5:_collect_secret_refs:fp=960090b735d7640d
   owner: web-execution
@@ -1024,7 +1033,7 @@ allow_hits:
     reading slog events and response bodies can distinguish
     middleware-bypassed failures from normal ones.
   expires: null
-- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=ec5907c3811b5cb7
+- key: web/secrets/service.py:R6:WebSecretService:check_user_ref_resolvable:fp=7bfc7431b665da26
   owner: web-secrets
   reason: |
     Narrow catch by design. check_user_ref_resolvable is the typed-error

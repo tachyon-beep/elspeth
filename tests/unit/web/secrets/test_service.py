@@ -530,6 +530,60 @@ class TestHasRefResolveInvariant:
         assert result is None
         assert mock_slog.error.call_count == 0
 
+    def test_resolve_re_emits_after_rate_limit_window_when_secret_cannot_be_decrypted(
+        self,
+        engine: sa.engine.Engine,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A swallowed SecretDecryptionError must emit a periodic breadcrumb."""
+        from elspeth.web.secrets import service as service_module
+
+        writer_store = UserSecretStore(engine=engine, master_key="test-master-key-32chars-minimum!")
+        writer_store.set_secret("ROT", value="user-val", user_id="u1", auth_provider_type="local")
+
+        rotated_user_store = UserSecretStore(engine=engine, master_key="rotated-master-key")
+        rotated_service = WebSecretService(
+            user_store=rotated_user_store,
+            server_store=ServerSecretStore(()),
+        )
+
+        monkeypatch.setattr(service_module, "_secret_decryption_last_logged_at", None, raising=False)
+        monkeypatch.setattr(service_module, "_secret_decryption_suppressed", 0, raising=False)
+        monotonic_values = iter((100.0, 100.0, 161.0))
+        monkeypatch.setattr(service_module.time, "monotonic", lambda: next(monotonic_values))
+
+        with patch.object(service_module, "_slog") as mock_slog:
+            assert rotated_service.resolve("u1", "ROT", auth_provider_type="local") is None
+            assert rotated_service.resolve("u1", "ROT", auth_provider_type="local") is None
+            assert rotated_service.resolve("u1", "ROT", auth_provider_type="local") is None
+
+        assert mock_slog.error.call_count == 2
+        args, kwargs = mock_slog.error.call_args_list[0]
+        assert args[0] == "secret_resolve_decryption_failed"
+        assert "cannot be decrypted" in kwargs["detail"]
+        assert kwargs["suppressed_since_last_emit"] == 0
+
+        args, kwargs = mock_slog.error.call_args_list[1]
+        assert args[0] == "secret_resolve_decryption_failed"
+        assert kwargs["suppressed_since_last_emit"] == 1
+
+    def test_resolve_emits_decryption_breadcrumb_only_for_secret_decryption_error(
+        self,
+        service: WebSecretService,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A plain SecretNotFoundError must not emit the decryption breadcrumb."""
+        from elspeth.web.secrets import service as service_module
+
+        monkeypatch.setattr(service_module, "_secret_decryption_last_logged_at", None, raising=False)
+        monkeypatch.setattr(service_module, "_secret_decryption_suppressed", 0, raising=False)
+
+        with patch.object(service_module, "_slog") as mock_slog:
+            result = service.resolve("u1", "NONEXISTENT", auth_provider_type="local")
+
+        assert result is None
+        assert mock_slog.error.call_count == 0
+
     def test_has_ref_returns_false_for_reserved_name_when_user_has_no_row(
         self,
         service: WebSecretService,

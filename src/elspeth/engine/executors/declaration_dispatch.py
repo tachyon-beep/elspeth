@@ -76,18 +76,24 @@ from elspeth.contracts.declaration_contracts import (
     PreEmissionInputs,
     registered_declaration_contracts_for_site,
 )
-from elspeth.contracts.errors import PluginContractViolation
+from elspeth.contracts.errors import FrameworkBugError, PluginContractViolation
 
 
 def _serialize_plugin_name(plugin: Any) -> str:
     """Return a stable string identifier for the plugin in aggregate messages.
 
     Direct attribute access for ``name`` — a plugin without ``name`` is a
-    framework bug per CLAUDE.md. Fallback to class name if the attribute
-    is present-but-empty only, keeping the aggregate message informative.
+    framework bug per CLAUDE.md. An empty value is also a framework bug:
+    aggregate audit evidence must not fabricate an identifier from the
+    plugin's class name when the authoritative ``plugin.name`` is absent.
     """
     name = plugin.name
-    return name if name else type(plugin).__name__
+    if not name:
+        raise FrameworkBugError(
+            f"Aggregate declaration audit evidence requires a non-empty plugin.name; "
+            f"refusing to fabricate an identifier for {type(plugin).__name__} from empty plugin.name"
+        )
+    return "".join((name,))
 
 
 def _build_aggregate_message(violations: Sequence[AuditEvidenceBase]) -> str:

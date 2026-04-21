@@ -3799,8 +3799,8 @@ class TestNodeStateGuard:
         with pytest.raises(OrchestrationInvariantError, match="before __enter__"):
             _ = guard.state_id
 
-    def test_auto_fail_when_execution_repo_down_raises_audit_integrity_error(self) -> None:
-        """If factory.execution.complete_node_state fails during auto-fail, AuditIntegrityError raised.
+    def test_auto_fail_when_execution_repo_record_failure_raises_audit_integrity_error(self) -> None:
+        """Landscape recorder failures during auto-fail must surface as AuditIntegrityError.
 
         Regression: Previously the original exception propagated and the DB failure
         was silently logged. This violates crash-on-anomaly: the audit trail has a
@@ -3808,10 +3808,11 @@ class TestNodeStateGuard:
         original transform error.
         """
         from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.core.landscape.errors import LandscapeRecordError
         from elspeth.engine.executors import NodeStateGuard
 
         factory = _make_factory()
-        factory.execution.complete_node_state.side_effect = RuntimeError("DB is down")
+        factory.execution.complete_node_state.side_effect = LandscapeRecordError("DB is down")
         guard = NodeStateGuard(
             factory.execution,
             token_id="tok_1",
@@ -3823,6 +3824,23 @@ class TestNodeStateGuard:
         # AuditIntegrityError must be raised — DB failure is more critical than original error
         with pytest.raises(AuditIntegrityError, match=r"Cannot record FAILED.*DB is down"), guard:
             raise ValueError("original error")
+
+    def test_auto_fail_value_error_from_execution_repo_propagates_plainly(self) -> None:
+        """Non-recorder bugs during auto-fail must keep their original type."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = ValueError("execution repo bug")
+        guard = NodeStateGuard(
+            factory.execution,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(ValueError, match="execution repo bug"), guard:
+            raise RuntimeError("original processing error")
 
     def test_attempt_passed_to_begin_node_state(self) -> None:
         """attempt parameter is forwarded to begin_node_state."""
@@ -3892,19 +3910,20 @@ class TestNodeStateGuard:
         with pytest.raises(AuditIntegrityError, match="corrupt state table"), guard:
             pass
 
-    def test_regular_execution_repo_error_on_clean_exit_raises_audit_integrity(self) -> None:
-        """Non-system execution repo error on clean exit → AuditIntegrityError raised.
+    def test_landscape_record_error_on_clean_exit_raises_audit_integrity(self) -> None:
+        """Landscape recorder failures on clean exit must raise AuditIntegrityError.
 
-        When factory.execution.complete_node_state fails with a regular exception (e.g., DB
+        When factory.execution.complete_node_state fails with a recorder failure (e.g., DB
         down) during the clean-exit path, AuditIntegrityError supersedes the
         OrchestrationInvariantError that would have been raised for missing complete().
         Audit corruption is always the highest-priority failure signal.
         """
         from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.core.landscape.errors import LandscapeRecordError
         from elspeth.engine.executors import NodeStateGuard
 
         factory = _make_factory()
-        factory.execution.complete_node_state.side_effect = RuntimeError("DB connection lost")
+        factory.execution.complete_node_state.side_effect = LandscapeRecordError("DB connection lost")
         guard = NodeStateGuard(
             factory.execution,
             token_id="tok_1",
@@ -3914,6 +3933,23 @@ class TestNodeStateGuard:
             input_data={"v": 1},
         )
         with pytest.raises(AuditIntegrityError, match=r"Cannot record FAILED.*DB connection lost"), guard:
+            pass
+
+    def test_value_error_from_execution_repo_propagates_on_clean_exit(self) -> None:
+        """Non-recorder bugs on clean exit must not be reclassified."""
+        from elspeth.engine.executors import NodeStateGuard
+
+        factory = _make_factory()
+        factory.execution.complete_node_state.side_effect = ValueError("execution repo bug")
+        guard = NodeStateGuard(
+            factory.execution,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+        with pytest.raises(ValueError, match="execution repo bug"), guard:
             pass
 
     # -- Re-raise guard tests: exception path (auto-fail) --------------------

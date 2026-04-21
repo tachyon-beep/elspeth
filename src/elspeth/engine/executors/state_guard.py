@@ -18,7 +18,6 @@ from collections.abc import Mapping
 from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
-import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import ExecutionError, NodeStateOpen
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.enums import NodeStateStatus
@@ -26,6 +25,7 @@ from elspeth.contracts.errors import (
     AuditIntegrityError,
     OrchestrationInvariantError,
 )
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 if TYPE_CHECKING:
@@ -137,9 +137,7 @@ class NodeStateGuard:
                     duration_ms=duration_ms,
                     error=error,
                 )
-            except contract_errors.TIER_1_ERRORS:
-                raise  # Tier 1 errors must crash immediately
-            except Exception as db_err:
+            except LandscapeRecordError as db_err:
                 raise AuditIntegrityError(
                     f"Cannot record FAILED for state {self.state_id} after missing complete() — "
                     f"audit trail has permanent OPEN state (Tier 1 violation). "
@@ -175,11 +173,7 @@ class NodeStateGuard:
                 duration_ms=duration_ms,
                 error=exc_error,
             )
-        except contract_errors.TIER_1_ERRORS:
-            raise  # Tier 1 errors must crash immediately
-        except (TypeError, AttributeError, KeyError, NameError):
-            raise  # Programming errors in recorder — crash to surface the bug
-        except Exception as db_err:
+        except LandscapeRecordError as db_err:
             # Audit trail corruption (permanent OPEN state) is MORE critical than
             # the original exception. Raise AuditIntegrityError with both contexts.
             raise AuditIntegrityError(
