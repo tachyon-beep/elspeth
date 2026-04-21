@@ -970,6 +970,33 @@ def test_http_config_timeout_custom() -> None:
     assert transform._timeout == 60
 
 
+def test_web_scrape_forward_probe_preserves_baseline_and_restores_payload_store(mock_ctx) -> None:
+    """Invariant probe should use a hermetic fetch seam and restore injected state."""
+    transform = WebScrapeTransform(WebScrapeTransform.probe_config())
+
+    assert WebScrapeTransform.passes_through_input is True
+
+    original_fetch = transform._fetch_url
+    original_payload_store = Mock()
+    original_payload_store.store.return_value = "existing-hash"
+    transform._payload_store = original_payload_store
+
+    base_row = make_pipeline_row({"baseline": "kept"})
+    result = transform.execute_forward_invariant_probe(
+        transform.forward_invariant_probe_rows(base_row),
+        mock_ctx,
+    )
+
+    assert result.status == "success"
+    assert result.row is not None
+    assert result.row["baseline"] == "kept"
+    assert result.row["page_content"]
+    assert result.row["page_fingerprint"]
+    assert result.row["fetch_status"] == 200
+    assert transform._payload_store is original_payload_store
+    assert transform._fetch_url.__func__ is original_fetch.__func__
+
+
 class TestWebScrapeDeclaredOutputFields:
     """Tests for declared_output_fields — centralized collision detection support.
 

@@ -194,8 +194,24 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:117603cf58c7e68d"
+    source_file_hash: str | None = "sha256:b8290a8b47488ee1"
     config_model = WebScrapeConfig
+    passes_through_input = True
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 forward invariant."""
+        return {
+            "schema": {"mode": "observed"},
+            "url_field": "web_scrape_probe_url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "http": {
+                "abuse_contact": "invariants@example.com",
+                "scraping_reason": "ADR-009 invariant probe",
+                "allowed_hosts": ["93.184.216.34/32"],
+            },
+        }
 
     def __init__(self, options: dict[str, Any]) -> None:
         super().__init__(options)
@@ -261,6 +277,65 @@ class WebScrapeTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Inject a deterministic public-IP URL for invariant probing."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name=self._url_field,
+                value="https://93.184.216.34/invariant-probe",
+            )
+        ]
+
+    def execute_forward_invariant_probe(
+        self,
+        probe_rows: list[PipelineRow],
+        ctx: TransformContext,
+    ) -> TransformResult:
+        """Drive the real process path with a hermetic no-network fetch seam."""
+
+        class _InvariantPayloadStore:
+            def store(self, payload: bytes) -> str:
+                return "probe-processed-hash"
+
+        class _InvariantCall:
+            request_ref = "probe-request-hash"
+            response_ref = "probe-response-hash"
+
+        def _fake_fetch_url(
+            safe_request: SSRFSafeRequest,
+            probe_ctx: TransformContext,
+        ) -> tuple[httpx.Response, str, _InvariantCall]:
+            del probe_ctx
+            return (
+                httpx.Response(
+                    200,
+                    text="<html><body><h1>Probe</h1><p>safe</p></body></html>",
+                ),
+                safe_request.original_url,
+                _InvariantCall(),
+            )
+
+        had_payload_store = "_payload_store" in self.__dict__
+        original_payload_store: Any = None
+        if had_payload_store:
+            original_payload_store = self.__dict__["_payload_store"]
+        had_fetch_override = "_fetch_url" in self.__dict__
+        original_fetch = self._fetch_url
+        try:
+            self.__dict__["_payload_store"] = _InvariantPayloadStore()
+            self.__dict__["_fetch_url"] = _fake_fetch_url
+            return super().execute_forward_invariant_probe(probe_rows, ctx)
+        finally:
+            if had_payload_store:
+                self.__dict__["_payload_store"] = original_payload_store
+            else:
+                delattr(self, "_payload_store")
+            if had_fetch_override:
+                self.__dict__["_fetch_url"] = original_fetch
+            else:
+                delattr(self, "_fetch_url")
 
     def on_start(self, ctx: LifecycleContext) -> None:
         """Capture infrastructure dependencies at pipeline start."""
