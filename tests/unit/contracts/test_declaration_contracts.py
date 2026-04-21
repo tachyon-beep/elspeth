@@ -11,12 +11,16 @@ import pytest
 from elspeth.contracts.declaration_contracts import (
     BatchFlushInputs,
     BatchFlushOutputs,
+    BoundaryInputs,
+    BoundaryOutputs,
     DeclarationContract,
     DeclarationContractViolation,
     DispatchSite,
     ExampleBundle,
     PostEmissionInputs,
     PostEmissionOutputs,
+    PreEmissionInputs,
+    _attach_contract_name_from_dispatcher,
     _clear_registry_for_tests,
     freeze_declaration_registry,
     implements_dispatch_site,
@@ -25,6 +29,7 @@ from elspeth.contracts.declaration_contracts import (
     register_declaration_contract,
     registered_declaration_contracts,
 )
+from elspeth.contracts.errors import FrameworkBugError
 
 
 class _FakePayload(TypedDict):
@@ -235,6 +240,76 @@ def test_contract_claiming_no_dispatch_sites_rejected() -> None:
         register_declaration_contract(_NoSites())
 
 
+def test_default_dispatch_methods_raise_framework_bug() -> None:
+    class _PassiveContract(DeclarationContract):
+        name = "passive_contract"
+        payload_schema = _FakePayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        @classmethod
+        def negative_example(cls) -> ExampleBundle:
+            raise NotImplementedError
+
+        @classmethod
+        def positive_example_does_not_apply(cls) -> ExampleBundle:
+            raise NotImplementedError
+
+    contract = _PassiveContract()
+    pre_inputs = PreEmissionInputs(
+        plugin=_FakePlugin(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        input_row=object(),
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+    post_inputs = PostEmissionInputs(
+        plugin=_FakePlugin(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        input_row=object(),
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+    post_outputs = PostEmissionOutputs(emitted_rows=(object(),))
+    batch_inputs = BatchFlushInputs(
+        plugin=_FakePlugin(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        buffered_tokens=(object(),),
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+    batch_outputs = BatchFlushOutputs(emitted_rows=(object(),))
+    boundary_inputs = BoundaryInputs(
+        plugin=_FakePlugin(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        static_contract=frozenset(),
+        row_data={"customer_id": "1"},
+    )
+    boundary_outputs = BoundaryOutputs(rows=(object(),))
+
+    with pytest.raises(FrameworkBugError, match="pre_emission_check"):
+        contract.pre_emission_check(pre_inputs)
+    with pytest.raises(FrameworkBugError, match="post_emission_check"):
+        contract.post_emission_check(post_inputs, post_outputs)
+    with pytest.raises(FrameworkBugError, match="batch_flush_check"):
+        contract.batch_flush_check(batch_inputs, batch_outputs)
+    with pytest.raises(FrameworkBugError, match="boundary_check"):
+        contract.boundary_check(boundary_inputs, boundary_outputs)
+
+
 def test_registration_after_freeze_raises() -> None:
     freeze_declaration_registry()
     with pytest.raises(Exception, match="frozen"):
@@ -284,7 +359,7 @@ def test_violation_payload_secrets_scrubbed() -> None:
         message="m",
     )
     # to_audit_dict reads contract_name, so attach before inspecting.
-    v._attach_contract_name("t")
+    _attach_contract_name_from_dispatcher(v, "t")
     dump = v.to_audit_dict()
     assert dump["payload"]["api_key"] == "<redacted-secret>"
 
@@ -366,6 +441,22 @@ def test_boundary_outputs_deep_freezes_nested_rows() -> None:
     assert isinstance(outputs.rows, tuple)
     assert isinstance(outputs.rows[0], MappingProxyType)
     assert outputs.rows[0]["outer"] == ("inner",)
+
+
+def test_boundary_inputs_deep_freezes_row_data() -> None:
+    inputs = BoundaryInputs(
+        plugin=object(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        static_contract=frozenset(),
+        row_data={"outer": {"inner": ["value"]}},
+        row_contract=None,
+    )
+    assert isinstance(inputs.row_data, MappingProxyType)
+    assert isinstance(inputs.row_data["outer"], MappingProxyType)
+    assert inputs.row_data["outer"]["inner"] == ("value",)
 
 
 def test_example_bundle_deep_freezes_nested_args() -> None:
@@ -480,7 +571,7 @@ def test_violation_to_audit_dict_contains_all_identity_fields() -> None:
     )
     # Simulate dispatcher attribution so to_audit_dict's contract_name read
     # does not hit the pre-attach guard.
-    v._attach_contract_name("c")
+    _attach_contract_name_from_dispatcher(v, "c")
     dump = v.to_audit_dict()
     expected_keys = {
         "exception_type",
@@ -569,10 +660,24 @@ def test_violation_contract_name_is_read_only_after_attach() -> None:
         payload={"k": "v"},
         message="m",
     )
-    v._attach_contract_name("contract_a")
+    _attach_contract_name_from_dispatcher(v, "contract_a")
     assert v.contract_name == "contract_a"
     with pytest.raises(AttributeError):
         v.contract_name = "contract_b"  # type: ignore[misc]
+
+
+def test_violation_contract_name_attach_requires_dispatcher_helper() -> None:
+    v = _TestViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"k": "v"},
+        message="m",
+    )
+    with pytest.raises(RuntimeError, match="dispatcher"):
+        v._attach_contract_name("spoofed")
 
 
 def test_violation_contract_name_attach_is_one_shot() -> None:
@@ -589,9 +694,9 @@ def test_violation_contract_name_attach_is_one_shot() -> None:
         payload={"k": "v"},
         message="m",
     )
-    v._attach_contract_name("first")
+    _attach_contract_name_from_dispatcher(v, "first")
     with pytest.raises(RuntimeError, match="already"):
-        v._attach_contract_name("second")
+        _attach_contract_name_from_dispatcher(v, "second")
 
 
 def test_violation_declares_slots() -> None:

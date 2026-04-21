@@ -318,6 +318,16 @@ class BaseTransform(ABC):
             "instantiate in isolation. Implement probe_config() or remove the annotation."
         )
 
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Return representative input rows for ADR-009's forward invariant.
+
+        The default harness drives annotated pass-through transforms with a
+        single scalar ``probe`` row. Config-sensitive transforms can override
+        this to add the specific fields/values their ``probe_config()``
+        requires while preserving the randomized background row shape.
+        """
+        return [probe]
+
     def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
         """Return representative input rows for ADR-009's backward invariant.
 
@@ -327,6 +337,25 @@ class BaseTransform(ABC):
         to supply a more representative shape.
         """
         return [probe]
+
+    @staticmethod
+    def _augment_invariant_probe_row(
+        probe: PipelineRow,
+        *,
+        field_name: str,
+        value: Any,
+    ) -> PipelineRow:
+        """Return ``probe`` plus one guaranteed field for invariant helpers."""
+        from elspeth.contracts.contract_propagation import propagate_contract
+
+        output = probe.to_dict().copy()
+        output[field_name] = value
+        contract = propagate_contract(
+            probe.contract,
+            output,
+            transform_adds_fields=True,
+        )
+        return PipelineRow(output, contract)
 
     @staticmethod
     def _create_schemas(

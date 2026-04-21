@@ -74,6 +74,8 @@ from elspeth.contracts.declaration_contracts import (
     PostEmissionInputs,
     PostEmissionOutputs,
     PreEmissionInputs,
+    _attach_contract_name_from_dispatcher,
+    _mark_aggregate_dispatched,
     registered_declaration_contracts_for_site,
 )
 from elspeth.contracts.errors import FrameworkBugError, PluginContractViolation
@@ -135,7 +137,7 @@ def _dispatch(
         except DeclarationContractViolation as exc:
             # C4 closure: attach the authoritative name from the registry
             # entry. Contracts cannot supply contract_name at construction.
-            exc._attach_contract_name(contract.name)
+            _attach_contract_name_from_dispatcher(exc, contract.name)
             violations.append(exc)
         except PluginContractViolation as exc:
             # PassThroughContractViolation inherits PluginContractViolation
@@ -167,7 +169,7 @@ def _dispatch(
         violations=tuple(violations),
         message=_build_aggregate_message(violations),
     )
-    aggregate._attach_by_dispatcher()
+    _mark_aggregate_dispatched(aggregate)
     raise aggregate
 
 

@@ -15,10 +15,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from types import MappingProxyType
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, get_args, runtime_checkable
 from uuid import UUID
 
 from elspeth.contracts.freeze import freeze_fields
+
+SessionRunStatus = Literal["pending", "running", "completed", "failed", "cancelled"]
+TerminalSessionRunStatus = Literal["completed", "failed", "cancelled"]
+
+SESSION_RUN_STATUS_VALUES: frozenset[str] = frozenset(get_args(SessionRunStatus))
+SESSION_TERMINAL_RUN_STATUS_VALUES: frozenset[str] = frozenset(get_args(TerminalSessionRunStatus))
 
 # Legal run status transitions. Implementations MUST reject any
 # transition not in this table.
@@ -28,7 +34,7 @@ from elspeth.contracts.freeze import freeze_fields
 # raises TypeError rather than silently redefining terminal-state policy
 # for every downstream consumer.  The inline dict has no retained alias,
 # so the proxy is the only reference — there is no mutable back-door.
-LEGAL_RUN_TRANSITIONS: Mapping[str, frozenset[str]] = MappingProxyType(
+LEGAL_RUN_TRANSITIONS: Mapping[SessionRunStatus, frozenset[SessionRunStatus]] = MappingProxyType(
     {
         "pending": frozenset({"running", "failed", "cancelled"}),
         "running": frozenset({"completed", "failed", "cancelled"}),
@@ -37,6 +43,14 @@ LEGAL_RUN_TRANSITIONS: Mapping[str, frozenset[str]] = MappingProxyType(
         "cancelled": frozenset(),  # terminal
     }
 )
+
+if frozenset(LEGAL_RUN_TRANSITIONS.keys()) != SESSION_RUN_STATUS_VALUES:
+    raise AssertionError(
+        f"LEGAL_RUN_TRANSITIONS keys {frozenset(LEGAL_RUN_TRANSITIONS.keys())} "
+        f"must match SessionRunStatus values {SESSION_RUN_STATUS_VALUES}"
+    )
+if any(not allowed.issubset(SESSION_RUN_STATUS_VALUES) for allowed in LEGAL_RUN_TRANSITIONS.values()):
+    raise AssertionError("LEGAL_RUN_TRANSITIONS contains a target not present in SessionRunStatus")
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +171,7 @@ class RunRecord:
     id: UUID
     session_id: UUID
     state_id: UUID
-    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    status: SessionRunStatus
     started_at: datetime
     finished_at: datetime | None
     rows_processed: int
@@ -308,7 +322,7 @@ class SessionServiceProtocol(Protocol):
     async def update_run_status(
         self,
         run_id: UUID,
-        status: Literal["pending", "running", "completed", "failed", "cancelled"],
+        status: SessionRunStatus,
         error: str | None = None,
         landscape_run_id: str | None = None,
         rows_processed: int | None = None,

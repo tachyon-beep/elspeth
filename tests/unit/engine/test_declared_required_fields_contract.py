@@ -161,6 +161,17 @@ def test_applies_to_on_plugin_missing_attribute_crashes() -> None:
         contract.applies_to(_NoAttr())
 
 
+def test_applies_to_empty_declaration_does_not_require_batch_flag() -> None:
+    contract = DeclaredRequiredFieldsContract()
+
+    class _NoBatchFlag:
+        name = "no-batch-flag"
+        node_id = "node-1"
+        declared_input_fields = frozenset()
+
+    assert contract.applies_to(_NoBatchFlag()) is False
+
+
 def test_applies_to_fails_closed_for_batch_aware_transform() -> None:
     contract = DeclaredRequiredFieldsContract()
 

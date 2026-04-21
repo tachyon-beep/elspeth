@@ -126,13 +126,14 @@ class SinkRequiredFieldsContract(DeclarationContract):
         inputs: BoundaryInputs,
         outputs: BoundaryOutputs,
     ) -> None:
+        declared_required_fields = inputs.plugin.declared_required_fields
         sink_node_id = inputs.plugin.node_id
         if sink_node_id is None:
             raise OrchestrationInvariantError(
                 f"Sink {inputs.plugin.name!r} has no node_id set at sink-required-fields boundary check time."
             )
         verify_sink_required_fields(
-            declared_required_fields=cast(frozenset[str], inputs.plugin.declared_required_fields),
+            declared_required_fields=declared_required_fields,
             row_data=cast(Mapping[str, object], inputs.row_data),
             row_contract=cast(SchemaContract | None, inputs.row_contract),
             plugin_name=inputs.plugin.name,

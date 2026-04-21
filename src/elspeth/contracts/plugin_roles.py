@@ -1,4 +1,4 @@
-"""L0 helpers for source/sink boundary role detection.
+"""L0 helpers for declaration-contract plugin typing and role detection.
 
 These helpers let L2 engine code distinguish source and sink plugin instances
 without importing the L3 plugin base classes. They intentionally avoid
@@ -12,7 +12,49 @@ runtime boundary contracts that need a lower-layer role check.
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Protocol, cast, runtime_checkable
+
+
+@runtime_checkable
+class ContractablePlugin(Protocol):
+    """Minimal plugin surface the declaration contracts depend on."""
+
+    name: str
+    node_id: str | None
+
+
+@runtime_checkable
+class DeclaredOutputFieldsPlugin(ContractablePlugin, Protocol):
+    declared_output_fields: frozenset[str]
+
+
+@runtime_checkable
+class DeclaredInputFieldsPlugin(ContractablePlugin, Protocol):
+    declared_input_fields: frozenset[str]
+    is_batch_aware: bool
+
+
+def _validated_string_frozenset(
+    value: object,
+    *,
+    owner_name: str,
+    attr_name: str,
+) -> frozenset[str]:
+    if type(value) is not frozenset:
+        raise TypeError(f"{owner_name}.{attr_name} must be frozenset, got {type(value).__name__!r}.")
+    if any(type(item) is not str for item in value):
+        raise TypeError(f"{owner_name}.{attr_name} must contain only str items.")
+    return frozenset(value)
+
+
+def _require_contractable_plugin(plugin: object) -> None:
+    typed_plugin = cast(ContractablePlugin, plugin)
+    name = typed_plugin.name
+    if type(name) is not str or not name:
+        raise TypeError(f"{type(plugin).__name__}.name must be a non-empty str.")
+    node_id = typed_plugin.node_id
+    if node_id is not None and type(node_id) is not str:
+        raise TypeError(f"{type(plugin).__name__}.node_id must be str | None, got {type(node_id).__name__!r}.")
 
 
 def _declared_frozenset_from_instance_or_mro(
@@ -23,18 +65,22 @@ def _declared_frozenset_from_instance_or_mro(
     instance_namespace = vars(plugin)
     if attr_name in instance_namespace:
         value = instance_namespace[attr_name]
-        if type(value) is not frozenset:
-            raise TypeError(f"{type(plugin).__name__}.{attr_name} must be frozenset, got {type(value).__name__!r}.")
-        return cast(frozenset[str], value)
+        return _validated_string_frozenset(
+            value,
+            owner_name=type(plugin).__name__,
+            attr_name=attr_name,
+        )
 
     for owner in type(plugin).__mro__:
         namespace = vars(owner)
         if attr_name not in namespace:
             continue
         value = namespace[attr_name]
-        if type(value) is not frozenset:
-            raise TypeError(f"{owner.__name__}.{attr_name} must be frozenset, got {type(value).__name__!r}.")
-        return cast(frozenset[str], value)
+        return _validated_string_frozenset(
+            value,
+            owner_name=owner.__name__,
+            attr_name=attr_name,
+        )
     return None
 
 
@@ -64,3 +110,32 @@ def sink_declared_required_fields(plugin: object) -> frozenset[str] | None:
         plugin,
         attr_name="declared_required_fields",
     )
+
+
+def require_declared_output_fields_plugin(plugin: object) -> DeclaredOutputFieldsPlugin:
+    """Return a runtime-validated plugin exposing ``declared_output_fields``."""
+
+    typed_plugin = cast(DeclaredOutputFieldsPlugin, plugin)
+    _validated_string_frozenset(
+        typed_plugin.declared_output_fields,
+        owner_name=type(plugin).__name__,
+        attr_name="declared_output_fields",
+    )
+    _require_contractable_plugin(plugin)
+    return typed_plugin
+
+
+def require_declared_input_fields_plugin(plugin: object) -> DeclaredInputFieldsPlugin:
+    """Return a runtime-validated plugin exposing ADR-013 input declarations."""
+
+    typed_plugin = cast(DeclaredInputFieldsPlugin, plugin)
+    _validated_string_frozenset(
+        typed_plugin.declared_input_fields,
+        owner_name=type(plugin).__name__,
+        attr_name="declared_input_fields",
+    )
+    is_batch_aware = typed_plugin.is_batch_aware
+    if type(is_batch_aware) is not bool:
+        raise TypeError(f"{type(plugin).__name__}.is_batch_aware must be bool, got {type(is_batch_aware).__name__!r}.")
+    _require_contractable_plugin(plugin)
+    return typed_plugin

@@ -111,8 +111,9 @@ class ValueTransform(BaseTransform):
 
     name = "value_transform"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:7a4da8ecfbb526e4"
+    source_file_hash: str | None = "sha256:95a45cc187549a43"
     config_model = ValueTransformConfig
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -134,6 +135,18 @@ class ValueTransform(BaseTransform):
             "ValueTransform",
             adds_fields=True,
         )
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        return {
+            "schema": {"mode": "observed"},
+            "operations": [
+                {
+                    "target": "value_transform_probe_added_1",
+                    "expression": "1",
+                }
+            ],
+        }
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Apply expression operations to row.

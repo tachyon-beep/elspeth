@@ -64,6 +64,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
 from elspeth.contracts.data import PluginSchema as _PermissiveSchema
+from elspeth.contracts.declaration_contracts import _attach_contract_name_from_dispatcher
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -2715,7 +2716,7 @@ class TestSinkExecutor:
                 },
                 message="Sink 'test_sink' declared required fields ['id', 'name'] but row is missing ['name']",
             )
-            violation._attach_contract_name("sink_required_fields")
+            _attach_contract_name_from_dispatcher(violation, "sink_required_fields")
             raise violation
 
         with (
@@ -2771,7 +2772,7 @@ class TestSinkExecutor:
                 },
                 message="Sink 'test_sink' declared required fields ['id', 'name'] but row is missing ['name']",
             )
-            violation._attach_contract_name("sink_required_fields")
+            _attach_contract_name_from_dispatcher(violation, "sink_required_fields")
             raise violation
 
         with (

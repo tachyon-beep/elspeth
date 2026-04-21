@@ -41,9 +41,9 @@ class TestSecretStrictCoercionRejected:
                 source_kind=42,  # type: ignore[arg-type]
             )
 
-    def test_create_response_rejects_string_bool_available(self) -> None:
-        with pytest.raises(ValidationError):
-            CreateSecretResponse(name="n", scope="user", available="false")  # type: ignore[arg-type]
+    def test_create_response_rejects_extra_available_field(self) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            CreateSecretResponse(name="n", scope="user", available=False)  # type: ignore[call-arg]
 
     def test_validate_response_rejects_string_bool_available(self) -> None:
         with pytest.raises(ValidationError):
@@ -70,7 +70,6 @@ class TestSecretExtraFieldsRejected:
             CreateSecretResponse(
                 name="n",
                 scope="user",
-                available=True,
                 value="super-secret",  # type: ignore[call-arg]
             )
 
@@ -85,8 +84,8 @@ class TestSecretResponseHappyPath:
         assert resp.source_kind == ""
 
     def test_create_response(self) -> None:
-        resp = CreateSecretResponse(name="api_key", scope="user", available=True)
-        assert resp.available is True
+        resp = CreateSecretResponse(name="api_key", scope="user")
+        assert resp.scope == "user"
 
     def test_validate_response(self) -> None:
         resp = ValidateSecretResponse(name="api_key", available=False)
@@ -101,7 +100,7 @@ class TestSecretStrictnessViaJson:
     the other tests in this module would catch a future Pydantic release
     that decoupled the two.  For the secrets response models the
     no-value-on-way-out invariant is load-bearing: a JSON body
-    ``{"name": "n", "scope": "user", "available": true, "value": "..."}``
+    ``{"name": "n", "scope": "user", "value": "..."}``
     must be rejected even if a future Pydantic version silently drops
     unknown fields for the JSON path but not for the constructor path.
 
@@ -111,7 +110,7 @@ class TestSecretStrictnessViaJson:
 
     def test_create_response_rejects_value_field_in_json(self) -> None:
         """No-value-on-way-out holds through the JSON-parse surface."""
-        payload = '{"name": "n", "scope": "user", "available": true, "value": "super-secret"}'
+        payload = '{"name": "n", "scope": "user", "value": "super-secret"}'
         with pytest.raises(ValidationError, match="extra"):
             CreateSecretResponse.model_validate_json(payload)
 
@@ -125,10 +124,9 @@ class TestSecretStrictnessViaJson:
         with pytest.raises(ValidationError, match="extra"):
             ValidateSecretResponse.model_validate_json(payload)
 
-    def test_create_response_rejects_string_bool_in_json(self) -> None:
-        """Strict mode rejects JSON string-for-bool coercion."""
-        payload = '{"name": "n", "scope": "user", "available": "true"}'
-        with pytest.raises(ValidationError):
+    def test_create_response_rejects_available_field_in_json(self) -> None:
+        payload = '{"name": "n", "scope": "user", "available": true}'
+        with pytest.raises(ValidationError, match="extra"):
             CreateSecretResponse.model_validate_json(payload)
 
     def test_inventory_rejects_int_scope_in_json(self) -> None:

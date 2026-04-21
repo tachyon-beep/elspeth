@@ -239,4 +239,3 @@ class ProgressBroadcaster:
         """
         with self._lock:
             self._subscribers.pop(run_id, None)
-            self._terminalized.discard(run_id)

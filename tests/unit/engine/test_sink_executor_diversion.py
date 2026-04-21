@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
+from elspeth.contracts.declaration_contracts import _attach_contract_name_from_dispatcher
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.enums import NodeStateStatus, RoutingMode
 from elspeth.contracts.errors import AuditIntegrityError, PluginContractViolation, SinkRequiredFieldsViolation
@@ -269,7 +270,7 @@ class TestFailsinkMode:
                     "['__diversion_reason', 'missing_field'] but row is missing ['missing_field']"
                 ),
             )
-            violation._attach_contract_name("sink_required_fields")
+            _attach_contract_name_from_dispatcher(violation, "sink_required_fields")
             raise violation
 
         with (

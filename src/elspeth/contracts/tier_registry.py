@@ -13,8 +13,8 @@ beyond the v0 design (see plan Revision History — Review v1):
 3. ``freeze_tier_registry()`` is called at end of bootstrap. Registration
    after freeze raises ``FrameworkBugError`` (reviewer B5/F-2).
 
-``FrameworkBugError`` is re-exported from this module because Task 4 will
-re-export it from ``errors.py``; this module cannot import ``errors`` (circular).
+``FrameworkBugError`` lives in this module so ``errors.py`` can expose the
+same public exception without creating a circular import.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ class FrameworkBugError(Exception):
     Recovery: These errors indicate bugs in framework code that must be fixed.
     They should never occur in correct operation.
 
-    Moved here from errors.py for the circular-import break; errors.py
-    re-exports it for back-compat (Task 4).
+    Defined here so ``errors.py`` can expose the same public exception
+    without introducing a circular import.
     """
 
 

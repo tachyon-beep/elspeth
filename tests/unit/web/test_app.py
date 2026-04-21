@@ -262,6 +262,12 @@ class TestMultiWorkerEnforcement:
         app = create_app(_settings(tmp_path))
         assert app is not None
 
+    @patch.dict("os.environ", {"WEB_CONCURRENCY": "banana"})
+    def test_invalid_web_concurrency_fails_closed(self, tmp_path) -> None:
+        """A non-integer worker count is a deployment bug, not a silent default."""
+        with pytest.raises(RuntimeError, match=r"WEB_CONCURRENCY='banana' is not a valid integer"):
+            create_app(_settings(tmp_path))
+
     @patch.dict("os.environ", {"WEB_CONCURRENCY": "1"})
     def test_raises_on_uvicorn_workers_space_form(self, tmp_path, monkeypatch) -> None:
         """Reject ``uvicorn --workers 2`` (space-separated argv form)."""
@@ -578,13 +584,19 @@ class TestPeriodicOrphanCleanup:
     async def test_excludes_live_run_ids(self) -> None:
         """Periodic cleanup passes live run IDs as exclude_run_ids."""
         mock_service = AsyncMock()
-        mock_service.cancel_all_orphaned_runs.return_value = 0
+        cleanup_called = asyncio.Event()
+
+        async def _cancel_all_orphaned_runs(**_kwargs):
+            cleanup_called.set()
+            return 0
+
+        mock_service.cancel_all_orphaned_runs.side_effect = _cancel_all_orphaned_runs
         mock_exec = MagicMock()
         live_ids = frozenset({"run-1", "run-2"})
         mock_exec.get_live_run_ids.return_value = live_ids
 
         task = asyncio.create_task(_periodic_orphan_cleanup(mock_service, mock_exec, interval_seconds=0, max_age_seconds=3600))
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(cleanup_called.wait(), timeout=5.0)
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -845,13 +857,13 @@ class TestSecretsExceptionHandlers:
 
     # -- Hypothesis property: TOCTOU-free create ------------------------------
 
-    def test_create_ack_available_true_implies_validate_true(self, tmp_path, monkeypatch) -> None:
-        """Property: create with available=True + immediate validate agrees.
+    def test_create_ack_omits_available_and_validate_true_agrees(self, tmp_path, monkeypatch) -> None:
+        """Property: create omits availability and immediate validate agrees.
 
-        Post-eager-fingerprint, a 201 response claiming ``available=True``
-        is an honest ack: an immediate validate of the same name (with no
-        intervening DELETE) must return ``available=True``.  Exercised
-        across a variety of name/value shapes.
+        Post-eager-fingerprint, a 201 create response no longer carries a
+        redundant constant ``available`` field. The honest availability
+        check is the immediate validate call of the same name (with no
+        intervening DELETE), which must return ``available=True``.
         """
         try:
             from hypothesis import given
@@ -882,7 +894,7 @@ class TestSecretsExceptionHandlers:
             if create.status_code != 201:
                 # Schema validators may reject some generated names; skip.
                 return
-            assert create.json()["available"] is True
+            assert "available" not in create.json()
             validate = client.post(f"/api/secrets/{name}/validate")
             assert validate.status_code == 200
             assert validate.json()["available"] is True

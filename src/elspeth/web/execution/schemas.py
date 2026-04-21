@@ -13,6 +13,8 @@ from typing import Any, ClassVar, Literal, Self, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from elspeth.web.sessions.protocol import SessionRunStatus, TerminalSessionRunStatus
+
 
 class _StrictResponse(BaseModel):
     """Base model for execution response schemas — Tier 1 trust rules.
@@ -230,7 +232,7 @@ class RunStatusResponse(_StrictResponse):
     """REST response for run status queries."""
 
     run_id: str
-    status: Literal["pending", "running", "completed", "failed", "cancelled"]
+    status: SessionRunStatus
     started_at: datetime | None
     finished_at: datetime | None
     rows_processed: int = Field(ge=0)
@@ -264,7 +266,7 @@ class RunResultsResponse(_StrictResponse):
     """REST response for terminal run results."""
 
     run_id: str
-    status: Literal["completed", "failed", "cancelled"]
+    status: TerminalSessionRunStatus
     rows_processed: int = Field(ge=0)
     rows_succeeded: int = Field(ge=0)
     rows_failed: int = Field(ge=0)

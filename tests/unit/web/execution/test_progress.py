@@ -557,8 +557,8 @@ class TestBroadcasterSingleTerminalGuard:
             "Non-terminal events after a terminal must reach the subscriber queue; the terminal guard only blocks duplicate terminals."
         )
 
-    def test_cleanup_run_clears_terminal_tracking(self) -> None:
-        """cleanup_run must remove terminal tracking state to prevent leaks."""
+    def test_cleanup_run_preserves_terminal_tracking(self) -> None:
+        """cleanup_run must preserve terminal tracking to suppress duplicate finals."""
         loop = MagicMock(spec=asyncio.AbstractEventLoop)
         broadcaster = ProgressBroadcaster(loop)
         broadcaster.subscribe("run-1")
@@ -569,7 +569,7 @@ class TestBroadcasterSingleTerminalGuard:
         assert "run-1" in broadcaster._terminalized, "Terminal tracking state must be present after terminal broadcast."
 
         broadcaster.cleanup_run("run-1")
-        assert "run-1" not in broadcaster._terminalized, "cleanup_run must remove terminal tracking state."
+        assert "run-1" in broadcaster._terminalized, "cleanup_run must preserve terminal tracking state after subscribers are removed."
 
     def test_different_runs_have_independent_terminal_tracking(self) -> None:
         """Terminal guard must be per-run, not global."""

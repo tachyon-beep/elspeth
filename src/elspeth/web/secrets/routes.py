@@ -78,14 +78,13 @@ def create_secrets_router() -> APIRouter:
         the value.
 
         TOCTOU: the service returns a :class:`CreateSecretResult` whose
-        ``available`` flag is derived at write-time from the eager
-        fingerprint computation (see ``UserSecretStore.set_secret``).
-        A successful return means the row was BOTH persisted AND
-        immediately resolvable — no second ``has_ref`` probe is needed
-        or performed, closing the race window where a concurrent DELETE
-        or an env-var clear between set and probe could flip
-        ``available`` to False for a row that was in fact correctly
-        written.  If the deployment is misconfigured (e.g., missing
+        eager fingerprint was computed at write-time
+        (see ``UserSecretStore.set_secret``). A successful return means
+        the row was BOTH persisted AND immediately resolvable — no
+        second ``has_ref`` probe is needed or performed, closing the
+        race window where a concurrent DELETE or an env-var clear
+        between set and probe could invalidate a row that was in fact
+        correctly written. If the deployment is misconfigured (e.g., missing
         ``ELSPETH_FINGERPRINT_KEY``), ``set_user_secret`` raises
         ``FingerprintKeyMissingError`` which the app-level handler
         translates to 503.
@@ -102,7 +101,6 @@ def create_secrets_router() -> APIRouter:
         return CreateSecretResponse(
             name=result.name,
             scope=result.scope,
-            available=result.available,
         )
 
     @router.delete("/{name}", status_code=204)

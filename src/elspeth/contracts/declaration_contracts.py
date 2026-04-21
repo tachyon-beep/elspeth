@@ -12,7 +12,9 @@ collect-then-raise audit-complete dispatch (ADR-010 §Semantics).
   placement is mandatory per plan-review W4 — the CI scanner at L3 imports
   it, and concrete contracts at L2/L3 apply it.
 - ``DeclarationContract`` — nominal ABC every contract inherits. Declares
-  four dispatch methods with default no-op bodies (decorate to claim).
+  four dispatch methods whose base implementations raise
+  ``FrameworkBugError`` when reached without an override (decorate to
+  claim).
   Rejected Protocol alternative per ADR-010 §Alternative 3 (nominal closes
   the spoofing vector).
 - Bundle types — ``PreEmissionInputs``, ``PostEmissionInputs`` /
@@ -107,6 +109,16 @@ class DispatchSite(StrEnum):
 
 
 _DISPATCH_SITE_VALUES: frozenset[str] = frozenset(site.value for site in DispatchSite)
+_DISPATCHER_ATTACHMENT_TOKEN = object()
+
+
+def _require_dispatcher_attachment(token: object | None, *, method_name: str) -> None:
+    if token is not _DISPATCHER_ATTACHMENT_TOKEN:
+        raise RuntimeError(
+            f"{method_name} is reserved for dispatcher-only attribution. "
+            "Authoritative contract metadata must come from the runtime dispatcher, "
+            "not from arbitrary callers."
+        )
 
 
 # =============================================================================
@@ -318,6 +330,7 @@ class BoundaryInputs:
     row_contract: Any | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "row_data", deep_freeze(self.row_data))
         if not self.row_id:
             raise ValueError("BoundaryInputs.row_id must not be empty")
         if not self.token_id:
@@ -662,8 +675,17 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
             )
         return cn
 
-    def _attach_contract_name(self, name: str) -> None:
+    def _attach_contract_name(
+        self,
+        name: str,
+        *,
+        _dispatcher_token: object | None = None,
+    ) -> None:
         """One-shot setter for the authoritative contract name (C4)."""
+        _require_dispatcher_attachment(
+            _dispatcher_token,
+            method_name="DeclarationContractViolation._attach_contract_name",
+        )
         if self._contract_name is not None:
             raise RuntimeError(
                 f"DeclarationContractViolation._attach_contract_name called "
@@ -685,6 +707,17 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
             "payload": scrub_payload_for_audit(self.payload),
             "message": str(self),
         }
+
+
+def _attach_contract_name_from_dispatcher(
+    violation: DeclarationContractViolation,
+    name: str,
+) -> None:
+    """Attach the authoritative contract name from the dispatcher only."""
+    violation._attach_contract_name(
+        name,
+        _dispatcher_token=_DISPATCHER_ATTACHMENT_TOKEN,
+    )
 
 
 # =============================================================================
@@ -759,10 +792,18 @@ class AggregateDeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         self.plugin = plugin
         self.violations = violations  # tuple — immutable by construction
 
-    def _attach_by_dispatcher(self) -> None:
+    def _attach_by_dispatcher(
+        self,
+        *,
+        _dispatcher_token: object | None = None,
+    ) -> None:
         """One-shot attribution flag. C5 closure mirror of C4's
         ``_attach_contract_name`` on individual DCV instances.
         """
+        _require_dispatcher_attachment(
+            _dispatcher_token,
+            method_name="AggregateDeclarationContractViolation._attach_by_dispatcher",
+        )
         if self._attached_by_dispatcher:
             raise RuntimeError(
                 "AggregateDeclarationContractViolation._attach_by_dispatcher "
@@ -788,6 +829,13 @@ class AggregateDeclarationContractViolation(AuditEvidenceBase, RuntimeError):
         }
 
 
+def _mark_aggregate_dispatched(aggregate: AggregateDeclarationContractViolation) -> None:
+    """Attach dispatcher attribution to an aggregate from the dispatcher only."""
+    aggregate._attach_by_dispatcher(
+        _dispatcher_token=_DISPATCHER_ATTACHMENT_TOKEN,
+    )
+
+
 # =============================================================================
 # DeclarationContract — nominal ABC (H2 §Fix direction)
 # =============================================================================
@@ -796,11 +844,14 @@ class AggregateDeclarationContractViolation(AuditEvidenceBase, RuntimeError):
 class DeclarationContract(ABC):
     """Nominal abstract base for every declaration-trust contract.
 
-    Four dispatch methods carry default no-op bodies. Concrete contracts
+    Four dispatch methods carry fail-closed base bodies. Concrete contracts
     OVERRIDE the methods for sites they implement AND decorate each override
     with ``@implements_dispatch_site("<site>")``. The decorator is the
     authoritative signal; the in-class override is the secondary signal for
-    flat (non-mixin) contracts.
+    flat (non-mixin) contracts. Reaching a base implementation means the
+    contract typoed the method name or forgot to override the claimed site,
+    so the framework raises ``FrameworkBugError`` instead of silently
+    accepting the no-op.
 
     **NOT a runtime-checkable Protocol.** ADR-010 §Alternative 3 rejection
     of structural typing stands: nominal inheritance closes the STRIDE
@@ -854,38 +905,51 @@ class DeclarationContract(ABC):
         """
 
     # -------------------------------------------------------------------------
-    # Dispatch methods — default no-op bodies. Concrete contracts override
-    # and decorate with @implements_dispatch_site. MC3c CI rule forbids
-    # trivial override bodies so opting-in-then-no-op is caught pre-merge.
+    # Dispatch methods — fail-closed base bodies. Concrete contracts
+    # override and decorate with @implements_dispatch_site. MC3c CI rule
+    # forbids trivial override bodies so opting-in-then-no-op is caught
+    # pre-merge.
     # -------------------------------------------------------------------------
 
     def pre_emission_check(self, inputs: PreEmissionInputs) -> None:
-        """Default no-op; decorated override in concrete contracts."""
-        return None
+        """Concrete contracts MUST override when claiming this site."""
+        raise FrameworkBugError(
+            f"{type(self).__name__}.pre_emission_check reached the DeclarationContract base implementation. "
+            "Override the method and decorate it with @implements_dispatch_site('pre_emission_check')."
+        )
 
     def post_emission_check(
         self,
         inputs: PostEmissionInputs,
         outputs: PostEmissionOutputs,
     ) -> None:
-        """Default no-op; decorated override in concrete contracts."""
-        return None
+        """Concrete contracts MUST override when claiming this site."""
+        raise FrameworkBugError(
+            f"{type(self).__name__}.post_emission_check reached the DeclarationContract base implementation. "
+            "Override the method and decorate it with @implements_dispatch_site('post_emission_check')."
+        )
 
     def batch_flush_check(
         self,
         inputs: BatchFlushInputs,
         outputs: BatchFlushOutputs,
     ) -> None:
-        """Default no-op; decorated override in concrete contracts."""
-        return None
+        """Concrete contracts MUST override when claiming this site."""
+        raise FrameworkBugError(
+            f"{type(self).__name__}.batch_flush_check reached the DeclarationContract base implementation. "
+            "Override the method and decorate it with @implements_dispatch_site('batch_flush_check')."
+        )
 
     def boundary_check(
         self,
         inputs: BoundaryInputs,
         outputs: BoundaryOutputs,
     ) -> None:
-        """Default no-op; decorated override in concrete contracts."""
-        return None
+        """Concrete contracts MUST override when claiming this site."""
+        raise FrameworkBugError(
+            f"{type(self).__name__}.boundary_check reached the DeclarationContract base implementation. "
+            "Override the method and decorate it with @implements_dispatch_site('boundary_check')."
+        )
 
 
 # =============================================================================

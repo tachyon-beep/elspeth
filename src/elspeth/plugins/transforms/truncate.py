@@ -86,8 +86,9 @@ class Truncate(BaseTransform):
 
     name = "truncate"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:ea3d11dbc7ab4031"
+    source_file_hash: str | None = "sha256:0475c5bbea215cbc"
     config_model = TruncateConfig
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -100,6 +101,22 @@ class Truncate(BaseTransform):
         self._schema_config = cfg.schema_config
         self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "Truncate")
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        return {
+            "schema": {"mode": "observed"},
+            "fields": {"truncate_probe_1": 5},
+        }
+
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="truncate_probe_1",
+                value="abcdefg",
+            )
+        ]
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Truncate specified fields in row.

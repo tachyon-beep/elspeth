@@ -13,7 +13,7 @@ normalization and this contract's ``applies_to`` guard.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from elspeth.contracts.declaration_contracts import (
     DeclarationContract,
@@ -29,6 +29,7 @@ from elspeth.contracts.errors import (
     FrameworkBugError,
     OrchestrationInvariantError,
 )
+from elspeth.contracts.plugin_roles import require_declared_input_fields_plugin
 from elspeth.contracts.schema_contract import (
     FieldContract,
     PipelineRow,
@@ -100,12 +101,13 @@ class DeclaredRequiredFieldsContract(DeclarationContract):
     payload_schema: ClassVar[type] = DeclaredRequiredInputFieldsPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        declared_input_fields = cast(frozenset[str], plugin.declared_input_fields)
+        typed_plugin = require_declared_input_fields_plugin(plugin)
+        declared_input_fields = typed_plugin.declared_input_fields
         if not declared_input_fields:
             return False
-        if cast(bool, plugin.is_batch_aware):
+        if typed_plugin.is_batch_aware:
             raise FrameworkBugError(
-                f"Transform {plugin.name!r} declares declared_input_fields "
+                f"Transform {typed_plugin.name!r} declares declared_input_fields "
                 f"{sorted(declared_input_fields)!r} but is batch-aware. No "
                 f"batch-pre-execution dispatch site exists; ADR-013 scopes this "
                 f"contract to non-batch transforms until an ADR-010 amendment lands."
@@ -114,15 +116,14 @@ class DeclaredRequiredFieldsContract(DeclarationContract):
 
     @implements_dispatch_site("pre_emission_check")
     def pre_emission_check(self, inputs: PreEmissionInputs) -> None:
-        transform_node_id = inputs.plugin.node_id
+        plugin = require_declared_input_fields_plugin(inputs.plugin)
+        transform_node_id = plugin.node_id
         if transform_node_id is None:
-            raise OrchestrationInvariantError(
-                f"Transform {inputs.plugin.name!r} has no node_id set at declared-required-fields check time."
-            )
+            raise OrchestrationInvariantError(f"Transform {plugin.name!r} has no node_id set at declared-required-fields check time.")
         verify_declared_required_fields(
-            declared_input_fields=cast(frozenset[str], inputs.plugin.declared_input_fields),
+            declared_input_fields=plugin.declared_input_fields,
             effective_input_fields=inputs.effective_input_fields,
-            plugin_name=inputs.plugin.name,
+            plugin_name=plugin.name,
             node_id=transform_node_id,
             run_id=inputs.run_id,
             row_id=inputs.row_id,

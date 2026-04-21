@@ -36,6 +36,7 @@ from elspeth.web.sessions.protocol import (
     RunAlreadyActiveError,
     RunRecord,
     SessionRecord,
+    SessionRunStatus,
 )
 
 
@@ -578,7 +579,7 @@ class SessionServiceImpl:
     async def update_run_status(
         self,
         run_id: UUID,
-        status: Literal["pending", "running", "completed", "failed", "cancelled"],
+        status: SessionRunStatus,
         error: str | None = None,
         landscape_run_id: str | None = None,
         rows_processed: int | None = None,

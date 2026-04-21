@@ -192,6 +192,41 @@ class TestResumeGuardrails:
         assert run_id in str(exc_info.value)
         assert "cannot build edge map" in str(exc_info.value).lower()
 
+    def test_resume_fails_when_runtime_val_manifest_has_drifted(self, resume_test_env: dict[str, Any]) -> None:
+        """Resume must fail closed when the current contract registry differs from the original run."""
+        run_id = _create_failed_run(resume_test_env["factory"], include_contract=True)
+        orchestrator = Orchestrator(
+            resume_test_env["db"],
+            checkpoint_manager=resume_test_env["checkpoint_manager"],
+        )
+        config, graph = _build_pipeline()
+
+        with (
+            patch(
+                "elspeth.engine.orchestrator.core.build_runtime_val_manifest",
+                return_value={
+                    "declaration_contracts": [{"name": "drifted"}],
+                    "expected_contract_sites": {"drifted": ["boundary_check"]},
+                    "tier_1_errors": [],
+                },
+            ),
+            patch(
+                "elspeth.core.checkpoint.recovery.RecoveryManager.get_unprocessed_row_data",
+                return_value=[],
+            ) as mock_get_unprocessed,
+            pytest.raises(OrchestrationInvariantError, match="runtime VAL manifest") as exc_info,
+        ):
+            orchestrator.resume(
+                resume_point=_make_resume_point(run_id),
+                config=config,
+                graph=graph,
+                payload_store=resume_test_env["payload_store"],
+            )
+
+        mock_get_unprocessed.assert_not_called()
+        assert run_id in str(exc_info.value)
+        assert "contract registry" in str(exc_info.value).lower()
+
     def test_resume_positive_control_succeeds_with_valid_preconditions(self, resume_test_env: dict[str, Any]) -> None:
         """Valid setup still resumes successfully (early exit when no rows remain)."""
         run_id = _create_failed_run(resume_test_env["factory"], include_contract=True)

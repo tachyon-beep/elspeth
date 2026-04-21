@@ -151,7 +151,11 @@ def _guard_frozen_attr(instance: Exception, name: str, value: object) -> None:
     Exception.__setattr__(instance, name, value)
 
 
-class BlobNotFoundError(Exception):
+class BlobError(Exception):
+    """Base class for structured blob lifecycle errors."""
+
+
+class BlobNotFoundError(BlobError):
     """Raised when a blob lookup fails.
 
     Route handlers catching this error should return 404.
@@ -167,7 +171,7 @@ class BlobNotFoundError(Exception):
         _guard_frozen_attr(self, name, value)
 
 
-class BlobActiveRunError(Exception):
+class BlobActiveRunError(BlobError):
     """Raised when attempting to delete a blob linked to an active run.
 
     Route handlers catching this error should return 409.
@@ -184,7 +188,7 @@ class BlobActiveRunError(Exception):
         _guard_frozen_attr(self, name, value)
 
 
-class BlobQuotaExceededError(Exception):
+class BlobQuotaExceededError(BlobError):
     """Raised when a blob creation would exceed the session storage quota.
 
     Route handlers catching this error should return 413.
@@ -202,7 +206,7 @@ class BlobQuotaExceededError(Exception):
         _guard_frozen_attr(self, name, value)
 
 
-class BlobStateError(Exception):
+class BlobStateError(BlobError):
     """Raised when a blob's status precludes the requested operation.
 
     Distinct from RuntimeError so per-blob catch clauses can be precise:
@@ -221,7 +225,7 @@ class BlobStateError(Exception):
         _guard_frozen_attr(self, name, value)
 
 
-class BlobIntegrityError(Exception):
+class BlobIntegrityError(BlobError):
     """Raised when a blob's on-disk content does not match its stored hash.
 
     This is a Tier 1 integrity violation: we wrote both the file and the

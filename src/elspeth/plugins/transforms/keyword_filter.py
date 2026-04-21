@@ -123,10 +123,11 @@ class KeywordFilter(BaseTransform):
     name = "keyword_filter"
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:f9ecd339b153339c"
+    source_file_hash: str | None = "sha256:55e0b82a5d7af53c"
     config_model = KeywordFilterConfig
     is_batch_aware = False
     creates_tokens = False
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -139,6 +140,23 @@ class KeywordFilter(BaseTransform):
         self._compiled_patterns: list[tuple[str, re.Pattern[str]]] = [(pattern, re.compile(pattern)) for pattern in cfg.blocked_patterns]
 
         self.input_schema, self.output_schema = self._create_schemas(cfg.schema_config, "KeywordFilter")
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        return {
+            "schema": {"mode": "observed"},
+            "fields": ["keyword_filter_probe_1"],
+            "blocked_patterns": [r"(?!x)x"],
+        }
+
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="keyword_filter_probe_1",
+                value="safe probe content",
+            )
+        ]
 
     def process(
         self,

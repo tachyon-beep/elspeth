@@ -49,6 +49,16 @@ from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
 
 
+def _parse_worker_count(raw_value: str, *, signal_name: str) -> int:
+    try:
+        return int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"{signal_name}={raw_value!r} is not a valid integer worker count. "
+            "Single-worker enforcement cannot safely determine the process model."
+        ) from exc
+
+
 async def _periodic_orphan_cleanup(
     session_service: SessionServiceImpl,
     execution_service: ExecutionServiceImpl,
@@ -385,34 +395,22 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
 
     # 1. WEB_CONCURRENCY env var (Heroku, Railway, render.com)
     web_concurrency_str = os.environ.get("WEB_CONCURRENCY", "1")
-    try:
-        if int(web_concurrency_str) > 1:
-            multi_worker_reason = f"WEB_CONCURRENCY={web_concurrency_str}"
-    except ValueError:
-        pass
+    if _parse_worker_count(web_concurrency_str, signal_name="WEB_CONCURRENCY") > 1:
+        multi_worker_reason = f"WEB_CONCURRENCY={web_concurrency_str}"
 
     # 2. sys.argv: uvicorn --workers N, gunicorn -w N / --workers N
     if multi_worker_reason is None:
         argv = sys.argv
         for i, arg in enumerate(argv):
             if arg == "--workers" and i + 1 < len(argv):
-                try:
-                    if int(argv[i + 1]) > 1:
-                        multi_worker_reason = f"--workers {argv[i + 1]}"
-                except ValueError:
-                    pass
+                if _parse_worker_count(argv[i + 1], signal_name="--workers") > 1:
+                    multi_worker_reason = f"--workers {argv[i + 1]}"
             elif arg.startswith("--workers="):
-                try:
-                    if int(arg.split("=", 1)[1]) > 1:
-                        multi_worker_reason = f"{arg}"
-                except ValueError:
-                    pass
-            elif arg == "-w" and i + 1 < len(argv):
-                try:
-                    if int(argv[i + 1]) > 1:
-                        multi_worker_reason = f"-w {argv[i + 1]}"
-                except ValueError:
-                    pass
+                worker_value = arg.split("=", 1)[1]
+                if _parse_worker_count(worker_value, signal_name="--workers") > 1:
+                    multi_worker_reason = f"{arg}"
+            elif arg == "-w" and i + 1 < len(argv) and _parse_worker_count(argv[i + 1], signal_name="-w") > 1:
+                multi_worker_reason = f"-w {argv[i + 1]}"
 
     if multi_worker_reason is not None:
         raise RuntimeError(

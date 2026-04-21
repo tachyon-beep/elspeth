@@ -88,6 +88,7 @@ from elspeth.contracts.events import (
 )
 from elspeth.contracts.hashing import repr_hash
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
 from elspeth.contracts.schema_contract_factory import create_contract_from_config
 from elspeth.contracts.tier_registry import freeze_tier_registry
 from elspeth.contracts.types import (
@@ -98,7 +99,7 @@ from elspeth.contracts.types import (
     NodeID,
     SinkName,
 )
-from elspeth.core.canonical import sanitize_for_canonical, stable_hash
+from elspeth.core.canonical import canonical_json, sanitize_for_canonical, stable_hash
 from elspeth.core.config import AggregationSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
@@ -2868,6 +2869,22 @@ class Orchestrator:
                 f"  2. The run was started with a version that didn't record contracts\n"
                 f"Resume cannot proceed safely without the schema contract. "
                 f"The audit trail must be complete and trustworthy."
+            )
+
+        # Resume replays persisted PipelineRow payloads through NullSource rather
+        # than re-opening the original source plugin, so source-boundary evidence
+        # is inherited from the original run. That is only sound if the current
+        # declaration-contract and Tier-1 registries still exactly match the
+        # manifest captured at original run start.
+        recorded_runtime_val_manifest = factory.run_lifecycle.get_runtime_val_manifest(run_id)
+        current_runtime_val_manifest = canonical_json(build_runtime_val_manifest())
+        if current_runtime_val_manifest != recorded_runtime_val_manifest:
+            raise OrchestrationInvariantError(
+                f"Cannot resume run '{run_id}': runtime VAL manifest drift detected. "
+                "The current contract registry no longer matches the registry "
+                "captured in the original run header, so inherited source-boundary "
+                "evidence is no longer trustworthy. Resume requires identical "
+                "declaration-contract and Tier-1 registries."
             )
 
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)

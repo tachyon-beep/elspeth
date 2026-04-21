@@ -224,12 +224,12 @@ allow_hits:
   reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=e8b23ba0546e4afb
+- key: web/app.py:R5:_settings_from_env:fp=de08b3dc95c5d035
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=2189045663811872
+- key: web/app.py:R6:_settings_from_env:fp=7efec3c36c0d32cc
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
@@ -479,30 +479,10 @@ allow_hits:
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=23fc9527067c7c3a
+- key: web/app.py:R1:create_app:fp=a7627425e97e3412
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
-  expires: null
-- key: web/app.py:R6:create_app:fp=5211f343b841a3bf
-  owner: web-app
-  reason: ValueError from int() on non-numeric WEB_CONCURRENCY
-  safety: Defaults to single worker
-  expires: null
-- key: web/app.py:R6:create_app:fp=b487e4c11a59d833
-  owner: web-app
-  reason: ValueError from int() on non-numeric --workers arg
-  safety: Skips this argv entry
-  expires: null
-- key: web/app.py:R6:create_app:fp=cf257b35244b5bdd
-  owner: web-app
-  reason: ValueError from int() on non-numeric --workers=N
-  safety: Skips this argv entry
-  expires: null
-- key: web/app.py:R6:create_app:fp=bde4c701bb77071d
-  owner: web-app
-  reason: ValueError from int() on non-numeric -w arg
-  safety: Skips this argv entry
   expires: null
 # copy_blobs_for_fork rollback handler — narrowed 2026-04-17 from the
 # prior `except Exception: pass` (silent-failure-hunter finding 4) to
@@ -613,7 +593,7 @@ allow_hits:
   reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
   expires: null
-- key: web/app.py:R1:create_app:fp=b06e9400e709e5a4
+- key: web/app.py:R1:create_app:fp=7c2bf3e771eb88d7
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -683,17 +663,17 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=e628b3b2f8b2d666
+- key: web/app.py:R1:lifespan:fp=6ee167b131f99763
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
   expires: null
-- key: web/app.py:R7:lifespan:fp=1abd5ca700ba5f3e
+- key: web/app.py:R7:lifespan:fp=85e3892da1563386
   owner: web-execution
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=a59a5a31639b7b52"
+- key: "web/app.py:R6:_periodic_orphan_cleanup:fp=dd5ac68f0ba8ca8a"
   owner: web-execution
   reason: "Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention, SQLite file I/O) so the periodic loop retries on the next interval. Catch is intentionally narrow; programmer-bug exceptions (AttributeError from a drifted attribute on ExecutionServiceImpl, TypeError from a signature change, AssertionError from an invariant guard) are NOT caught and terminate the background task so they surface at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError). Same pattern as the CRIT-2 audit-cleanup narrow catch at web/composer/service.py ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py fork_from_message (lines 968 and 987)."
   safety: "Recoverable failures are logged via slog.error periodic_orphan_cleanup_failed with exc_class only — exc_info is deliberately omitted so SQLAlchemy __cause__ chains (DB URLs, schema names, sqlite file path) cannot reach structured server logs. Same exc_info-redaction pattern commit 59bdf514 established across the HTTP-path slog.error sites. Programmer-bug propagation invariant is guarded by tests/unit/web/test_app.py test_programmer_bug_terminates_task_and_does_not_log (AttributeError terminates the task) and the recoverable-failure path by test_continues_after_exception (OperationalError logged, loop continues, no traceback text leaked)."
@@ -921,32 +901,32 @@ allow_hits:
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
   safety: Continues to next delimiter; returns None for uncertain content; no data loss
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=81049e780f966e57
+- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=980e098630642f37
   owner: web-execution
   reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp, rejects int (Unix epoch)
   safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False) coercion scope
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=b718b99e53713b61
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=a2876e79ca2e5da7
   owner: web-execution
   reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip path; non-dict values handled by Pydantic
   safety: Structural dispatch for deserialization, not error suppression
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=49ed85b5b2bfb3e1
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=fc5e2ae61fdb7856
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=ace520a8c5968607
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=2b649babdd83f8f3
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=9ace6092f23d776d
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=4b8e4b786359a8b6
   owner: web-execution
   reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip resolution
   safety: Non-dict data falls through to Pydantic union matching
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=6c0e789618dc5bce
+- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=31d7c3585f80c9d1
   owner: web-execution
   reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator
@@ -1016,7 +996,7 @@ allow_hits:
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
   expires: null
-- key: web/app.py:R2:create_app:_request_id:fp=c2600d2750e2496d
+- key: web/app.py:R2:create_app:_request_id:fp=4cd0c1c947ec7564
   owner: web-app
   reason: |
     Trust-boundary fallback. The exception handlers registered in

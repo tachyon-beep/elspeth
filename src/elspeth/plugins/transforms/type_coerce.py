@@ -275,8 +275,9 @@ class TypeCoerce(BaseTransform):
 
     name = "type_coerce"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:0525d9beaed7e674"
+    source_file_hash: str | None = "sha256:d706c99f20755d08"
     config_model = TypeCoerceConfig
+    passes_through_input = True
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
@@ -290,6 +291,22 @@ class TypeCoerce(BaseTransform):
             cfg.schema_config,
             "TypeCoerce",
         )
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        return {
+            "schema": {"mode": "observed"},
+            "conversions": [{"field": "type_coerce_probe_1", "to": "str"}],
+        }
+
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="type_coerce_probe_1",
+                value=7,
+            )
+        ]
 
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Apply type conversions to row fields.

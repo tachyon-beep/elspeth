@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import get_args
 from uuid import uuid4
 
 import pytest
 
 from elspeth.web.sessions.protocol import (
+    LEGAL_RUN_TRANSITIONS,
+    SESSION_RUN_STATUS_VALUES,
+    SESSION_TERMINAL_RUN_STATUS_VALUES,
     ChatMessageRecord,
     CompositionStateData,
     CompositionStateRecord,
     RunAlreadyActiveError,
     RunRecord,
     SessionRecord,
+    SessionRunStatus,
 )
 
 
@@ -124,6 +129,12 @@ class TestRunRecord:
         )
         with pytest.raises(AttributeError):
             record.status = "completed"  # type: ignore[misc]
+
+    def test_run_status_literal_and_transition_table_share_one_source_of_truth(self) -> None:
+        assert frozenset(get_args(SessionRunStatus)) == SESSION_RUN_STATUS_VALUES
+        assert frozenset(LEGAL_RUN_TRANSITIONS.keys()) == SESSION_RUN_STATUS_VALUES
+        assert all(allowed.issubset(SESSION_RUN_STATUS_VALUES) for allowed in LEGAL_RUN_TRANSITIONS.values())
+        assert frozenset({"completed", "failed", "cancelled"}) == SESSION_TERMINAL_RUN_STATUS_VALUES
 
 
 class TestRunAlreadyActiveError:

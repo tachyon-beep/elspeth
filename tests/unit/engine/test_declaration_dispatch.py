@@ -30,6 +30,7 @@ from elspeth.contracts.declaration_contracts import (
     PostEmissionInputs,
     PostEmissionOutputs,
     _clear_registry_for_tests,
+    _mark_aggregate_dispatched,
     _restore_registry_snapshot_for_tests,
     _snapshot_registry_for_tests,
     implements_dispatch_site,
@@ -455,8 +456,37 @@ def test_aggregate_attribution_one_shot() -> None:
         ),
         message="2 violations",
     )
-    aggregate._attach_by_dispatcher()
+    _mark_aggregate_dispatched(aggregate)
     with pytest.raises(RuntimeError, match="twice"):
+        _mark_aggregate_dispatched(aggregate)
+
+
+def test_aggregate_attribution_requires_dispatcher_helper() -> None:
+    aggregate = AggregateDeclarationContractViolation(
+        plugin="P",
+        violations=(
+            _TestViolationA(
+                plugin="P",
+                node_id="n",
+                run_id="r",
+                row_id="rw",
+                token_id="t",
+                payload={"note": "a"},
+                message="a",
+            ),
+            _TestViolationB(
+                plugin="P",
+                node_id="n",
+                run_id="r",
+                row_id="rw",
+                token_id="t",
+                payload={"note": "b"},
+                message="b",
+            ),
+        ),
+        message="2 violations",
+    )
+    with pytest.raises(RuntimeError, match="dispatcher"):
         aggregate._attach_by_dispatcher()
 
 

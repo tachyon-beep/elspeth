@@ -97,7 +97,11 @@ def _probe_instantiate(cls: type[BaseTransform]) -> BaseTransform:
     try:
         config = cls.probe_config()
     except NotImplementedError as exc:
-        raise _UnprobeableTransform(reason=f"{cls.__name__}.probe_config() not implemented: {exc}") from exc
+        if cls.passes_through_input:
+            reason = f"{cls.__name__}.probe_config() not implemented: {exc}"
+        else:
+            reason = f"{cls.__name__}.probe_config() not implemented (non-pass-through transform has not opted into invariant probing)."
+        raise _UnprobeableTransform(reason=reason) from exc
     try:
         return cls(config=config)
     except TypeError as exc:
@@ -152,6 +156,17 @@ def _observed_fields(row: PipelineRow) -> frozenset[str]:
     return contract_fields & payload_fields
 
 
+def _effective_input_fields(probe_rows: list[PipelineRow]) -> frozenset[str]:
+    """Mirror runtime pass-through input-field semantics for probe rows."""
+    if not probe_rows:
+        return frozenset()
+    observed_sets = [_observed_fields(row) for row in probe_rows]
+    effective = observed_sets[0]
+    for observed in observed_sets[1:]:
+        effective = effective & observed
+    return effective
+
+
 @given(row=probe_row())
 @settings(
     max_examples=30,
@@ -177,13 +192,20 @@ def test_annotated_transforms_preserve_input_fields(
     except _UnprobeableTransform as exc:
         pytest.skip(f"{_annotated_cls.__name__}: {exc.reason}")
 
+    probe_rows = transform.forward_invariant_probe_rows(row)
+
     # Batch-aware transforms receive list[PipelineRow]; single-token transforms
-    # receive PipelineRow. Both shapes are exercised by the same probe.
+    # receive PipelineRow. ``forward_invariant_probe_rows()`` lets
+    # config-sensitive pass-through transforms adapt the generic probe into a
+    # representative success-path shape.
     try:
         if transform.is_batch_aware:
-            result = transform.process([row], _probe_context(transform))  # type: ignore[arg-type]
+            result = transform.process(probe_rows, _probe_context(transform))  # type: ignore[arg-type]
         else:
-            result = transform.process(row, _probe_context(transform))
+            assert len(probe_rows) == 1, (
+                f"{_annotated_cls.__name__}.forward_invariant_probe_rows() must return exactly 1 row for non-batch transforms."
+            )
+            result = transform.process(probe_rows[0], _probe_context(transform))
     except (TypeError, AttributeError) as exc:
         pytest.skip(f"{_annotated_cls.__name__}: probe invocation rejected: {exc}")
 
@@ -197,7 +219,7 @@ def test_annotated_transforms_preserve_input_fields(
         # Empty emission — ADR-009 §Clause 3 carve-out. Drops nothing.
         return
 
-    input_fields = frozenset(fc.normalized_name for fc in row.contract.fields)
+    input_fields = _effective_input_fields(probe_rows)
     for emitted in emitted_rows:
         runtime_contract = frozenset(fc.normalized_name for fc in emitted.contract.fields)
         runtime_payload = frozenset(emitted.keys())
@@ -260,7 +282,8 @@ def test_non_pass_through_transforms_do_drop_fields(
     ``probe_config()`` does not exercise a case where fields are dropped
     — both are governance defects that must be addressed in this PR.
 
-    Non-annotated transforms WITHOUT ``probe_config()`` are skipped silently:
+    Non-annotated transforms WITHOUT ``probe_config()`` are skipped with a
+    diagnostic reason:
     probing is opt-in, and the forward invariant + skip-rate budget are the
     load-bearing governance for annotated transforms. Transforms whose
     ``probe_config()`` raises or whose constructor rejects it are also
@@ -274,13 +297,13 @@ def test_non_pass_through_transforms_do_drop_fields(
     """
     try:
         transform = _probe_instantiate(_non_pass_through_cls)
-    except _UnprobeableTransform:
+    except _UnprobeableTransform as exc:
         # Non-annotated transforms that did not opt into probing — or whose
         # probe config is incompatible with their constructor — are out of
         # scope for the backward invariant. The forward invariant and
         # skip-rate budget cover the annotated set; this test only
         # exercises transforms that explicitly declared a probe config.
-        pytest.skip(f"{_non_pass_through_cls.__name__}: not probeable (no probe_config() or constructor mismatch).")
+        pytest.skip(f"{_non_pass_through_cls.__name__}: {exc.reason}")
 
     probes_preserved = True
     probe_count = 0

@@ -3422,10 +3422,12 @@ class TestUpdateBlobSessionLockSerialisation:
             # satisfy the completed-wait check for the wrong reason.
             assert started.wait(timeout=2.0), "worker thread never entered its body"
             # While we hold the lock, the worker MUST NOT complete — if
-            # it does, the tool bypassed the session lock.  0.3s is an
-            # ample margin for a sub-millisecond in-memory SQLite
-            # transaction; fail fast if the tool is not lock-respecting.
-            blocked = not completed.wait(timeout=0.3)
+            # it does, the tool bypassed the session lock. Keep a full
+            # second of slack here: under xdist load the worker thread may
+            # take longer than a few hundred milliseconds to reach the
+            # lock acquisition point even though the locking contract is
+            # correct.
+            blocked = not completed.wait(timeout=1.0)
             assert blocked, (
                 "update_blob completed while the session lock was held externally; "
                 "the tool did not acquire _session_blob_lock before _sync_get_blob, "

@@ -23,7 +23,9 @@ from sqlalchemy import select
 from elspeth.contracts import Determinism, NodeType, RoutingMode, RowOutcome, RunStatus
 from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
 from elspeth.contracts.types import NodeID, SinkName
+from elspeth.core.canonical import canonical_json
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import (
@@ -49,6 +51,11 @@ def _null_source(on_success: str = "default") -> NullSource:
     source = NullSource({})
     source.on_success = on_success
     return source
+
+
+def _runtime_val_manifest_json() -> str:
+    """Mirror the run-header manifest production begin_run() stores."""
+    return canonical_json(build_runtime_val_manifest())
 
 
 class TestResumeComprehensive:
@@ -166,6 +173,7 @@ class TestResumeComprehensive:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 
@@ -514,6 +522,7 @@ class TestResumeComprehensive:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 
@@ -719,6 +728,7 @@ class TestResumeComprehensive:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 
@@ -919,6 +929,7 @@ class TestResumeComprehensive:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 
@@ -1121,6 +1132,7 @@ class TestResumeComprehensive:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 
@@ -1316,6 +1328,7 @@ class TestResumeComprehensive:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 

@@ -19,6 +19,7 @@ import pytest
 
 from elspeth.web.blobs.protocol import (
     BlobActiveRunError,
+    BlobError,
     BlobIntegrityError,
     BlobNotFoundError,
     BlobQuotaExceededError,
@@ -127,6 +128,10 @@ class TestBlobExceptionFamilyInvariants:
         BlobStateError,
         BlobIntegrityError,
     )
+
+    def test_every_family_member_inherits_blob_error(self) -> None:
+        for cls in self._FAMILY:
+            assert issubclass(cls, BlobError), f"{cls.__name__} must inherit BlobError for family-wide catches."
 
     def test_every_family_member_declares_frozen_attrs(self) -> None:
         """Every exception in the family MUST declare ``_FROZEN_ATTRS``.

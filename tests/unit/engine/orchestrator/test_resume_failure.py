@@ -14,6 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.contracts import NodeID, RunStatus
+from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
+from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.orchestrator.core import Orchestrator
@@ -62,6 +64,7 @@ class TestResumeFinalizesAsFailed:
         mock_factory = MagicMock(spec=RecorderFactory)
         mock_factory.run_lifecycle.get_source_schema.return_value = '{"mode": "observed"}'
         mock_factory.run_lifecycle.get_run_contract.return_value = MagicMock()
+        mock_factory.run_lifecycle.get_runtime_val_manifest.return_value = canonical_json(build_runtime_val_manifest())
 
         # Mock RecoveryManager
         mock_recovery = MagicMock()

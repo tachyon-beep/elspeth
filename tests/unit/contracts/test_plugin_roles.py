@@ -9,6 +9,8 @@ import pytest
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.plugin_roles import (
+    require_declared_input_fields_plugin,
+    require_declared_output_fields_plugin,
     sink_declared_required_fields,
     source_declared_guaranteed_fields,
 )
@@ -130,3 +132,28 @@ def test_sink_helper_does_not_cross_match_source_role(
     expected: frozenset[str] | None,
 ) -> None:
     assert sink_declared_required_fields(plugin) == expected
+
+
+def test_require_declared_output_fields_plugin_returns_typed_plugin() -> None:
+    class _DeclaredOutputPlugin:
+        name = "declared-output"
+        node_id = "node-1"
+        declared_output_fields = frozenset({"customer_id"})
+
+    plugin = _DeclaredOutputPlugin()
+    typed = require_declared_output_fields_plugin(plugin)
+
+    assert typed is plugin
+    assert typed.name == "declared-output"
+    assert typed.declared_output_fields == frozenset({"customer_id"})
+
+
+def test_require_declared_input_fields_plugin_rejects_non_frozenset() -> None:
+    class _BadDeclaredInputPlugin:
+        name = "declared-input"
+        node_id = "node-1"
+        declared_input_fields = ("customer_id",)
+        is_batch_aware = False
+
+    with pytest.raises(TypeError, match="declared_input_fields"):
+        require_declared_input_fields_plugin(_BadDeclaredInputPlugin())

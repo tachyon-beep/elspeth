@@ -126,6 +126,11 @@ allow_hits:
   reason: Best-effort TokenCompleted telemetry after source-boundary audit completion must not mask the original Tier-1 boundary violation
   safety: Telemetry runs only after both FAILED audit writes succeed; failures are logged and the original violation continues to propagate
   expires: '2026-07-10'
+- key: engine/processor.py:R4:RowProcessor:_record_flush_violation:fp=abaee3231888b927
+  owner: architecture
+  reason: Best-effort TokenCompleted telemetry after batch-flush FAILED audit completion must not mask the original batch-flush violation
+  safety: Telemetry runs only after the FAILED outcome is recorded for that token; failures are logged and the original violation continues to propagate
+  expires: '2026-07-10'
 - key: engine/commencement.py:R5:evaluate_commencement_gates:fp=18ca009ccd49b5e0
   owner: architecture
   reason: Offensive isinstance check — gate results must be bool before recording in audit trail. Non-boolean results from expression evaluation are a config bug, not data to coerce.
@@ -141,67 +146,67 @@ allow_hits:
   reason: Cleanup/pop with default - entry may not exist due to race between timeout and emit
   safety: Documented TOCTOU race pattern - pop(None) is intentional cleanup of possibly-absent entry
   expires: '2026-05-02'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_emit_phase_error:fp=c6614b6152ca9135
+- key: engine/orchestrator/core.py:R4:Orchestrator:_emit_phase_error:fp=cb545ca7adc583c4
   owner: architecture
   reason: Best-effort PhaseError emission — event-bus handler bugs must not mask the original pipeline exception
   safety: Catches and logs; original exception always re-raised by caller
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=f01844882f665775
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=b14b24bc62ea405b
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=2e1851ead5476558
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=c0d603007f9b5d4b
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=62a6062f53e1c8bc
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=40776a876b5c72c8
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=29b76bce404b90fe
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=33681c76f82e4f77
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=926bece7f5e25d90
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=1480972c213347ef
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=c1a385776562c927
+- key: engine/orchestrator/core.py:R4:Orchestrator:_cleanup_plugins:fp=14e744c36896c2af
   owner: architecture
   reason: Plugin cleanup must attempt all closures; broad catch collects errors then raises
   safety: Code reviewed - collects all cleanup errors into list, raises ExceptionGroup after all attempted
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_export_phase:fp=b5039ca3c4d1591e
+- key: engine/orchestrator/core.py:R4:Orchestrator:_execute_export_phase:fp=ca4d4d10b9b6ebb4
   owner: architecture
   reason: Best-effort export status recording — must not mask original export exception
   safety: Catches and logs; original export exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=c2bff95418c4c901
+- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=c226c8e2439011d8
   owner: architecture
   reason: Best-effort interrupted ceremony — GracefulShutdownError must not be masked by ceremony failure
   safety: Catches and logs; original shutdown exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=f1f8262b82f4824d
+- key: engine/orchestrator/core.py:R4:Orchestrator:run:fp=40bc5315942d8b6f
   owner: architecture
   reason: Best-effort failure ceremony — original pipeline exception must not be masked
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=fe34c503ec93989b
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=5cb7a3eaaf6a83b5
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=e76936664b5c1f66
+- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=b4c3954be227647a
   owner: architecture
   reason: Best-effort interrupted ceremony on resume — must not mask original shutdown exception
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=ec91c688592698e6
+- key: engine/orchestrator/core.py:R4:Orchestrator:resume:fp=699154e960ff3433
   owner: architecture
   reason: Best-effort failure ceremony on resume — must not mask original exception
   safety: Catches and logs; original exception always re-raised
@@ -236,7 +241,7 @@ allow_hits:
   reason: 'ADR-010 Decision 1 nominal isinstance check -- discriminates AuditEvidenceBase subclasses so NodeStateGuard can populate ExecutionError.context from to_audit_dict(). Nominal inheritance (not structural Protocol) is deliberate: see ADR-010 Alternative 3 for the accidental-match spoofing rationale. The exception always propagates; only structured audit context is conditionally added.'
   safety: 'The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug; broken to_audit_dict() surfaces via the existing (TypeError, AttributeError, KeyError, NameError) re-raise path.'
   expires: null
-- key: engine/executors/declaration_dispatch.py:R6:_dispatch:fp=3b991a91617839d0
+- key: engine/executors/declaration_dispatch.py:R6:_dispatch:fp=15d9ff75661bacf0
   owner: architecture
   reason: "ADR-010 §Semantics amendment (2026-04-20, comment #417 on H2) — the audit-complete dispatcher MUST catch DeclarationContractViolation, attach the authoritative contract_name via C4 closure, and continue iterating so every applicable contract's method runs. This is not silent swallowing: the collected violations are raised as the original (N=1 reference equality) or as AggregateDeclarationContractViolation (N>=2) at loop end. Catch-and-collect IS the audit-complete invariant."
   safety: Every caught violation is either re-raised via the N=1 reference-equality fast path OR wrapped in AggregateDeclarationContractViolation and raised from the dispatcher boundary. No silent drops. See N3 §Acceptance + comment #417.

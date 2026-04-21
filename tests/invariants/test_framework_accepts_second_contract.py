@@ -25,6 +25,7 @@ from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.declaration_contracts import (
     PostEmissionInputs,
     PostEmissionOutputs,
+    _attach_contract_name_from_dispatcher,
     _clear_registry_for_tests,
     _restore_registry_snapshot_for_tests,
     _snapshot_registry_for_tests,
@@ -119,7 +120,7 @@ def test_declared_output_fields_violation_is_audit_evidence() -> None:
 
     assert isinstance(violation, AuditEvidenceBase)
 
-    violation._attach_contract_name("declared_output_fields")
+    _attach_contract_name_from_dispatcher(violation, "declared_output_fields")
     audit = violation.to_audit_dict()
 
     assert audit["exception_type"] == "DeclaredOutputFieldsViolation"

@@ -109,13 +109,14 @@ class SourceGuaranteedFieldsContract(DeclarationContract):
         inputs: BoundaryInputs,
         outputs: BoundaryOutputs,
     ) -> None:
+        declared_guaranteed_fields = inputs.plugin.declared_guaranteed_fields
         source_node_id = inputs.plugin.node_id
         if source_node_id is None:
             raise OrchestrationInvariantError(
                 f"Source {inputs.plugin.name!r} has no node_id set at source-guaranteed-fields boundary check time."
             )
         verify_source_guaranteed_fields(
-            declared_guaranteed_fields=cast(frozenset[str], inputs.plugin.declared_guaranteed_fields),
+            declared_guaranteed_fields=declared_guaranteed_fields,
             row_data=cast(Mapping[str, object], inputs.row_data),
             row_contract=cast(SchemaContract | None, inputs.row_contract),
             plugin_name=inputs.plugin.name,

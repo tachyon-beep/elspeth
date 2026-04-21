@@ -52,7 +52,6 @@ class CreateSecretResponse(_StrictResponse):
 
     name: str
     scope: str
-    available: bool
 
 
 class ValidateSecretResponse(_StrictResponse):

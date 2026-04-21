@@ -258,8 +258,7 @@ class WebSecretService:
         Eager-fingerprint semantics (see :meth:`UserSecretStore.set_secret`)
         guarantee that a successful return implies the secret is both
         persisted AND immediately resolvable — no TOCTOU window against
-        a separate ``has_ref`` probe, and no silent half-success state
-        where ``available=False`` for a row that was nevertheless written.
+        a separate ``has_ref`` probe.
 
         Raises
         ------
@@ -271,7 +270,6 @@ class WebSecretService:
         return CreateSecretResult(
             name=name,
             scope="user",
-            available=True,
             fingerprint=fingerprint,
         )
 

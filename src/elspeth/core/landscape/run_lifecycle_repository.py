@@ -256,6 +256,29 @@ class RunLifecycleRepository:
             )
         return source_schema_json
 
+    def get_runtime_val_manifest(self, run_id: str) -> str:
+        """Get the runtime-VAL manifest captured at run start."""
+        query = select(runs_table.c.runtime_val_manifest_json).where(runs_table.c.run_id == run_id)
+        run_row = self._ops.execute_fetchone(query)
+
+        if run_row is None:
+            raise AuditIntegrityError(f"Run {run_id} not found in database")
+
+        runtime_val_manifest_json = run_row.runtime_val_manifest_json
+        if runtime_val_manifest_json is None:
+            raise AuditIntegrityError(
+                f"Run {run_id} has no runtime VAL manifest stored. "
+                "Resume cannot verify declaration-contract or Tier-1 registry parity "
+                "without this evidence — audit trail is incomplete."
+            )
+
+        if type(runtime_val_manifest_json) is not str:
+            raise AuditIntegrityError(
+                f"Run {run_id} runtime_val_manifest_json is {type(runtime_val_manifest_json).__name__}, "
+                "expected str — audit data corruption (Tier 1 violation)"
+            )
+        return runtime_val_manifest_json
+
     def record_source_field_resolution(
         self,
         run_id: str,

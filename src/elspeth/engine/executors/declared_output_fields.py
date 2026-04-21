@@ -14,7 +14,7 @@ mirroring the pass-through contract's "contract ∩ payload" posture.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from elspeth.contracts.declaration_contracts import (
     BatchFlushInputs,
@@ -33,6 +33,7 @@ from elspeth.contracts.errors import (
     FrameworkBugError,
     OrchestrationInvariantError,
 )
+from elspeth.contracts.plugin_roles import require_declared_output_fields_plugin
 from elspeth.contracts.schema_contract import (
     FieldContract,
     PipelineRow,
@@ -111,7 +112,8 @@ class DeclaredOutputFieldsContract(DeclarationContract):
     payload_schema: ClassVar[type] = DeclaredOutputFieldsPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        return bool(cast(frozenset[str], plugin.declared_output_fields))
+        typed_plugin = require_declared_output_fields_plugin(plugin)
+        return bool(typed_plugin.declared_output_fields)
 
     @implements_dispatch_site("post_emission_check")
     def post_emission_check(
@@ -119,13 +121,14 @@ class DeclaredOutputFieldsContract(DeclarationContract):
         inputs: PostEmissionInputs,
         outputs: PostEmissionOutputs,
     ) -> None:
-        transform_node_id = inputs.plugin.node_id
+        plugin = require_declared_output_fields_plugin(inputs.plugin)
+        transform_node_id = plugin.node_id
         if transform_node_id is None:
-            raise OrchestrationInvariantError(f"Transform {inputs.plugin.name!r} has no node_id set at declared-output-fields check time.")
+            raise OrchestrationInvariantError(f"Transform {plugin.name!r} has no node_id set at declared-output-fields check time.")
         verify_declared_output_fields(
-            declared_output_fields=cast(frozenset[str], inputs.plugin.declared_output_fields),
+            declared_output_fields=plugin.declared_output_fields,
             emitted_rows=outputs.emitted_rows,
-            plugin_name=inputs.plugin.name,
+            plugin_name=plugin.name,
             node_id=transform_node_id,
             run_id=inputs.run_id,
             row_id=inputs.row_id,
@@ -138,15 +141,16 @@ class DeclaredOutputFieldsContract(DeclarationContract):
         inputs: BatchFlushInputs,
         outputs: BatchFlushOutputs,
     ) -> None:
-        transform_node_id = inputs.plugin.node_id
+        plugin = require_declared_output_fields_plugin(inputs.plugin)
+        transform_node_id = plugin.node_id
         if transform_node_id is None:
             raise OrchestrationInvariantError(
-                f"Transform {inputs.plugin.name!r} has no node_id set at declared-output-fields batch-flush check time."
+                f"Transform {plugin.name!r} has no node_id set at declared-output-fields batch-flush check time."
             )
         verify_declared_output_fields(
-            declared_output_fields=cast(frozenset[str], inputs.plugin.declared_output_fields),
+            declared_output_fields=plugin.declared_output_fields,
             emitted_rows=outputs.emitted_rows,
-            plugin_name=inputs.plugin.name,
+            plugin_name=plugin.name,
             node_id=transform_node_id,
             run_id=inputs.run_id,
             row_id=inputs.row_id,

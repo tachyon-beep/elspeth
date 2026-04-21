@@ -145,7 +145,7 @@ class TestCreateSecret:
         body = resp.json()
         assert body["name"] == "API_KEY"
         assert body["scope"] == "user"
-        assert body["available"] is True
+        assert "available" not in body
 
     def test_create_secret_value_not_in_response_body(self) -> None:
         """SECURITY: explicit check that 'value' key is absent from response JSON."""

@@ -64,10 +64,7 @@ class CreateSecretResult:
     Eager-fingerprint design guarantees that if this value is returned
     (rather than an exception being raised), the secret is both persisted
     AND immediately resolvable — closing the TOCTOU window that the
-    prior two-step ``set_secret`` + ``has_ref`` check suffered.  The
-    ``available`` field is therefore always True today; it remains on
-    the contract so clients stay forward-compatible with a future
-    deferred-fingerprint mode.
+    prior two-step ``set_secret`` + ``has_ref`` check suffered.
 
     ``fingerprint`` is safe to surface — it is an HMAC digest, not the
     secret value, and is already recorded in the Landscape audit trail
@@ -76,7 +73,6 @@ class CreateSecretResult:
 
     name: str
     scope: Literal["user", "server", "org"]
-    available: bool
     fingerprint: str
 
 

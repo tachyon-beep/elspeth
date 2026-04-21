@@ -18,8 +18,10 @@ from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.results import SourceRow
+from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
 from elspeth.contracts.schema_contract import FieldContract, SchemaContract
 from elspeth.contracts.types import AggregationName
+from elspeth.core.canonical import canonical_json
 from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
 from elspeth.core.dag import ExecutionGraph
 from elspeth.engine.orchestrator import PipelineConfig
@@ -37,6 +39,11 @@ from tests.fixtures.plugins import CollectSink, ListSource
 
 if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
+
+
+def _runtime_val_manifest_json() -> str:
+    """Mirror the run-header manifest production begin_run() stores."""
+    return canonical_json(build_runtime_val_manifest())
 
 
 class InterruptAfterN(BaseTransform):
@@ -829,6 +836,7 @@ class TestInterruptAndResume:
                     source_schema_json=source_schema_json,
                     schema_contract_json=schema_contract_json,
                     schema_contract_hash=schema_contract_hash,
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 
@@ -1043,6 +1051,7 @@ class TestInterruptAndResume:
                     source_schema_json=source_schema_json,
                     schema_contract_json=audit_record.to_json(),
                     schema_contract_hash=contract.version_hash(),
+                    runtime_val_manifest_json=_runtime_val_manifest_json(),
                 )
             )
 

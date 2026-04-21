@@ -846,10 +846,7 @@ class TestProcessRowNoTransforms:
             processor._record_flush_violation(fctx, violation)
 
         assert mock_record_token_outcome.call_count == 2
-        recorded_refs = {
-            call.kwargs["ref"].token_id
-            for call in mock_record_token_outcome.call_args_list
-        }
+        recorded_refs = {call.kwargs["ref"].token_id for call in mock_record_token_outcome.call_args_list}
         assert recorded_refs == {"token-a", "token-b"}
 
     def test_batch_flush_non_recorder_recording_bug_propagates_unmodified(self) -> None:

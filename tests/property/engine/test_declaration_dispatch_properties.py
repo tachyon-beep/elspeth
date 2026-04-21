@@ -47,7 +47,7 @@ from __future__ import annotations
 from typing import Any, ClassVar, TypedDict
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from elspeth.contracts.declaration_contracts import (
@@ -212,6 +212,77 @@ def boundary_outputs_strategy() -> st.SearchStrategy[BoundaryOutputs]:
         BoundaryOutputs,
         rows=st.lists(_row_like_strategy(), max_size=4).map(tuple),
     )
+
+
+def _seed_pre_emission_bundle() -> PreEmissionInputs:
+    return PreEmissionInputs(
+        plugin=_named_plugin("seed-pre"),
+        node_id="node_pre",
+        run_id="run_pre",
+        row_id="row_pre",
+        token_id="token_pre",
+        input_row={"customer_id": 7, "amount": "42"},
+        static_contract=frozenset({"customer_id", "amount"}),
+        effective_input_fields=frozenset({"customer_id", "amount"}),
+    )
+
+
+def _seed_post_emission_inputs() -> PostEmissionInputs:
+    return PostEmissionInputs(
+        plugin=_named_plugin("seed-post"),
+        node_id="node_post",
+        run_id="run_post",
+        row_id="row_post",
+        token_id="token_post",
+        input_row={"customer_id": 7, "amount": "42"},
+        static_contract=frozenset({"customer_id", "amount"}),
+        effective_input_fields=frozenset({"customer_id", "amount"}),
+    )
+
+
+def _seed_post_emission_outputs() -> PostEmissionOutputs:
+    return PostEmissionOutputs(
+        emitted_rows=({"customer_id": 7, "status": "ok"},),
+    )
+
+
+def _seed_batch_flush_inputs() -> BatchFlushInputs:
+    return BatchFlushInputs(
+        plugin=_named_plugin("seed-batch"),
+        node_id="node_batch",
+        run_id="run_batch",
+        row_id="row_batch",
+        token_id="token_batch",
+        buffered_tokens=(
+            {"customer_id": 7, "amount": "42"},
+            {"customer_id": 8, "amount": "99"},
+        ),
+        static_contract=frozenset({"customer_id", "amount"}),
+        effective_input_fields=frozenset({"customer_id", "amount"}),
+    )
+
+
+def _seed_batch_flush_outputs() -> BatchFlushOutputs:
+    return BatchFlushOutputs(
+        emitted_rows=({"batch_size": 2, "status": "ok"},),
+    )
+
+
+def _seed_boundary_inputs() -> BoundaryInputs:
+    return BoundaryInputs(
+        plugin=_named_plugin("seed-boundary"),
+        node_id="node_boundary",
+        run_id="run_boundary",
+        row_id="row_boundary",
+        token_id="token_boundary",
+        static_contract=frozenset({"customer_id"}),
+        row_data={"customer_id": 7, "raw": {"source": "csv"}},
+        row_contract=None,
+    )
+
+
+def _seed_boundary_outputs() -> BoundaryOutputs:
+    return BoundaryOutputs(rows=({"customer_id": 7},))
 
 
 # =============================================================================
@@ -826,6 +897,7 @@ def test_pre_emission_applicable_non_raising_registry_returns_none(
     assert run_pre_emission_checks(bundle) is None
 
 
+@example(bundle=_seed_pre_emission_bundle())
 @given(bundle=pre_emission_inputs_strategy())  # -> PreEmissionInputs
 @_DISPATCH_PROPERTY_SETTINGS
 def test_pre_emission_n1_raises_via_reference_identity(
@@ -847,6 +919,7 @@ def test_pre_emission_n1_raises_via_reference_identity(
     assert not isinstance(exc_info.value, AggregateDeclarationContractViolation)
 
 
+@example(bundle=_seed_pre_emission_bundle())
 @given(bundle=pre_emission_inputs_strategy())  # -> PreEmissionInputs
 @_DISPATCH_PROPERTY_SETTINGS
 def test_pre_emission_n2_raises_aggregate(_pre_emission_two_raisers, bundle):
@@ -875,6 +948,10 @@ def test_pre_emission_n2_raises_aggregate(_pre_emission_two_raisers, bundle):
 # =============================================================================
 
 
+@example(
+    inputs=_seed_post_emission_inputs(),
+    outputs=_seed_post_emission_outputs(),
+)
 @given(  # -> PostEmissionInputs, PostEmissionOutputs
     inputs=post_emission_inputs_strategy(),
     outputs=post_emission_outputs_strategy(),
@@ -885,6 +962,10 @@ def test_post_emission_empty_registry_returns_none(_empty_registry, inputs, outp
     assert run_post_emission_checks(inputs, outputs) is None
 
 
+@example(
+    inputs=_seed_post_emission_inputs(),
+    outputs=_seed_post_emission_outputs(),
+)
 @given(  # -> PostEmissionInputs, PostEmissionOutputs
     inputs=post_emission_inputs_strategy(),
     outputs=post_emission_outputs_strategy(),
@@ -945,6 +1026,10 @@ def test_post_emission_n2_raises_aggregate(
 # =============================================================================
 
 
+@example(
+    inputs=_seed_batch_flush_inputs(),
+    outputs=_seed_batch_flush_outputs(),
+)
 @given(  # -> BatchFlushInputs, BatchFlushOutputs
     inputs=batch_flush_inputs_strategy(),
     outputs=batch_flush_outputs_strategy(),
@@ -955,6 +1040,10 @@ def test_batch_flush_empty_registry_returns_none(_empty_registry, inputs, output
     assert run_batch_flush_checks(inputs, outputs) is None
 
 
+@example(
+    inputs=_seed_batch_flush_inputs(),
+    outputs=_seed_batch_flush_outputs(),
+)
 @given(  # -> BatchFlushInputs, BatchFlushOutputs
     inputs=batch_flush_inputs_strategy(),
     outputs=batch_flush_outputs_strategy(),
@@ -1015,6 +1104,10 @@ def test_batch_flush_n2_raises_aggregate(
 # =============================================================================
 
 
+@example(
+    inputs=_seed_boundary_inputs(),
+    outputs=_seed_boundary_outputs(),
+)
 @given(  # -> BoundaryInputs, BoundaryOutputs
     inputs=boundary_inputs_strategy(),
     outputs=boundary_outputs_strategy(),
@@ -1031,6 +1124,10 @@ def test_boundary_empty_registry_returns_none(_empty_registry, inputs, outputs):
     assert run_boundary_checks(inputs, outputs) is None
 
 
+@example(
+    inputs=_seed_boundary_inputs(),
+    outputs=_seed_boundary_outputs(),
+)
 @given(  # -> BoundaryInputs, BoundaryOutputs
     inputs=boundary_inputs_strategy(),
     outputs=boundary_outputs_strategy(),

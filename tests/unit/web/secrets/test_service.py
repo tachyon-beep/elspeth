@@ -168,7 +168,7 @@ class TestCrud:
         assert deleted is False
 
     def test_set_user_secret_returns_create_result(self, service: WebSecretService) -> None:
-        """set_user_secret returns a CreateSecretResult with fingerprint + availability.
+        """set_user_secret returns a CreateSecretResult with fingerprint only.
 
         Eager-fingerprint design: if this call returns (instead of raising
         FingerprintKeyMissingError), the secret is persisted AND immediately
@@ -179,7 +179,7 @@ class TestCrud:
         assert isinstance(result, CreateSecretResult)
         assert result.name == "FRESH"
         assert result.scope == "user"
-        assert result.available is True
+        assert not hasattr(result, "available")
         assert len(result.fingerprint) == 64
         assert all(c in "0123456789abcdef" for c in result.fingerprint)
 
