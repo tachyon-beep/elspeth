@@ -234,6 +234,8 @@ class TestRecordCall:
         Callers should use allocate_call_index() to get unique indices, but the DB
         constraint serves as defense-in-depth against bugs that might bypass the allocator.
         """
+        from elspeth.core.landscape.errors import LandscapeRecordError
+
         # First call succeeds
         landscape_factory.execution.record_call(
             state_id=state_id,
@@ -245,7 +247,7 @@ class TestRecordCall:
         )
 
         # Duplicate call_index is rejected by DB constraint
-        with pytest.raises(IntegrityError):
+        with pytest.raises(LandscapeRecordError) as exc_info:
             landscape_factory.execution.record_call(
                 state_id=state_id,
                 call_index=0,  # Same index - rejected at DB level
@@ -254,10 +256,13 @@ class TestRecordCall:
                 request_data=RawCallPayload({"prompt": "Second"}),
                 response_data=RawCallPayload({"response": "Second"}),
             )
+        assert isinstance(exc_info.value.__cause__, IntegrityError)
 
     def test_invalid_state_id_raises_integrity_error(self, landscape_factory: RecorderFactory) -> None:
-        """Test that invalid state_id raises IntegrityError (FK constraint)."""
-        with pytest.raises(IntegrityError):
+        """Test that invalid state_id raises LandscapeRecordError with FK cause."""
+        from elspeth.core.landscape.errors import LandscapeRecordError
+
+        with pytest.raises(LandscapeRecordError) as exc_info:
             landscape_factory.execution.record_call(
                 state_id="nonexistent_state_id",
                 call_index=0,
@@ -266,6 +271,7 @@ class TestRecordCall:
                 request_data=RawCallPayload({"prompt": "Test"}),
                 response_data=RawCallPayload({"response": "Test"}),
             )
+        assert isinstance(exc_info.value.__cause__, IntegrityError)
 
     def test_record_http_call(self, landscape_factory: RecorderFactory, state_id: str) -> None:
         """Test recording an HTTP call type."""

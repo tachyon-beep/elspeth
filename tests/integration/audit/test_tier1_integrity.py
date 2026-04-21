@@ -159,13 +159,15 @@ class TestRecorderCrashesOnNullAuditFields:
         """register_node with None as plugin_name must crash.
 
         The nodes table has plugin_name NOT NULL.  Passing None should
-        raise IntegrityError from the database or TypeError upstream.
+        surface as LandscapeRecordError with the database IntegrityError as cause.
         """
         from sqlalchemy.exc import IntegrityError
 
+        from elspeth.core.landscape.errors import LandscapeRecordError
+
         run = _begin_run(landscape_factory)
 
-        with pytest.raises((IntegrityError, TypeError)):
+        with pytest.raises(LandscapeRecordError) as exc_info:
             landscape_factory.data_flow.register_node(
                 run_id=run.run_id,
                 plugin_name=None,  # type: ignore[arg-type]
@@ -174,6 +176,7 @@ class TestRecorderCrashesOnNullAuditFields:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
+        assert isinstance(exc_info.value.__cause__, IntegrityError)
 
     def test_null_config_hash_prevented(self, landscape_db: LandscapeDB, landscape_factory: RecorderFactory) -> None:
         """register_node computes config_hash from config dict.
@@ -199,11 +202,14 @@ class TestRecorderCrashesOnNullAuditFields:
     def test_null_run_id_in_register_node_crashes(self, landscape_db: LandscapeDB, landscape_factory: RecorderFactory) -> None:
         """register_node with None as run_id must crash.
 
-        The nodes table has run_id NOT NULL with a FK to runs.
+        The nodes table has run_id NOT NULL with a FK to runs; repository writes
+        surface DB rejection as LandscapeRecordError.
         """
         from sqlalchemy.exc import IntegrityError
 
-        with pytest.raises((IntegrityError, TypeError)):
+        from elspeth.core.landscape.errors import LandscapeRecordError
+
+        with pytest.raises(LandscapeRecordError) as exc_info:
             landscape_factory.data_flow.register_node(
                 run_id=None,  # type: ignore[arg-type]
                 plugin_name="test_plugin",
@@ -212,6 +218,7 @@ class TestRecorderCrashesOnNullAuditFields:
                 config={},
                 schema_config=DYNAMIC_SCHEMA,
             )
+        assert isinstance(exc_info.value.__cause__, IntegrityError)
 
 
 # ===================================================================

@@ -15,7 +15,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from elspeth.contracts.results import TransformResult
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.infrastructure.clients.llm import (
     ContentPolicyError,
@@ -49,6 +49,16 @@ def _make_ctx() -> Mock:
     ctx.token = Mock()
     ctx.token.token_id = "token-1"
     return ctx
+
+
+def _identity_contract(contract: SchemaContract) -> SchemaContract:
+    """Mirror the transform's no-op contract alignment in focused strategy tests."""
+    return contract
+
+
+def _identity_row(row: PipelineRow) -> PipelineRow:
+    """Mirror the transform's no-op row alignment in focused strategy tests."""
+    return row
 
 
 def _make_config(*, provider: str = "azure", **overrides: Any) -> dict[str, Any]:
@@ -2573,6 +2583,8 @@ class TestParallelErrorReasonNotFabricated:
             temperature=0.0,
             max_tokens=100,
             response_field="llm_response",
+            align_output_contract=_identity_contract,
+            align_output_row_contract=_identity_row,
             executor=mock_executor,
         )
 
@@ -2654,6 +2666,8 @@ class TestParallelAuditMetadataThreadSafety:
             temperature=0.0,
             max_tokens=100,
             response_field="llm_response",
+            align_output_contract=_identity_contract,
+            align_output_row_contract=_identity_row,
             executor=mock_executor,
         )
 
@@ -2733,6 +2747,8 @@ class TestParallelAuditMetadataThreadSafety:
             temperature=0.0,
             max_tokens=100,
             response_field="llm_response",
+            align_output_contract=_identity_contract,
+            align_output_row_contract=_identity_row,
             executor=mock_executor,
         )
 
@@ -2818,6 +2834,8 @@ class TestMultiQueryFinishReasonAudit:
             temperature=0.0,
             max_tokens=100,
             response_field="llm_response",
+            align_output_contract=_identity_contract,
+            align_output_row_contract=_identity_row,
             executor=None,  # Sequential mode
         )
 
@@ -2862,6 +2880,8 @@ class TestMultiQueryFinishReasonAudit:
             temperature=0.0,
             max_tokens=100,
             response_field="llm_response",
+            align_output_contract=_identity_contract,
+            align_output_row_contract=_identity_row,
             executor=None,
         )
 
@@ -2911,6 +2931,8 @@ class TestSequentialErrorReasonNotFabricated:
             temperature=0.0,
             max_tokens=100,
             response_field="llm_response",
+            align_output_contract=_identity_contract,
+            align_output_row_contract=_identity_row,
             executor=None,  # Sequential mode
         )
 

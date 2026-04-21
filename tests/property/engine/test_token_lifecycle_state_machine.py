@@ -708,13 +708,17 @@ class TestTokenLifecycleInvariants:
                 sink_name="default",
             )
 
-            # Second terminal outcome should violate unique constraint
-            with pytest.raises(IntegrityError):
+            # Second terminal outcome should violate the unique constraint and
+            # surface through the recorder wrapper.
+            from elspeth.core.landscape.errors import LandscapeRecordError
+
+            with pytest.raises(LandscapeRecordError) as exc_info:
                 factory.data_flow.record_token_outcome(
                     ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                     outcome=RowOutcome.QUARANTINED,
                     error_hash="test_error_hash",
                 )
+            assert isinstance(exc_info.value.__cause__, IntegrityError)
 
             # Count outcomes - should be exactly 1
             with db.connection() as conn:

@@ -312,10 +312,15 @@ class TestRecordTokenOutcome:
         assert outcome_id is not None
 
     def test_duplicate_terminal_raises(self, factory, run_with_token) -> None:
-        """Two terminal outcomes for same token should raise IntegrityError."""
+        """Two terminal outcomes for same token should raise LandscapeRecordError.
+
+        The DB unique constraint is the enforcement point, but repository writes
+        wrap DB failures so callers get a stable audit-layer exception.
+        """
         from sqlalchemy.exc import IntegrityError
 
         from elspeth.contracts import RowOutcome
+        from elspeth.core.landscape.errors import LandscapeRecordError
 
         run, token = run_with_token
 
@@ -327,12 +332,13 @@ class TestRecordTokenOutcome:
         )
 
         # Second terminal outcome should fail
-        with pytest.raises(IntegrityError):
+        with pytest.raises(LandscapeRecordError) as exc_info:
             factory.data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run.run_id),
                 outcome=RowOutcome.ROUTED,
                 sink_name="errors",
             )
+        assert isinstance(exc_info.value.__cause__, IntegrityError)
 
 
 class TestOutcomeContractValidation:

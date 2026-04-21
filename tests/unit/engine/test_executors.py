@@ -2815,7 +2815,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(SinkRequiredFieldsViolation, match=r"optional in the row's schema contract.*coalesce merge"):
+        with pytest.raises(SinkTransactionalInvariantError, match=r"optional in the row's schema contract.*coalesce merge"):
             executor.write(
                 sink,
                 [token],
@@ -2891,7 +2891,7 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(SinkRequiredFieldsViolation, match=r"optional in the row's schema contract.*coalesce merge"):
+        with pytest.raises(SinkTransactionalInvariantError, match=r"optional in the row's schema contract.*coalesce merge"):
             executor.write(
                 sink,
                 [token],
@@ -5413,7 +5413,7 @@ class TestPassThroughCrossCheck:
                 make_row({"value": "v"}, contract=dropping_contract),
                 success_reason={"action": "passthrough"},
             )
-            token = _make_token(contract=input_contract)
+            token = _make_token({"value": "test", "extra": "e"}, contract=input_contract)
             ctx = make_context()
 
             with pytest.raises(PassThroughContractViolation):

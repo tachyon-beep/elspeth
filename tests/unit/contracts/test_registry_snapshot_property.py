@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
+import pytest
 from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 
@@ -114,6 +115,19 @@ def _site_subsets() -> st.SearchStrategy[frozenset[str]]:
     ).map(frozenset)
 
 
+@pytest.fixture(autouse=True)
+def _restore_registry_after_each_test() -> None:
+    """Restore the declaration registry to its pre-test state.
+
+    These property tests intentionally clear and repopulate the global
+    registry. Restoring the incoming snapshot prevents later tests in the
+    same worker from inheriting an empty or synthetic registry.
+    """
+    snapshot = _snapshot_registry_for_tests()
+    yield
+    _restore_registry_snapshot_for_tests(snapshot)
+
+
 @settings(
     max_examples=50,
     deadline=None,
@@ -202,6 +216,6 @@ def test_register_populates_per_site_map_for_claimed_sites_only(
         else:
             assert contract not in contracts_at_site, f"contract did not claim site {site.value!r} but is in per-site list"
 
-    # Restore — test-only fixture in this file is not autouse, so leave
-    # a clean state behind.
+    # Explicit cleanup isolates Hypothesis examples within this test; the
+    # autouse fixture restores the broader pre-test registry snapshot.
     _clear_registry_for_tests()

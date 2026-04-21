@@ -16,6 +16,7 @@ import pytest
 
 from elspeth.contracts.engine import BufferEntry
 from elspeth.contracts.results import TransformResult
+from elspeth.contracts.schema_contract import PipelineRow, SchemaContract
 from elspeth.contracts.token_usage import TokenUsage
 from elspeth.plugins.transforms.llm.multi_query import QuerySpec
 from elspeth.plugins.transforms.llm.provider import FinishReason, LLMProvider, LLMQueryResult
@@ -74,6 +75,16 @@ def _make_mock_provider(responses: list[dict[str, Any]] | None = None) -> Mock:
     return mock_provider
 
 
+def _identity_contract(contract: SchemaContract) -> SchemaContract:
+    """Mirror the no-op contract alignment used in these unit tests."""
+    return contract
+
+
+def _identity_row(row: PipelineRow) -> PipelineRow:
+    """Mirror the no-op row alignment used in these unit tests."""
+    return row
+
+
 def _make_multi_query_strategy(*, executor: Mock | None = None) -> MultiQueryStrategy:
     """Build a MultiQueryStrategy with two simple query specs."""
     specs = [
@@ -95,6 +106,8 @@ def _make_multi_query_strategy(*, executor: Mock | None = None) -> MultiQueryStr
         temperature=0.7,
         max_tokens=None,
         response_field="llm_response",
+        align_output_contract=_identity_contract,
+        align_output_row_contract=_identity_row,
         executor=executor,
     )
 
@@ -115,6 +128,7 @@ def single_query_result() -> TransformResult:
         temperature=0.7,
         max_tokens=None,
         response_field="llm_response",
+        align_output_contract=_identity_contract,
     )
 
     mock_provider = Mock(spec=LLMProvider)
