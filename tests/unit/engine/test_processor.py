@@ -32,6 +32,7 @@ from elspeth.contracts.enums import (
 )
 from elspeth.contracts.errors import (
     AuditIntegrityError,
+    FrameworkBugError,
     MaxRetriesExceeded,
     OrchestrationInvariantError,
     SourceGuaranteedFieldsViolation,
@@ -799,6 +800,43 @@ class TestProcessRowNoTransforms:
         assert len(outcomes) == 1
         assert outcomes[0].outcome == RowOutcome.FAILED.value
 
+    def test_source_boundary_framework_bug_records_failed_outcome_and_failed_source_state(self) -> None:
+        """Tier-1 framework bugs after token creation must still leave terminal audit evidence."""
+        db, factory = _make_factory()
+        processor = _make_processor(
+            factory,
+            source_plugin=self._source_plugin(declared_guaranteed_fields=frozenset({"customer_id"})),
+        )
+        source_row = _make_source_row({"value": 42})
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+
+        with (
+            patch(
+                "elspeth.engine.processor.run_boundary_checks",
+                side_effect=FrameworkBugError("source row crossed boundary without a schema contract"),
+            ),
+            pytest.raises(FrameworkBugError, match="without a schema contract"),
+        ):
+            processor.process_row(
+                row_index=0,
+                source_row=source_row,
+                transforms=[],
+                ctx=ctx,
+            )
+
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import node_states_table, token_outcomes_table
+
+        with db.connection() as conn:
+            states = conn.execute(select(node_states_table).where(node_states_table.c.run_id == "test-run")).fetchall()
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == "test-run")).fetchall()
+
+        assert len(states) >= 1
+        assert states[0].status == NodeStateStatus.FAILED
+        assert len(outcomes) == 1
+        assert outcomes[0].outcome == RowOutcome.FAILED.value
+
     def test_batch_flush_token_completed_telemetry_failure_does_not_interrupt_failed_audit_recording(self) -> None:
         """Best-effort telemetry must not interrupt per-token FAILED batch-flush audit writes."""
         _db, factory = _make_factory()
@@ -891,6 +929,76 @@ class TestProcessRowNoTransforms:
             RowOutcome.DROPPED_BY_FILTER,
             RowOutcome.DROPPED_BY_FILTER,
         )
+
+    def test_empty_batch_flush_recorder_failure_raises_audit_integrity_error(self) -> None:
+        """Typed recorder failures during zero-row batch terminalization must outrank success."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        transform = _make_mock_transform(node_id="aggregate-1", name="batch-transform")
+        token_a = make_token_info(row_id="row-a", token_id="token-a", data={"value": 1})
+        token_b = make_token_info(row_id="row-b", token_id="token-b", data={"value": 2})
+        fctx = _FlushContext(
+            node_id=NodeID("aggregate-1"),
+            transform=transform,
+            settings=AggregationSettings(
+                name="agg",
+                plugin="batch-plugin",
+                input="source",
+                on_error="discard",
+                trigger={"count": 2},
+            ),
+            buffered_tokens=(token_a, token_b),
+            batch_id="batch-1",
+            error_msg="batch flush dropped rows",
+            expand_parent_token=token_a,
+            triggering_token=token_b,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        with (
+            patch.object(factory.data_flow, "record_token_outcome", side_effect=LandscapeRecordError("audit DB down")),
+            pytest.raises(
+                AuditIntegrityError,
+                match=r"Failed to record DROPPED_BY_FILTER outcome for token 'token-a'",
+            ) as exc_info,
+        ):
+            processor._route_empty_emission_results(fctx)
+
+        assert isinstance(exc_info.value.__cause__, LandscapeRecordError)
+
+    def test_success_empty_recorder_failure_raises_audit_integrity_error(self) -> None:
+        """Typed recorder failures during single-row success_empty terminalization must outrank success."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        transform = _make_mock_transform(node_id="filter-1", name="dropper")
+        token = make_token_info(row_id="row-drop", token_id="token-drop", data={"value": 1})
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+
+        with (
+            patch.object(
+                processor,
+                "_execute_transform_with_retry",
+                return_value=(TransformResult.success_empty(success_reason={"action": "filtered"}), token, None),
+            ),
+            patch.object(factory.data_flow, "record_token_outcome", side_effect=LandscapeRecordError("audit DB down")),
+            pytest.raises(
+                AuditIntegrityError,
+                match=r"Failed to record DROPPED_BY_FILTER outcome for token 'token-drop'",
+            ) as exc_info,
+        ):
+            processor._handle_transform_node(
+                transform=transform,
+                current_token=token,
+                ctx=ctx,
+                node_id=NodeID("filter-1"),
+                child_items=[],
+                coalesce_node_id=None,
+                coalesce_name=None,
+                current_on_success_sink="default",
+            )
+
+        assert isinstance(exc_info.value.__cause__, LandscapeRecordError)
 
     def test_batch_flush_non_recorder_recording_bug_propagates_unmodified(self) -> None:
         """Only recorder failures become AuditIntegrityError on batch-flush auto-fail."""

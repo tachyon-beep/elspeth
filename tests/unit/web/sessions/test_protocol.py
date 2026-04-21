@@ -43,11 +43,11 @@ class TestChatMessageRecord:
             session_id=uuid4(),
             role="assistant",
             content="Hello",
-            tool_calls={"name": "search", "args": {"q": "test"}},
+            tool_calls=[{"id": "call-1", "type": "function", "function": {"name": "search", "arguments": '{"q":"test"}'}}],
             created_at=datetime.now(UTC),
         )
         with pytest.raises(TypeError):
-            record.tool_calls["new_key"] = "value"  # type: ignore[index]
+            record.tool_calls[0]["new_key"] = "value"  # type: ignore[index]
 
     def test_tool_calls_none_is_fine(self) -> None:
         record = ChatMessageRecord(

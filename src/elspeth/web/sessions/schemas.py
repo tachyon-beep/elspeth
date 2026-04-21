@@ -13,9 +13,7 @@ than globally; see ``web/blobs/schemas.py`` for the companion pattern.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from datetime import datetime
-from typing import Any
 from uuid import UUID
 
 import pydantic
@@ -63,6 +61,10 @@ class SendMessageRequest(BaseModel):
     state_id: UUID | None = None
 
 
+type ToolCallObject = dict[str, JsonValue]
+type ToolCallList = list[ToolCallObject]
+
+
 class ChatMessageResponse(_StrictResponse):
     """Response for a single chat message."""
 
@@ -70,7 +72,7 @@ class ChatMessageResponse(_StrictResponse):
     session_id: str
     role: str
     content: str
-    tool_calls: Mapping[str, Any] | None = None
+    tool_calls: ToolCallList | None = None
     created_at: datetime
     composition_state_id: str | None = None
 

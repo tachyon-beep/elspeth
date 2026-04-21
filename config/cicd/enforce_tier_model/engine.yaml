@@ -50,9 +50,9 @@ per_file_rules:
 - pattern: engine/processor.py
   rules:
   - R5
-  reason: Protocol dispatch (TransformProtocol vs GateSettings) and union narrowing; ADR-010 H2 (2026-04-20) added isinstance(child, PassThroughContractViolation) in the aggregate-flush catch so PassThroughContractViolation (pre-DCV hierarchy, inherits PluginContractViolation) still routes through _record_flush_violation when wrapped in an aggregate.
+  reason: Protocol dispatch (TransformProtocol vs GateSettings) and union narrowing; ADR-010 H2 (2026-04-20) added isinstance(child, PassThroughContractViolation) in the aggregate-flush catch so PassThroughContractViolation (pre-DCV hierarchy, inherits PluginContractViolation) still routes through _record_flush_violation when wrapped in an aggregate. The source-boundary failure helper also uses nominal isinstance checks to distinguish audit-evidence exceptions from framework/orchestration failures without fabricating context.
   expires: null
-  max_hits: 8
+  max_hits: 10
 - pattern: engine/tokens.py
   rules:
   - R5
@@ -121,17 +121,17 @@ allow_hits:
   reason: TYPE_CHECKING import of TelemetryManager — RowProcessor emits telemetry events
   safety: No runtime coupling — annotation-only import behind TYPE_CHECKING guard
   expires: null
-- key: engine/processor.py:R4:RowProcessor:_record_source_boundary_failure:fp=aa98293522b1abd7
+- key: engine/processor.py:R4:RowProcessor:_record_source_boundary_failure:fp=83b8970724893970
   owner: architecture
-  reason: Best-effort TokenCompleted telemetry after source-boundary audit completion must not mask the original Tier-1 boundary violation
-  safety: Telemetry runs only after both FAILED audit writes succeed; failures are logged and the original violation continues to propagate
+  reason: Best-effort TokenCompleted telemetry after source-boundary audit completion must not mask the original Tier-1 source-boundary failure
+  safety: Telemetry runs only after both FAILED audit writes succeed; failures are logged and the original failure continues to propagate
   expires: '2026-07-10'
-- key: engine/processor.py:R4:RowProcessor:_record_flush_violation:fp=abaee3231888b927
+- key: engine/processor.py:R4:RowProcessor:_record_flush_violation:fp=fa466d76f5232435
   owner: architecture
   reason: Best-effort TokenCompleted telemetry after batch-flush FAILED audit completion must not mask the original batch-flush violation
   safety: Telemetry runs only after the FAILED outcome is recorded for that token; failures are logged and the original violation continues to propagate
   expires: '2026-07-10'
-- key: engine/processor.py:R4:RowProcessor:_route_empty_emission_results:fp=4a4cea1b9be1abed
+- key: engine/processor.py:R4:RowProcessor:_route_empty_emission_results:fp=e70811d518b4d79a
   owner: architecture
   reason: Best-effort TokenCompleted telemetry after zero-row batch flush must not strand buffered tokens without terminal dropped outcomes
   safety: Telemetry runs only after DROPPED_BY_FILTER is recorded for that token; failures are logged and processing continues to terminalize the remaining buffered tokens

@@ -10,7 +10,7 @@ import asyncio
 import functools
 import shutil
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -241,7 +241,7 @@ class SessionServiceImpl:
         session_id: UUID,
         role: Literal["user", "assistant", "system", "tool"],
         content: str,
-        tool_calls: Mapping[str, Any] | None = None,
+        tool_calls: Sequence[Mapping[str, Any]] | None = None,
         composition_state_id: UUID | None = None,
     ) -> ChatMessageRecord:
         """Add a chat message and update the session's updated_at."""

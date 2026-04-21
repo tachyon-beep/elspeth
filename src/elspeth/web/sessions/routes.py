@@ -75,7 +75,7 @@ def _message_response(msg: ChatMessageRecord) -> ChatMessageResponse:
         session_id=str(msg.session_id),
         role=msg.role,
         content=msg.content,
-        tool_calls=msg.tool_calls,
+        tool_calls=deep_thaw(msg.tool_calls) if msg.tool_calls is not None else None,
         created_at=msg.created_at,
         composition_state_id=str(msg.composition_state_id) if msg.composition_state_id else None,
     )

@@ -163,7 +163,16 @@ class TestMessagePersistence:
     @pytest.mark.asyncio
     async def test_add_message_with_tool_calls(self, service) -> None:
         session = await service.create_session("alice", "Chat", "local")
-        tool_calls_data = {"name": "set_source", "arguments": {"type": "csv"}}
+        tool_calls_data = [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "set_source",
+                    "arguments": '{"type":"csv"}',
+                },
+            }
+        ]
         msg = await service.add_message(
             session.id,
             "assistant",

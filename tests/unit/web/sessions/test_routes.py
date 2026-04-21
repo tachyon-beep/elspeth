@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -957,6 +958,49 @@ class TestMessageRoutes:
         assert messages[0]["role"] == "user"
         assert messages[1]["content"] == "Sure, I can help."
         assert messages[1]["role"] == "assistant"
+
+    def test_get_messages_returns_stored_tool_call_arrays(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = _make_composer_mock()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Chat"})
+        session_id = uuid.UUID(resp.json()["id"])
+
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(
+            service.add_message(
+                session_id,
+                "assistant",
+                "Calling a tool",
+                tool_calls=[
+                    {
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {
+                            "name": "list_sources",
+                            "arguments": '{"kind":"csv"}',
+                        },
+                    }
+                ],
+            )
+        )
+        loop.close()
+
+        msgs_resp = client.get(f"/api/sessions/{session_id}/messages")
+        assert msgs_resp.status_code == 200
+        messages = msgs_resp.json()
+        assert len(messages) == 1
+        assert messages[0]["tool_calls"] == [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "list_sources",
+                    "arguments": '{"kind":"csv"}',
+                },
+            }
+        ]
 
 
 class TestLiteLLMErrorRedaction:

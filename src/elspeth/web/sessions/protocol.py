@@ -74,14 +74,15 @@ class SessionRecord:
 class ChatMessageRecord:
     """Represents a row from the chat_messages table.
 
-    tool_calls may contain a dict -- requires freeze guard when not None.
+    tool_calls uses the stored LiteLLM array format and may contain nested
+    mutable lists/dicts -- requires freeze guard when not None.
     """
 
     id: UUID
     session_id: UUID
     role: Literal["user", "assistant", "system", "tool"]
     content: str
-    tool_calls: Mapping[str, Any] | None
+    tool_calls: Sequence[Mapping[str, Any]] | None
     created_at: datetime
     composition_state_id: UUID | None = None
 
@@ -238,7 +239,7 @@ class SessionServiceProtocol(Protocol):
         session_id: UUID,
         role: Literal["user", "assistant", "system", "tool"],
         content: str,
-        tool_calls: Mapping[str, Any] | None = None,
+        tool_calls: Sequence[Mapping[str, Any]] | None = None,
         composition_state_id: UUID | None = None,
     ) -> ChatMessageRecord: ...
 

@@ -189,9 +189,25 @@ class TestSessionStrictCoercionRejected:
         with pytest.raises(ValidationError):
             ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
 
-    def test_chat_message_response_rejects_non_mapping_tool_calls(self) -> None:
+    def test_chat_message_response_accepts_tool_call_array(self) -> None:
         kwargs = _valid_chat_message_kwargs()
-        kwargs["tool_calls"] = ["set_source"]
+        kwargs["tool_calls"] = [
+            {
+                "id": "call-1",
+                "type": "function",
+                "function": {
+                    "name": "set_source",
+                    "arguments": '{"type":"csv"}',
+                },
+            }
+        ]
+        resp = ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
+        assert resp.tool_calls is not None
+        assert resp.tool_calls[0]["id"] == "call-1"
+
+    def test_chat_message_response_rejects_non_array_tool_calls(self) -> None:
+        kwargs = _valid_chat_message_kwargs()
+        kwargs["tool_calls"] = {"name": "set_source"}
         with pytest.raises(ValidationError):
             ChatMessageResponse(**kwargs)  # type: ignore[arg-type]
 
