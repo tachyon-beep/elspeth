@@ -608,6 +608,19 @@ class TestContractFieldSubsetValidation:
                 }
             )
 
+    def test_guaranteed_fields_optional_declared_field_raises(self) -> None:
+        """Explicit-schema guaranteed_fields must not overstate optional fields as guaranteed."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        with pytest.raises(ValueError, match=r"guaranteed_fields.*optional fields.*score"):
+            SchemaConfig.from_dict(
+                {
+                    "mode": "fixed",
+                    "fields": ["id: str", "score: float?"],
+                    "guaranteed_fields": ["score"],
+                }
+            )
+
 
 class TestSchemaConfigRequiredBoolValidation:
     """Regression tests for P1: SchemaConfig.from_dict coerces non-boolean required values.

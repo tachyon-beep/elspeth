@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move the remaining eligible transform plugins in epic `elspeth-be398f0bcb` into truthful ADR-009/ADR-010 invariant coverage by classifying each transform honestly, adding hermetic probe support, eliminating the current blind-skip surface, and explicitly carving out the batch-LLM blocker that still needs separate contract work.
+**Goal:** Move the remaining eligible transform plugins in epic `elspeth-be398f0bcb` into truthful ADR-009/ADR-010 invariant coverage by classifying each transform honestly, adding hermetic probe support, eliminating the current blind-skip surface at both probe instantiation and probe execution time, explicitly carving out the batch-LLM blocker that still needs separate contract work, and leaving a bounded spike artifact that defines the follow-on batch-LLM tranche.
 
-**Architecture:** Keep the invariant harness generic and dumb: it should ask transforms for probe config, probe rows, and a probe execution path, but it should not learn every transport stack or concurrency model itself. Local shape-changing transforms stay non-pass-through and opt into backward probes that exercise real field-drop paths; success-path enrichers and validators that preserve all input fields become `passes_through_input=True` and provide deterministic forward probes using local doubles or internal no-network execution seams. Batch-aware transforms only join that lane when the probe seam exercises the real runtime path rather than fabricating a synthetic success row.
+**Architecture:** Keep the invariant harness generic and dumb: it should ask transforms for probe config, probe rows, and a probe execution path, but it should not learn every transport stack or concurrency model itself. Local shape-changing transforms stay non-pass-through and opt into backward probes that exercise real field-drop paths; success-path enrichers and validators that preserve all input fields become `passes_through_input=True` and provide deterministic forward probes using local doubles or internal no-network execution seams. Batch-aware transforms only join that lane when the probe seam exercises the real runtime path rather than fabricating a synthetic success row. Scope-level coverage in this tranche must prove more than instantiation: for every in-scope transform it must instantiate the class, shape the canonical probe rows, execute the canonical forward/backward hook successfully, and fail hard if any of those phases regress.
 
 **Tech Stack:** Python 3.12, pytest, Hypothesis, respx/httpx mocks, ELSPETH plugin base classes, BatchTransformMixin, Filigree issue traceability, ADR-009/ADR-010 contract governance.
 
@@ -17,9 +17,12 @@
 This is one plan, not four separate plans, because the work is one subsystem:
 the ADR-009 invariant harness plus the remaining transform families that feed
 it. The cross-cutting prerequisite is real: today the harness calls
-`process()` directly, which means `BatchTransformMixin` transforms such as
-`AzureContentSafety`, `AzurePromptShield`, and `LLMTransform` cannot join
-truthful forward coverage without a transform-owned probe execution seam.
+`process()` directly and still converts execution-time `TypeError` /
+`AttributeError` probe rejection into `pytest.skip()`, which means
+`BatchTransformMixin` transforms such as `AzureContentSafety`,
+`AzurePromptShield`, and `LLMTransform` cannot join truthful forward coverage
+without a transform-owned probe execution seam and a hard-fail coverage check
+that exercises that seam.
 
 ### Repo reality to preserve
 
@@ -30,11 +33,24 @@ truthful forward coverage without a transform-owned probe execution seam.
   `passes_through_input = False`, `probe_config()`, and a custom
   `backward_invariant_probe_rows()` are already implemented in
   `src/elspeth/plugins/transforms/batch_replicate.py`.
+- `tests/invariants/test_pass_through_invariants.py` still skips on
+  execution-time `TypeError` / `AttributeError` during probe invocation today.
+  This plan must delete that skip path rather than only proving probe
+  instantiation.
+- `PluginManager.create_transform()` instantiates transform classes positionally
+  (`plugin_cls(config)`) in the live runtime. The invariant harness must match
+  that contract instead of imposing a stricter `cls(config=...)` keyword-only
+  constructor assumption that some real transforms do not implement.
 - `WebScrapeTransform`, `AzureContentSafety`, `AzurePromptShield`,
   `LLMTransform`, and `RAGRetrievalTransform` preserve input fields on their
   successful emission paths in the current repo. The migration work is not
   “make them preserve fields”; it is “declare that truthfully and prove it
   hermetically.”
+- `BaseAzureSafetyTransform` is only a shared infrastructure base today. The
+  truthful `passes_through_input=True` declaration should live on
+  `AzureContentSafety` and `AzurePromptShield`, not on the base class, so a
+  future Azure safety subclass cannot inherit a pass-through promise by
+  accident.
 - `AzureBatchLLMTransform` and `OpenRouterBatchLLMTransform` are NOT eligible
   for truthful `passes_through_input=True` annotation in this tranche. Their
   fully successful rows preserve input fields, but their mixed-success batch
@@ -42,6 +58,15 @@ truthful forward coverage without a transform-owned probe execution seam.
   guaranteed fields (notably `*_usage` and `*_model`). This plan must not hide
   that mismatch behind fabricated probe hooks that bypass the real batch
   assembly path.
+- `RAGRetrievalConfig` validates `provider` names against the lazy `PROVIDERS`
+  registry. `chroma` is gated behind the optional `chromadb` extra in this repo,
+  so mandatory invariant coverage cannot depend on `provider: "chroma"` being
+  available in the test environment.
+- `LLMTransform.close()` and `RAGRetrievalTransform.close()` unconditionally
+  close any provider left attached to the instance. Probe doubles in this
+  tranche must therefore implement `close()` and restore the original provider
+  state before returning so the transform lifecycle remains safe after probe
+  execution.
 - External-call transforms MUST NOT require live credentials, DNS, vendor
   access, or nondeterministic provider behavior in invariant tests. The probe
   path must stay CI-safe and local-only.
@@ -50,6 +75,9 @@ truthful forward coverage without a transform-owned probe execution seam.
 
 - This tranche intentionally does **not** annotate `AzureBatchLLMTransform` or
   `OpenRouterBatchLLMTransform` as pass-through.
+- This plan does include a bounded spike for those classes, but the spike is
+  design/contract work only. It must not change their runtime behavior or
+  pretend the blocker is already fixed.
 - Do **not** add hermetic hooks that manually construct a compliant success row
   for those classes. That would only prove the hook can fabricate a
   pass-through-shaped row, not that the real `_process_batch()` /
@@ -102,10 +130,14 @@ issue descriptions in a materially new way.
 - Modify: `src/elspeth/plugins/transforms/llm/transform.py`
 - Modify: `tests/unit/plugins/llm/test_transform.py`
 
+### Batch LLM spike files
+
+- Create: `docs/superpowers/specs/2026-04-21-batch-llm-invariant-follow-on-design.md`
+
 ### Retrieval / suite reconciliation files
 
 - Modify: `src/elspeth/plugins/transforms/rag/transform.py`
-- Modify: `tests/integration/plugins/transforms/test_rag_pipeline.py`
+- Modify: `tests/unit/plugins/transforms/rag/test_transform.py`
 - Modify: `tests/integration/plugins/transforms/test_output_schema_contract.py`
 - Modify: `tests/unit/core/test_dag_schema_propagation.py`
 - Modify: `tests/unit/web/composer/test_state.py`
@@ -214,9 +246,13 @@ def test_custom_forward_execution_can_bypass_default_process_path() -> None:
 Run: `uv run pytest tests/unit/plugins/test_invariant_probe_execution.py -q`
 Expected: FAIL with `AttributeError: '_SingleRowEcho' object has no attribute 'execute_forward_invariant_probe'`.
 
-- [ ] **Step 3: Add the execution hook to `BaseTransform` and switch the harness to use it**
+- [ ] **Step 3: Add the execution hook to `BaseTransform`, switch the harness to use it, and delete execution-time skip behavior**
 
-Edit `src/elspeth/plugins/infrastructure/base.py` and add two default execution hooks immediately after `backward_invariant_probe_rows()`:
+Edit `src/elspeth/plugins/infrastructure/base.py` and add two default execution hooks immediately after `backward_invariant_probe_rows()`. While touching the same area, update the `probe_config()` docstring so it documents the real constructor contract: the returned dict is passed positionally to `cls(...)`, matching `PluginManager.create_transform()`, not via `cls(config=...)`.
+
+Add a focused constructor-parity regression to `tests/unit/plugins/test_invariant_probe_execution.py` using a probe-only transform whose `__init__` accepts the config dict positionally but does not expose a `config=` keyword. The test should import `_probe_instantiate()` from `tests/invariants/test_pass_through_invariants.py` and prove the helper instantiates that class successfully. This locks in that invariant probing follows the live runtime contract instead of inventing a stricter keyword-only one.
+
+Then add the default execution hooks:
 
 ```python
     def execute_forward_invariant_probe(
@@ -258,7 +294,13 @@ Edit `src/elspeth/plugins/infrastructure/base.py` and add two default execution 
         return self.execute_forward_invariant_probe(probe_rows, ctx)
 ```
 
-Then edit `tests/invariants/test_pass_through_invariants.py` so both tests call the execution hooks instead of calling `process()` directly:
+Then edit `tests/invariants/test_pass_through_invariants.py` so `_probe_instantiate()` also matches the runtime constructor path:
+
+```python
+        return cls(config)
+```
+
+and so both tests call the execution hooks instead of calling `process()` directly:
 
 ```python
         result = transform.execute_forward_invariant_probe(
@@ -275,6 +317,11 @@ and:
             _probe_context(transform),
         )
 ```
+
+Delete the current `except (TypeError, AttributeError): pytest.skip(...)` block
+entirely for forward probes. A transform that rejects its canonical probe
+execution path is still a blind spot and must fail the suite, not consume skip
+budget.
 
 - [ ] **Step 4: Update the plugin protocol documentation**
 
@@ -294,8 +341,8 @@ harness itself.
 
 - [ ] **Step 5: Run the focused tests**
 
-Run: `uv run pytest tests/unit/plugins/test_invariant_probe_execution.py tests/invariants/test_pass_through_invariants.py -q -k "PassThrough or BatchReplicate or invariant_probe_execution"`
-Expected: PASS. Existing `PassThrough` and `BatchReplicate` behavior should remain unchanged.
+Run: `uv run pytest tests/unit/plugins/test_invariant_probe_execution.py tests/invariants/test_pass_through_invariants.py -q -k "PassThrough or BatchReplicate or invariant_probe_execution or positional"`
+Expected: PASS. Existing `PassThrough` and `BatchReplicate` behavior should remain unchanged, and the harness should now instantiate probeable transforms with the same positional constructor contract the runtime uses.
 
 - [ ] **Step 6: Commit**
 
@@ -556,22 +603,31 @@ class WebScrapeTransform(BaseTransform):
             return _InvariantResponse(), safe_request.original_url, _InvariantCall()
 
         original_fetch = self._fetch_url
-        self._payload_store = _InvariantPayloadStore()
+        had_payload_store = hasattr(self, "_payload_store")
+        original_payload_store = getattr(self, "_payload_store", None)
         try:
+            self._payload_store = _InvariantPayloadStore()
             self._fetch_url = _fake_fetch_url  # type: ignore[assignment]
             return super().execute_forward_invariant_probe(probe_rows, ctx)
         finally:
             self._fetch_url = original_fetch  # type: ignore[assignment]
+            if had_payload_store:
+                self._payload_store = original_payload_store
+            else:
+                delattr(self, "_payload_store")
 ```
 
 Also add a focused unit test in `tests/unit/plugins/transforms/test_web_scrape.py`
 that asserts `passes_through_input is True` and the forward probe returns a
 successful row containing the original `baseline` field plus the scrape fields.
+The probe test should also assert that any injected `_payload_store` state is
+restored after execution so the hermetic hook does not leave mutated instance
+state behind for later lifecycle operations.
 
-- [ ] **Step 4: Run the web slice, including the output-schema contract test**
+- [ ] **Step 4: Run the web slice, including the invariant harness and the output-schema contract test**
 
-Run: `uv run pytest tests/unit/plugins/transforms/test_web_scrape.py tests/unit/plugins/transforms/test_forward_invariant_probes.py tests/integration/plugins/transforms/test_output_schema_contract.py -q -k "WebScrapeTransform or web_scrape"`
-Expected: PASS. `WebScrapeTransform` should prove successful pass-through without making a real HTTP call.
+Run: `uv run pytest tests/unit/plugins/transforms/test_web_scrape.py tests/unit/plugins/transforms/test_forward_invariant_probes.py tests/invariants/test_pass_through_invariants.py tests/integration/plugins/transforms/test_output_schema_contract.py -q -k "WebScrapeTransform or web_scrape"`
+Expected: PASS. `WebScrapeTransform` should prove successful pass-through without making a real HTTP call, and the shared invariant harness should validate that immediately rather than waiting for Task 6 to expose constructor/execution regressions.
 
 - [ ] **Step 5: Commit**
 
@@ -619,14 +675,13 @@ from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 Run: `uv run pytest tests/unit/plugins/transforms/test_forward_invariant_probes.py -q -k "AzureContentSafety or AzurePromptShield"`
 Expected: FAIL because the classes are not yet annotated and cannot execute hermetically.
 
-- [ ] **Step 3: Put the shared pass-through declaration and probe execution hook in the Azure base class**
+- [ ] **Step 3: Put the shared probe execution hook in the Azure base class, but keep the pass-through truth declaration on the concrete classes**
 
 Edit `src/elspeth/plugins/transforms/azure/base.py`:
 
 ```python
 class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
     determinism = Determinism.EXTERNAL_CALL
-    passes_through_input = True
 
     def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
         field_name = self._fields[0] if isinstance(self._fields, list) else self._fields
@@ -689,6 +744,8 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
 Edit `src/elspeth/plugins/transforms/azure/content_safety.py`:
 
 ```python
+    passes_through_input = True
+
     @classmethod
     def probe_config(cls) -> dict[str, Any]:
         return {
@@ -713,6 +770,8 @@ Edit `src/elspeth/plugins/transforms/azure/content_safety.py`:
 Edit `src/elspeth/plugins/transforms/azure/prompt_shield.py`:
 
 ```python
+    passes_through_input = True
+
     @classmethod
     def probe_config(cls) -> dict[str, Any]:
         return {
@@ -729,9 +788,12 @@ Edit `src/elspeth/plugins/transforms/azure/prompt_shield.py`:
         }
 ```
 
-Also add focused tests in each existing family file asserting that
-`execute_forward_invariant_probe()` returns a success result preserving the
-original row fields.
+Also add focused tests in each existing family file asserting that:
+
+- the concrete class carries `passes_through_input is True`,
+- `BaseAzureSafetyTransform` remains unannotated / default-false, and
+- `execute_forward_invariant_probe()` returns a success result preserving the
+  original row fields.
 
 - [ ] **Step 5: Run the Azure slice**
 
@@ -781,7 +843,7 @@ from elspeth.plugins.transforms.llm.transform import LLMTransform
 Run: `uv run pytest tests/unit/plugins/transforms/test_forward_invariant_probes.py -q -k LLMTransform`
 Expected: FAIL because `LLMTransform` is not yet annotated/probeable.
 
-- [ ] **Step 3: Annotate `LLMTransform` and use a fake provider through `_process_row()`**
+- [ ] **Step 3: Annotate `LLMTransform` and use a lifecycle-safe fake provider through `_process_row()`**
 
 Edit `src/elspeth/plugins/transforms/llm/transform.py`:
 
@@ -824,8 +886,17 @@ class LLMTransform(BaseTransform, BatchTransformMixin):
                     finish_reason=FinishReason.STOP,
                 )
 
-        self._provider = _InvariantProvider()
-        return self._process_row(probe_rows[0], ctx)
+            def close(self) -> None:
+                return None
+
+        original_provider = self._provider
+        probe_provider = _InvariantProvider()
+        try:
+            self._provider = probe_provider
+            return self._process_row(probe_rows[0], ctx)
+        finally:
+            self._provider = original_provider
+            probe_provider.close()
 ```
 
 In `tests/unit/plugins/llm/test_transform.py`, add a focused multi-query
@@ -853,13 +924,17 @@ def test_multi_query_success_preserves_original_input_fields() -> None:
     assert result.row["text"] == "hello"
 ```
 
-- [ ] **Step 4: Record the batch-LLM blocker explicitly in this plan and keep those classes out of the pass-through lane**
+Also add a focused regression that the forward invariant probe restores any
+pre-existing provider state and that calling `close()` after probe execution
+does not raise.
+
+- [ ] **Step 4: Keep the batch-LLM classes out of the pass-through lane and hand the blocker to the dedicated spike**
 
 Do **not** modify `src/elspeth/plugins/transforms/llm/azure_batch.py` or
 `src/elspeth/plugins/transforms/llm/openrouter_batch.py` in this tranche.
 
-Capture this follow-on requirement in the implementation notes / issue
-commentary associated with this work:
+Carry these requirements forward into the dedicated batch-LLM spike task in
+this plan:
 
 - The current mixed-success batch path in both classes emits partial-error rows
   that omit some currently declared guaranteed fields (`*_usage`,
@@ -890,20 +965,21 @@ git commit -m "feat(invariants): migrate llm transform into truthful pass-throug
 
 **Files:**
 - Modify: `src/elspeth/plugins/transforms/rag/transform.py`
-- Modify: `tests/integration/plugins/transforms/test_rag_pipeline.py`
+- Modify: `tests/unit/plugins/transforms/rag/test_transform.py`
 - Modify: `tests/integration/plugins/transforms/test_output_schema_contract.py`
 - Modify: `tests/unit/core/test_dag_schema_propagation.py`
 - Modify: `tests/unit/web/composer/test_state.py`
 - Create: `tests/invariants/test_transform_probe_coverage.py`
 - Modify: `tests/unit/plugins/transforms/test_forward_invariant_probes.py`
 
-- [ ] **Step 1: Add the scope-level coverage test and a failing RAG forward-smoke case**
+- [ ] **Step 1: Add scope-level coverage that proves successful canonical probe execution, plus a failing RAG forward-smoke case**
 
 Create `tests/invariants/test_transform_probe_coverage.py`:
 
 ```python
 from __future__ import annotations
 
+from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 from elspeth.plugins.transforms.batch_stats import BatchStats
@@ -912,12 +988,10 @@ from elspeth.plugins.transforms.json_explode import JSONExplode
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
-from tests.invariants.test_pass_through_invariants import _probe_instantiate
+from elspeth.testing import make_pipeline_row
+from tests.invariants.test_pass_through_invariants import _probe_context, _probe_instantiate
 
-IN_SCOPE = (
-    BatchStats,
-    FieldMapper,
-    JSONExplode,
+FORWARD_SCOPE = (
     WebScrapeTransform,
     AzureContentSafety,
     AzurePromptShield,
@@ -925,15 +999,48 @@ IN_SCOPE = (
     RAGRetrievalTransform,
 )
 
+BACKWARD_SCOPE = (
+    BatchStats,
+    FieldMapper,
+    JSONExplode,
+)
 
-def test_follow_on_epic_scope_has_no_blind_probe_skips() -> None:
-    failures: list[str] = []
-    for cls in IN_SCOPE:
-        try:
-            _probe_instantiate(cls)
-        except Exception as exc:
-            failures.append(f"{cls.__name__}: {exc}")
-    assert not failures, f"In-scope transforms still missing truthful probe support: {failures!r}"
+
+def _assert_successful_probe_execution(
+    cls: type[BaseTransform],
+    *,
+    direction: str,
+) -> None:
+    transform = _probe_instantiate(cls)
+    base_row = make_pipeline_row({"baseline": "kept"})
+
+    if direction == "forward":
+        probe_rows = transform.forward_invariant_probe_rows(base_row)
+        result = transform.execute_forward_invariant_probe(
+            probe_rows,
+            _probe_context(transform),
+        )
+    else:
+        probe_rows = transform.backward_invariant_probe_rows(base_row)
+        result = transform.execute_backward_invariant_probe(
+            probe_rows,
+            _probe_context(transform),
+        )
+
+    assert result.status == "success", (
+        f"{cls.__name__} canonical {direction} invariant probe must execute "
+        f"successfully; got status={result.status!r}."
+    )
+
+
+def test_in_scope_forward_probes_execute_successfully_without_blind_skips() -> None:
+    for cls in FORWARD_SCOPE:
+        _assert_successful_probe_execution(cls, direction="forward")
+
+
+def test_in_scope_backward_probes_execute_successfully_without_blind_skips() -> None:
+    for cls in BACKWARD_SCOPE:
+        _assert_successful_probe_execution(cls, direction="backward")
 ```
 
 Extend `tests/unit/plugins/transforms/test_forward_invariant_probes.py`:
@@ -959,10 +1066,12 @@ from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 
 - [ ] **Step 2: Run the RAG/scope tests to verify they fail**
 
-Run: `uv run pytest tests/unit/plugins/transforms/test_forward_invariant_probes.py tests/invariants/test_transform_probe_coverage.py -q -k "RAGRetrievalTransform or follow_on_epic_scope"`
-Expected: FAIL because `RAGRetrievalTransform` is not yet annotated/probeable.
+Run: `uv run pytest tests/unit/plugins/transforms/test_forward_invariant_probes.py tests/invariants/test_transform_probe_coverage.py -q -k "RAGRetrievalTransform or in_scope"`
+Expected: FAIL because `RAGRetrievalTransform` is not yet annotated/probeable
+and the new scope-level test now fails on canonical probe execution regressions,
+not just instantiation gaps.
 
-- [ ] **Step 3: Annotate `RAGRetrievalTransform` and give it a fake-provider forward execution path**
+- [ ] **Step 3: Annotate `RAGRetrievalTransform` and give it a provider-agnostic, lifecycle-safe forward execution path**
 
 Edit `src/elspeth/plugins/transforms/rag/transform.py`:
 
@@ -976,8 +1085,15 @@ class RAGRetrievalTransform(BaseTransform):
         return {
             "output_prefix": "policy",
             "query_field": "rag_probe_query",
-            "provider": "chroma",
-            "provider_config": {"collection": "invariant-probe", "mode": "ephemeral"},
+            # Use a provider name that validates on the base install. The
+            # invariant hook injects a local double and never constructs the
+            # real provider.
+            "provider": "azure_search",
+            "provider_config": {
+                "endpoint": "https://invariant.example.search.windows.net",
+                "index": "invariant-probe",
+                "api_key": "probe-key",
+            },
             "schema": {"mode": "observed"},
         }
 
@@ -997,7 +1113,7 @@ class RAGRetrievalTransform(BaseTransform):
     ) -> TransformResult:
         class _InvariantProvider:
             last_skipped_count = 0
-            last_skipped_reasons: list[str] = []
+            last_skipped_reasons: list[dict[str, Any]] = []
 
             def search(self, *args: Any, **kwargs: Any):
                 from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
@@ -1011,14 +1127,30 @@ class RAGRetrievalTransform(BaseTransform):
                     )
                 ]
 
-        self._provider = _InvariantProvider()
-        self._on_start_called = True
-        return super().execute_forward_invariant_probe(probe_rows, ctx)
+            def close(self) -> None:
+                return None
+
+        original_provider = self._provider
+        original_on_start_called = self._on_start_called
+        probe_provider = _InvariantProvider()
+        try:
+            self._provider = probe_provider
+            self._on_start_called = True
+            return super().execute_forward_invariant_probe(probe_rows, ctx)
+        finally:
+            self._provider = original_provider
+            self._on_start_called = original_on_start_called
+            probe_provider.close()
 ```
 
-Add a focused assertion in `tests/integration/plugins/transforms/test_rag_pipeline.py`
-that `passes_through_input` is true and the probe path preserves the original
-query field.
+Add focused assertions in `tests/unit/plugins/transforms/rag/test_transform.py`
+that `passes_through_input` is true, the probe path preserves the original query
+field, and calling `close()` after probe execution remains safe. Keep these in
+the unit suite that already owns `RAGRetrievalTransform` lifecycle behavior
+rather than moving probe/lifecycle coverage into
+`tests/integration/plugins/transforms/test_rag_pipeline.py`. Do not rely on
+`pytest.importorskip("chromadb")` or any optional provider extra in the
+forward-probe path; this coverage is mandatory for the base install.
 
 - [ ] **Step 4: Run the full tranche verification, including composer/runtime agreement checks**
 
@@ -1029,10 +1161,10 @@ uv run pytest \
   tests/unit/plugins/test_invariant_probe_execution.py \
   tests/unit/plugins/transforms/test_forward_invariant_probes.py \
   tests/unit/plugins/transforms/test_backward_invariant_probes.py \
+  tests/unit/plugins/transforms/rag/test_transform.py \
   tests/invariants/test_pass_through_invariants.py \
   tests/invariants/test_transform_probe_coverage.py \
   tests/integration/plugins/transforms/test_output_schema_contract.py \
-  tests/integration/plugins/transforms/test_rag_pipeline.py \
   tests/unit/core/test_dag_schema_propagation.py \
   tests/unit/web/composer/test_state.py -q
 ```
@@ -1062,7 +1194,8 @@ uv run ruff check \
   tests/invariants/test_transform_probe_coverage.py \
   tests/unit/plugins/test_invariant_probe_execution.py \
   tests/unit/plugins/transforms/test_forward_invariant_probes.py \
-  tests/unit/plugins/transforms/test_backward_invariant_probes.py
+  tests/unit/plugins/transforms/test_backward_invariant_probes.py \
+  tests/unit/plugins/transforms/rag/test_transform.py
 ```
 
 Then commit:
@@ -1088,11 +1221,86 @@ git add src/elspeth/plugins/infrastructure/base.py \
   tests/unit/plugins/transforms/azure/test_content_safety.py \
   tests/unit/plugins/transforms/azure/test_prompt_shield.py \
   tests/unit/plugins/llm/test_transform.py \
+  tests/unit/plugins/transforms/rag/test_transform.py \
   tests/integration/plugins/transforms/test_output_schema_contract.py \
-  tests/integration/plugins/transforms/test_rag_pipeline.py \
   tests/unit/core/test_dag_schema_propagation.py \
   tests/unit/web/composer/test_state.py
 git commit -m "feat(invariants): close remaining transform migration blind spots"
+```
+
+### Task 7: Spike the batch-LLM follow-on without changing runtime behavior
+
+**Files:**
+- Create: `docs/superpowers/specs/2026-04-21-batch-llm-invariant-follow-on-design.md`
+
+- [ ] **Step 1: Re-read the batch-LLM contract surfaces and capture the exact mismatch**
+
+Inspect:
+
+- `src/elspeth/plugins/transforms/llm/__init__.py`
+- `src/elspeth/plugins/transforms/llm/azure_batch.py`
+- `src/elspeth/plugins/transforms/llm/openrouter_batch.py`
+- `tests/unit/plugins/llm/test_azure_batch.py`
+- `tests/unit/plugins/llm/test_openrouter_batch.py`
+
+Write a short matrix in the spike note covering:
+
+- what `get_llm_guaranteed_fields()` currently declares,
+- what each batch class advertises via `declared_output_fields` /
+  `_output_schema_config`,
+- what the fully successful row path emits,
+- what mixed-success / partial-error rows emit today, and
+- which fields are currently missing from error-bearing rows.
+
+- [ ] **Step 2: Evaluate fix directions against contract truthfulness and engine behavior**
+
+In the spike note, evaluate at least these options:
+
+- keep the current guaranteed-field contract and populate `*_usage` /
+  `*_model` on error-bearing rows with truthful sentinel values such as `None`,
+- narrow the guaranteed-field contract for batch LLM outputs and push usage /
+  model into a non-guaranteed lane, or
+- redesign the batch transform result contract so mixed-success rows are not
+  represented as a successful multi-row pass-through output.
+
+For each option, spell out the trade-offs for:
+
+- downstream DAG/schema validation,
+- composer/output-schema previews,
+- audit semantics and row-level explainability,
+- test-path integrity, and
+- migration risk for existing pipelines.
+
+- [ ] **Step 3: Define the minimum truthful no-network probe seam for each batch implementation**
+
+The spike must describe a probe seam that exercises the real runtime assembly
+path rather than fabricating output rows:
+
+- For `OpenRouterBatchLLMTransform`, the seam must still drive
+  `_process_batch()` and the per-row result assembly path, even if HTTP is
+  replaced by a local double.
+- For `AzureBatchLLMTransform`, the seam must still exercise the checkpoint /
+  resume / result-assembly behavior using local doubles or synthetic downloaded
+  batch payloads, not a helper that directly returns a prebuilt success row.
+
+The spike note must name the likely test entry points and what would need to be
+stubbed or injected to keep the probe deterministic and offline.
+
+- [ ] **Step 4: End the spike with a concrete recommendation and a follow-on implementation checklist**
+
+The spike note must finish with:
+
+- a recommended contract direction,
+- the smallest set of files/tests expected to change in the future tranche,
+- the characterization tests that should be written first, and
+- explicit non-go conditions that should block pass-through annotation if the
+  real runtime path still disagrees with the declared contract.
+
+- [ ] **Step 5: Commit the spike artifact**
+
+```bash
+git add docs/superpowers/specs/2026-04-21-batch-llm-invariant-follow-on-design.md
+git commit -m "docs(invariants): spike batch llm follow-on design"
 ```
 
 ---
@@ -1101,8 +1309,12 @@ git commit -m "feat(invariants): close remaining transform migration blind spots
 
 - [ ] `BatchStats`, `FieldMapper`, and `JSONExplode` remain `passes_through_input = False` and are no longer skipped for missing probe opt-in.
 - [ ] `WebScrapeTransform`, `AzureContentSafety`, `AzurePromptShield`, `LLMTransform`, and `RAGRetrievalTransform` are truthfully annotated `passes_through_input = True`.
+- [ ] The Azure pass-through declaration lives on `AzureContentSafety` and `AzurePromptShield`, not on `BaseAzureSafetyTransform`.
 - [ ] `AzureBatchLLMTransform` and `OpenRouterBatchLLMTransform` remain explicitly deferred until their mixed-success output contract and a real no-network batch probe seam are designed.
-- [ ] The invariant harness no longer hardcodes `process()` as the only probe execution path.
+- [ ] A spike note exists at `docs/superpowers/specs/2026-04-21-batch-llm-invariant-follow-on-design.md` capturing the batch-LLM contract mismatch, a recommended fix direction, and the minimum truthful no-network probe seam.
+- [ ] The invariant harness no longer hardcodes `process()` as the only probe execution path and no longer converts execution-time probe rejection into `pytest.skip()`.
+- [ ] Probe doubles for `WebScrapeTransform`, `LLMTransform`, and `RAGRetrievalTransform` restore any replaced collaborators or instance state before returning and leave subsequent lifecycle calls safe after probe execution.
+- [ ] `RAGRetrievalTransform` probe configuration validates against a provider entry available in the base install; no invariant coverage depends on optional `chromadb` extras.
 - [ ] No in-scope transform requires live credentials, DNS, or network access to satisfy invariant coverage.
-- [ ] The scope-level coverage test makes blind-skip regressions a hard failure for the exact transforms tracked by epic `elspeth-be398f0bcb`.
+- [ ] The scope-level coverage tests instantiate, shape, and successfully execute the canonical forward/backward probes for the exact transforms tracked by epic `elspeth-be398f0bcb`, making both instantiation regressions and execution-time blind skips hard failures.
 - [ ] Output-schema and composer-preview agreement tests still pass after the new annotations.

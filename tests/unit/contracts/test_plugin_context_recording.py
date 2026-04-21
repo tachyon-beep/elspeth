@@ -97,6 +97,48 @@ class TestRecordValidationErrorHappyPath:
         )
         assert token.destination == "error_sink"
 
+    def test_quarantine_destinations_queue_error_for_row_linkage(self) -> None:
+        """Non-discard validation errors should be available for quarantine row linking."""
+        ctx = make_source_context()
+        row = {"name": "test"}
+
+        token = ctx.record_validation_error(
+            row=row,
+            error="missing required field",
+            schema_mode="fixed",
+            destination="quarantine_sink",
+        )
+
+        assert ctx.pop_pending_quarantine_validation_error_id(row) == token.error_id
+
+    def test_discard_validation_errors_are_not_queued_for_row_linkage(self) -> None:
+        """Discarded rows should not leave stale pending linkage entries behind."""
+        ctx = make_source_context()
+        row = {"name": "discard-me"}
+
+        ctx.record_validation_error(
+            row=row,
+            error="bad data",
+            schema_mode="fixed",
+            destination="discard",
+        )
+
+        assert ctx.pop_pending_quarantine_validation_error_id(row) is None
+
+    def test_noncanonical_quarantine_linkage_uses_repr_fallback(self) -> None:
+        """Pending linkage must still match non-canonical raw rows like NaN payloads."""
+        ctx = make_source_context()
+        row = {"value": float("nan")}
+
+        token = ctx.record_validation_error(
+            row=row,
+            error="Row contains NaN",
+            schema_mode="observed",
+            destination="quarantine_sink",
+        )
+
+        assert ctx.pop_pending_quarantine_validation_error_id({"value": float("nan")}) == token.error_id
+
 
 class TestRecordTransformErrorGuards:
     """record_transform_error() must crash on missing landscape."""

@@ -255,6 +255,26 @@ class TestExecutionErrorPostInit:
         error = ExecutionError(exception="boom", exception_type="RuntimeError")
         assert error.exception == "boom"
 
+    def test_rejects_non_mapping_context(self) -> None:
+        from elspeth.contracts import ExecutionError
+
+        with pytest.raises(TypeError, match="context must be a mapping, got list"):
+            ExecutionError(
+                exception="boom",
+                exception_type="RuntimeError",
+                context=["bad"],  # type: ignore[arg-type]
+            )
+
+    def test_rejects_context_with_non_string_keys(self) -> None:
+        from elspeth.contracts import ExecutionError
+
+        with pytest.raises(TypeError, match="context keys must be strings"):
+            ExecutionError(
+                exception="boom",
+                exception_type="RuntimeError",
+                context={1: "bad"},  # type: ignore[arg-type]
+            )
+
 
 class TestCoalesceFailureReasonPostInit:
     """Tests for CoalesceFailureReason __post_init__ validation."""

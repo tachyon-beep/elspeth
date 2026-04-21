@@ -11,7 +11,9 @@ from datetime import UTC
 from sqlalchemy import select
 
 from elspeth.contracts.enums import NodeType
+from elspeth.contracts.results import SourceRow
 from elspeth.contracts.schema import SchemaConfig
+from elspeth.core.canonical import sanitize_for_canonical
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.lineage import explain
@@ -19,6 +21,7 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
+from elspeth.engine.tokens import TokenManager
 from tests.fixtures.factories import make_context
 
 # Shared schema config for tests
@@ -354,6 +357,115 @@ class TestErrorEventExplainQuery:
         assert len(lineage.validation_errors) == 1
         assert lineage.validation_errors[0].error_id == error_token.error_id
         assert "Expected int" in lineage.validation_errors[0].error
+
+    def test_explain_includes_validation_errors_for_quarantined_primitive_rows(self, landscape_db: LandscapeDB) -> None:
+        """Quarantined primitive rows must retain their validation error in lineage."""
+        factory = RecorderFactory(landscape_db)
+        run = factory.run_lifecycle.begin_run(
+            config={"test": True},
+            canonical_version="1.0",
+        )
+        run_id = run.run_id
+
+        source_node = factory.data_flow.register_node(
+            run_id=run_id,
+            plugin_name="json_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={"path": "data.jsonl"},
+            sequence=0,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        ctx = make_context(
+            run_id=run_id,
+            landscape=factory.plugin_audit_writer(),
+            node_id=source_node.node_id,
+        )
+        error_token = ctx.record_validation_error(
+            row=42,
+            error="Expected object row, got int",
+            schema_mode="parse",
+            destination="quarantine_sink",
+        )
+
+        token_manager = TokenManager(factory.data_flow, step_resolver=lambda _node_id: 0)
+        quarantine_token = token_manager.create_quarantine_token(
+            run_id=run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            source_row=SourceRow.quarantined(
+                row=42,
+                error="Expected object row, got int",
+                destination="quarantine_sink",
+            ),
+            validation_error_id=error_token.error_id,
+        )
+
+        lineage = explain(
+            query=factory.query,
+            data_flow=factory.data_flow,
+            run_id=run_id,
+            token_id=quarantine_token.token_id,
+        )
+
+        assert lineage is not None
+        assert [record.error_id for record in lineage.validation_errors] == [error_token.error_id]
+
+    def test_explain_includes_validation_errors_for_sanitized_quarantine_rows(self, landscape_db: LandscapeDB) -> None:
+        """Sanitized quarantine payloads must still resolve their original validation error."""
+        factory = RecorderFactory(landscape_db)
+        run = factory.run_lifecycle.begin_run(
+            config={"test": True},
+            canonical_version="1.0",
+        )
+        run_id = run.run_id
+
+        source_node = factory.data_flow.register_node(
+            run_id=run_id,
+            plugin_name="json_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={"path": "data.jsonl"},
+            sequence=0,
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        raw_row = {"value": float("nan")}
+        ctx = make_context(
+            run_id=run_id,
+            landscape=factory.plugin_audit_writer(),
+            node_id=source_node.node_id,
+        )
+        error_token = ctx.record_validation_error(
+            row=raw_row,
+            error="Row contains NaN",
+            schema_mode="observed",
+            destination="quarantine_sink",
+        )
+
+        token_manager = TokenManager(factory.data_flow, step_resolver=lambda _node_id: 0)
+        quarantine_token = token_manager.create_quarantine_token(
+            run_id=run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            source_row=SourceRow.quarantined(
+                row=sanitize_for_canonical(raw_row),
+                error="Row contains NaN",
+                destination="quarantine_sink",
+            ),
+            validation_error_id=error_token.error_id,
+        )
+
+        lineage = explain(
+            query=factory.query,
+            data_flow=factory.data_flow,
+            run_id=run_id,
+            token_id=quarantine_token.token_id,
+        )
+
+        assert lineage is not None
+        assert [record.error_id for record in lineage.validation_errors] == [error_token.error_id]
 
     def test_explain_includes_transform_errors(self, landscape_db: LandscapeDB) -> None:
         """explain() should return transform errors for queried token."""

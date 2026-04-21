@@ -9,11 +9,22 @@ Layer: L3 (application). Imports from L3 (web.composer.state).
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import os
 import re
+import tempfile
+import threading
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+if importlib.util.find_spec("fcntl") is None:  # pragma: no cover - Windows fallback
+    fcntl_module: Any = None
+else:
+    import fcntl as fcntl_module
 
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 
@@ -24,6 +35,12 @@ from elspeth.web.composer.state import CompositionState, PipelineMetadata
 # rather than coerce (silent coercion would re-point the agent's intended
 # session to a different file, a meaning-changing operation).
 _SESSION_ID_RE = re.compile(r"^[a-f0-9]{12}$")
+
+# Process-local fast path for thread-level serialization. See
+# ``SessionManager._locked_session`` for the cross-process lock that pairs
+# with this registry when ``fcntl`` is available.
+_SESSION_LOCKS: dict[str, threading.Lock] = {}
+_SESSION_LOCKS_REGISTRY_MUTEX = threading.Lock()
 
 
 class InvalidSessionIdError(ValueError):
@@ -42,6 +59,27 @@ class InvalidSessionIdError(ValueError):
         self.session_id = session_id
 
 
+class CorruptSessionFileError(ValueError):
+    """Raised when a canonical session file cannot be parsed as a session."""
+
+    def __init__(self, session_id: str, reason: str) -> None:
+        super().__init__(f"Corrupt session file for {session_id}: {reason}")
+        self.session_id = session_id
+        self.reason = reason
+
+
+class StaleSessionVersionError(ValueError):
+    """Raised when a save would overwrite a newer on-disk session version."""
+
+    def __init__(self, session_id: str, *, incoming_version: int, on_disk_version: int) -> None:
+        super().__init__(
+            f"Refusing stale save for {session_id}: incoming version {incoming_version} is older than on-disk version {on_disk_version}."
+        )
+        self.session_id = session_id
+        self.incoming_version = incoming_version
+        self.on_disk_version = on_disk_version
+
+
 def _validate_session_id(session_id: str) -> None:
     """Enforce the session_id shape at the filesystem boundary.
 
@@ -57,6 +95,16 @@ def _validate_session_id(session_id: str) -> None:
     """
     if not _SESSION_ID_RE.fullmatch(session_id):
         raise InvalidSessionIdError(session_id)
+
+
+def _session_lock(session_id: str) -> threading.Lock:
+    """Return the process-local mutex guarding one canonical session ID."""
+    if session_id in _SESSION_LOCKS:
+        return _SESSION_LOCKS[session_id]
+    with _SESSION_LOCKS_REGISTRY_MUTEX:
+        if session_id not in _SESSION_LOCKS:
+            _SESSION_LOCKS[session_id] = threading.Lock()
+        return _SESSION_LOCKS[session_id]
 
 
 class SessionNotFoundError(Exception):
@@ -95,7 +143,17 @@ class SessionManager:
         self._dir.mkdir(parents=True, exist_ok=True)
         path = self._session_path(session_id)
         data = state.to_dict()
-        path.write_text(json.dumps(data, indent=2, sort_keys=True))
+        serialized = json.dumps(data, indent=2, sort_keys=True)
+        with self._locked_session(session_id):
+            if path.exists():
+                on_disk = self._read_session_state(path, session_id)
+                if state.version < on_disk.version:
+                    raise StaleSessionVersionError(
+                        session_id,
+                        incoming_version=state.version,
+                        on_disk_version=on_disk.version,
+                    )
+            self._atomic_write(path, serialized)
         return path
 
     def load(self, session_id: str) -> CompositionState:
@@ -103,15 +161,18 @@ class SessionManager:
         path = self._session_path(session_id)
         if not path.exists():
             raise SessionNotFoundError(session_id)
-        data = json.loads(path.read_text())
-        return CompositionState.from_dict(data)
+        try:
+            return self._read_session_state(path, session_id)
+        except FileNotFoundError as exc:
+            raise SessionNotFoundError(session_id) from exc
 
     def delete(self, session_id: str) -> None:
         """Delete a saved session."""
         path = self._session_path(session_id)
-        if not path.exists():
-            raise SessionNotFoundError(session_id)
-        path.unlink()
+        with self._locked_session(session_id):
+            if not path.exists():
+                raise SessionNotFoundError(session_id)
+            path.unlink()
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions with ID, name, and version."""
@@ -119,12 +180,17 @@ class SessionManager:
             return []
         sessions: list[dict[str, Any]] = []
         for path in sorted(self._dir.glob("*.json")):
-            data = json.loads(path.read_text())
+            session_id = path.stem
+            if not _SESSION_ID_RE.fullmatch(session_id):
+                continue
+            found, state = self._read_session_state_for_listing(path, session_id)
+            if not found or state is None:
+                continue
             sessions.append(
                 {
-                    "session_id": path.stem,
-                    "name": data["metadata"]["name"],
-                    "version": data["version"],
+                    "session_id": session_id,
+                    "name": state.metadata.name,
+                    "version": state.version,
                 }
             )
         return sessions
@@ -134,3 +200,67 @@ class SessionManager:
         # delete) routes here, so validating once covers all three.
         _validate_session_id(session_id)
         return self._dir / f"{session_id}.json"
+
+    def _lock_path(self, session_id: str) -> Path:
+        _validate_session_id(session_id)
+        return self._dir / f".{session_id}.lock"
+
+    @contextmanager
+    def _locked_session(self, session_id: str) -> Iterator[None]:
+        """Serialize version-check + replace across threads and processes."""
+        with _session_lock(session_id):
+            if fcntl_module is None:
+                yield
+                return
+            lock_path = self._lock_path(session_id)
+            with lock_path.open("a+", encoding="utf-8") as lock_file:
+                fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl_module.flock(lock_file.fileno(), fcntl_module.LOCK_UN)
+
+    def _read_session_state_for_listing(self, path: Path, session_id: str) -> tuple[bool, CompositionState | None]:
+        """Load one session for list_sessions without failing the whole listing."""
+        try:
+            return True, self._read_session_state(path, session_id)
+        except (CorruptSessionFileError, FileNotFoundError):
+            return False, None
+
+    def _read_session_state(self, path: Path, session_id: str) -> CompositionState:
+        """Parse one canonical session file into a validated state snapshot."""
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            raise CorruptSessionFileError(session_id, f"could not read file: {exc}") from exc
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise CorruptSessionFileError(session_id, f"invalid JSON: {exc.msg}") from exc
+        if type(data) is not dict:
+            raise CorruptSessionFileError(session_id, "top-level JSON value must be an object")
+        try:
+            return CompositionState.from_dict(data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CorruptSessionFileError(session_id, f"invalid session payload: {exc}") from exc
+
+    def _atomic_write(self, path: Path, serialized: str) -> None:
+        """Write to a sibling tempfile and replace the canonical file atomically."""
+        tmp_fd, tmp_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            text=True,
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(tmp_fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(serialized)
+                tmp_file.flush()
+                os.fsync(tmp_file.fileno())
+            tmp_path.replace(path)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise

@@ -2017,6 +2017,7 @@ class Orchestrator:
 
         # Destination validated - increment counter and proceed with routing.
         counters.rows_quarantined += 1
+        validation_error_id = loop_ctx.ctx.pop_pending_quarantine_validation_error_id(source_item.row)
         # Sanitize quarantine data at Tier-3 boundary: replace non-finite
         # floats (NaN, Infinity) with None so downstream canonical JSON
         # and stable_hash operations succeed. The quarantine_error records
@@ -2031,6 +2032,7 @@ class Orchestrator:
             source_node_id=source_id,
             row_index=row_index,
             source_row=source_item,
+            validation_error_id=validation_error_id,
         )
 
         # Record source node_state (step_index=0) for quarantine audit lineage.

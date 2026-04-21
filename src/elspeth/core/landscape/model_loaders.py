@@ -462,6 +462,7 @@ class ValidationErrorLoader:
             schema_mode=row.schema_mode,
             destination=row.destination,
             created_at=row.created_at,
+            row_id=row.row_id,
             row_data_json=row.row_data_json,
             violation_type=row.violation_type,
             original_field_name=row.original_field_name,

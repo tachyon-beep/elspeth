@@ -139,6 +139,10 @@ class PluginContext:
     # Batch checkpoints restored from previous BatchPendingError
     # Maps node_id -> typed checkpoint state for each batch transform
     _batch_checkpoints: dict[str, BatchCheckpointState] = field(default_factory=dict)
+    # Validation errors that must later be linked to a persisted quarantine row.
+    # Entries are (match_key, error_id), where match_key hashes the raw row payload
+    # before orchestrator normalization/wrapping.
+    _pending_quarantine_validation_errors: list[tuple[str, str]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         # Deep-freeze config so plugins cannot mutate the run configuration
@@ -146,6 +150,25 @@ class PluginContext:
         # PluginContext is not frozen (checkpoint/token need mutation), but
         # config must be immutable for audit integrity.
         self.config = deep_freeze(self.config)
+
+    @staticmethod
+    def _validation_error_match_key(row: Any) -> str:
+        """Build a stable lookup key for a raw validation-error payload."""
+        from elspeth.contracts.hashing import repr_hash, stable_hash
+
+        try:
+            return stable_hash(row)
+        except (ValueError, TypeError):
+            return repr_hash(row)
+
+    def pop_pending_quarantine_validation_error_id(self, row: Any) -> str | None:
+        """Consume the queued validation error ID matching a quarantined row payload."""
+        match_key = self._validation_error_match_key(row)
+        for index, (pending_match_key, error_id) in enumerate(self._pending_quarantine_validation_errors):
+            if pending_match_key == match_key:
+                del self._pending_quarantine_validation_errors[index]
+                return error_id
+        return None
 
     def get_checkpoint(self) -> BatchCheckpointState | None:
         """Get checkpoint state for batch transforms.
@@ -467,6 +490,10 @@ class PluginContext:
             destination=destination,
             contract_violation=contract_violation,
         )
+
+        if destination != "discard" and error_id is not None:
+            match_key = self._validation_error_match_key(row)
+            self._pending_quarantine_validation_errors.append((match_key, error_id))
 
         return ValidationErrorToken(
             row_id=row_id,

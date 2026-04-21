@@ -526,6 +526,15 @@ class SchemaConfig:
         _validate_contract_fields_subset(guaranteed_fields, "guaranteed_fields", declared_names)
         _validate_contract_fields_subset(required_fields, "required_fields", declared_names)
         _validate_contract_fields_subset(audit_fields, "audit_fields", declared_names)
+        if guaranteed_fields is not None:
+            required_declared_names = frozenset(f.name for f in parsed_fields if f.required)
+            optional_guarantees = set(guaranteed_fields) - required_declared_names
+            if optional_guarantees:
+                raise ValueError(
+                    "'guaranteed_fields' contains optional fields not guaranteed by schema: "
+                    f"{', '.join(sorted(optional_guarantees))}. "
+                    "Mark them required or remove them from guaranteed_fields."
+                )
 
         return cls(
             mode=mode,

@@ -251,7 +251,11 @@ def explain(
         parent_tokens.append(parent_token)
 
     # Get validation errors for this row (by hash)
-    validation_errors = data_flow.get_validation_errors_for_row(run_id, source_row.source_data_hash)
+    validation_errors = data_flow.get_validation_errors_for_row(
+        run_id,
+        source_row.source_data_hash,
+        row_id=source_row.row_id,
+    )
 
     # Get transform errors for this token
     transform_errors = data_flow.get_transform_errors_for_token(token_id)

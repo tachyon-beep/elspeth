@@ -201,7 +201,7 @@ allow_hits:
   reason: Best-effort failure ceremony — original pipeline exception must not be masked
   safety: Catches and logs; original exception always re-raised
   expires: '2026-07-10'
-- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=5cb7a3eaaf6a83b5
+- key: engine/orchestrator/core.py:R6:Orchestrator:_handle_quarantine_row:fp=a6d0ca434837788d
   owner: bugfix
   reason: Tier-3 boundary — quarantined row data may contain NaN/Infinity that stable_hash rejects
   safety: Falls back to repr_hash with debug logging; audit trail uses separate hashing path

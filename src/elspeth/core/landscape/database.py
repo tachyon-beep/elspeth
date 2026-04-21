@@ -56,6 +56,8 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     # declaration contracts + Tier-1 error classes registered at bootstrap,
     # serialized as canonical JSON on the runs row.
     ("runs", "runtime_val_manifest_json"),
+    # Quarantine lineage exactness - links validation errors to persisted rows
+    ("validation_errors", "row_id"),
 )
 
 # Required foreign keys for audit integrity (Tier 1 trust).
@@ -63,6 +65,7 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
 # Bug fix: error tables were missing foreign keys to nodes/tokens
 _REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
     ("validation_errors", "node_id", "nodes"),
+    ("validation_errors", "row_id", "rows"),
     ("transform_errors", "token_id", "tokens"),
     ("transform_errors", "transform_id", "nodes"),
 )
@@ -80,6 +83,7 @@ _REQUIRED_INDEXES: tuple[tuple[str, str], ...] = (
     ("calls", "ix_calls_state_call_index_unique"),
     ("calls", "ix_calls_operation_call_index_unique"),
     ("token_outcomes", "ix_token_outcomes_terminal_unique"),
+    ("validation_errors", "ix_validation_errors_run_row"),
 )
 
 

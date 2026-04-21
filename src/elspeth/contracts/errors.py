@@ -71,6 +71,12 @@ class ExecutionError:
         # Deep-freeze the structured context payload (ADR-008) so the Tier-1
         # audit-recording path cannot be mutated after construction.
         if self.context is not None:
+            try:
+                context_keys = self.context.keys()
+            except AttributeError as exc:
+                raise TypeError(f"ExecutionError.context must be a mapping, got {type(self.context).__name__}") from exc
+            if any(type(key) is not str for key in context_keys):
+                raise TypeError("ExecutionError.context keys must be strings")
             freeze_fields(self, "context")
 
     def to_dict(self) -> dict[str, Any]:

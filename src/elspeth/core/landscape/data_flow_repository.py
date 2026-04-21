@@ -31,6 +31,7 @@ from elspeth.contracts import (
 )
 from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.hashing import repr_hash
 from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
@@ -93,6 +94,21 @@ class DataFlowRepository:
         self._payload_store = payload_store
 
     # ── Token recording: private helpers ─────────────────────────────────
+
+    def _sanitize_node_config_for_audit(self, config: Mapping[str, object]) -> Mapping[str, object]:
+        """Return an audit-safe node config with secrets fingerprinted."""
+        import os
+
+        from elspeth.core.config import _fingerprint_secrets
+
+        thawed = deep_thaw(config)
+        if type(thawed) is not dict:
+            raise TypeError(f"Node config must thaw to dict[str, object], got {type(thawed).__name__}: {thawed!r}")
+
+        allow_raw = False
+        if "ELSPETH_ALLOW_RAW_SECRETS" in os.environ:
+            allow_raw = os.environ["ELSPETH_ALLOW_RAW_SECRETS"].lower() == "true"
+        return _fingerprint_secrets(thawed, fail_if_no_key=not allow_raw)
 
     def _resolve_run_id_for_row(self, row_id: str) -> str:
         """Resolve the run_id that owns a given row_id.
@@ -959,8 +975,9 @@ class DataFlowRepository:
             Node model
         """
         node_id = node_id or generate_id()
-        config_json = canonical_json(config)
-        config_hash = stable_hash(config)
+        audit_safe_config = self._sanitize_node_config_for_audit(config)
+        config_json = canonical_json(audit_safe_config)
+        config_hash = stable_hash(audit_safe_config)
         timestamp = now()
 
         # Extract schema info for audit (WP-11.99)
@@ -1281,6 +1298,7 @@ class DataFlowRepository:
         schema_mode: str,
         destination: str,
         *,
+        row_id: str | None = None,
         contract_violation: ContractViolation | None = None,
     ) -> str:
         """Record a validation error in the audit trail.
@@ -1334,6 +1352,7 @@ class DataFlowRepository:
                 error_id=error_id,
                 run_id=run_id,
                 node_id=node_id,
+                row_id=row_id,
                 row_hash=row_hash,
                 row_data_json=row_data_json,
                 error=error,
@@ -1349,6 +1368,51 @@ class DataFlowRepository:
         )
 
         return error_id
+
+    def link_validation_error_to_row(
+        self,
+        *,
+        run_id: str,
+        error_id: str,
+        row_id: str,
+    ) -> None:
+        """Attach a persisted quarantine row to an existing validation error."""
+        actual_run_id = self._resolve_run_id_for_row(row_id)
+        if actual_run_id != run_id:
+            raise AuditIntegrityError(
+                f"Validation error linkage prevented cross-run contamination: row {row_id!r} belongs to "
+                f"run {actual_run_id!r}, but caller supplied run_id={run_id!r}."
+            )
+
+        error_row = self._ops.execute_fetchone(
+            select(
+                validation_errors_table.c.run_id,
+                validation_errors_table.c.row_id,
+            ).where(validation_errors_table.c.error_id == error_id)
+        )
+        if error_row is None:
+            raise AuditIntegrityError(f"Validation error {error_id!r} does not exist in validation_errors. This is Tier 1 data corruption.")
+        if error_row.run_id != run_id:
+            raise AuditIntegrityError(
+                f"Validation error linkage prevented cross-run contamination: error {error_id!r} belongs to "
+                f"run {error_row.run_id!r}, but caller supplied run_id={run_id!r}."
+            )
+        if error_row.row_id is not None:
+            if error_row.row_id != row_id:
+                raise AuditIntegrityError(
+                    f"Validation error {error_id!r} is already linked to row {error_row.row_id!r}; refusing to relink it to {row_id!r}."
+                )
+            return
+
+        self._ops.execute_update(
+            validation_errors_table.update()
+            .where(
+                validation_errors_table.c.error_id == error_id,
+                validation_errors_table.c.run_id == run_id,
+            )
+            .values(row_id=row_id),
+            context="validation_errors.row_id linkage",
+        )
 
     def record_transform_error(
         self,
@@ -1444,25 +1508,41 @@ class DataFlowRepository:
 
         return error_id
 
-    def get_validation_errors_for_row(self, run_id: str, row_hash: str) -> list[ValidationErrorRecord]:
-        """Get validation errors for a row by its hash.
-
-        Validation errors are keyed by row_hash since quarantined rows
-        never get row_ids (they're rejected before entering the pipeline).
+    def get_validation_errors_for_row(
+        self,
+        run_id: str,
+        row_hash: str | None = None,
+        *,
+        row_id: str | None = None,
+    ) -> list[ValidationErrorRecord]:
+        """Get validation errors for a row by stable row linkage or legacy hash.
 
         Args:
             run_id: Run ID to query
-            row_hash: Hash of the row data
+            row_hash: Legacy hash of the row data (used for historical/fallback lookup)
+            row_id: Persisted row identifier for quarantined rows when available
 
         Returns:
             List of ValidationErrorRecord models
         """
-        query = select(validation_errors_table).where(
+        if row_id is not None:
+            row_query = select(validation_errors_table).where(
+                validation_errors_table.c.run_id == run_id,
+                validation_errors_table.c.row_id == row_id,
+            )
+            row_rows = self._ops.execute_fetchall(row_query)
+            if row_rows or row_hash is None:
+                return [self._validation_error_loader.load(r) for r in row_rows]
+
+        if row_hash is None:
+            raise ValueError("get_validation_errors_for_row requires row_id or row_hash")
+
+        hash_query = select(validation_errors_table).where(
             validation_errors_table.c.run_id == run_id,
             validation_errors_table.c.row_hash == row_hash,
         )
-        rows = self._ops.execute_fetchall(query)
-        return [self._validation_error_loader.load(r) for r in rows]
+        hash_rows = self._ops.execute_fetchall(hash_query)
+        return [self._validation_error_loader.load(r) for r in hash_rows]
 
     def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
         """Get all validation errors for a run.

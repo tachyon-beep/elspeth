@@ -570,6 +570,7 @@ class ValidationErrorRecord:
     schema_mode: str  # "fixed", "flexible", "observed", "parse"
     destination: str
     created_at: datetime
+    row_id: str | None = None
     row_data_json: str | None = None
     violation_type: str | None = None  # "type_mismatch", "missing_field", "extra_field"
     original_field_name: str | None = None  # Display name e.g. "'Amount USD'"

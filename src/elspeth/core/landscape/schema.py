@@ -35,7 +35,11 @@ metadata = MetaData()
 #        column on runs_table records the declaration + Tier-1 registries
 #        in effect at run start, enabling auditor queries like "which VAL
 #        contracts were in force during run X?"
-SQLITE_SCHEMA_EPOCH = 3
+#   4 → validation_errors.row_id links quarantine errors to persisted rows,
+#        allowing explain() to resolve the exact validation failures for
+#        quarantined tokens even when the stored row payload is normalized
+#        before persistence.
+SQLITE_SCHEMA_EPOCH = 4
 
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.
@@ -433,6 +437,7 @@ validation_errors_table = Table(
     Column("error_id", String(32), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("node_id", String(64)),  # Source node where validation failed (nullable)
+    Column("row_id", String(64), ForeignKey("rows.row_id")),  # Persisted quarantine row when one exists
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),  # Store the row for debugging
     Column("error", Text, nullable=False),
@@ -456,6 +461,7 @@ validation_errors_table = Table(
 
 Index("ix_validation_errors_run", validation_errors_table.c.run_id)
 Index("ix_validation_errors_node", validation_errors_table.c.node_id)
+Index("ix_validation_errors_run_row", validation_errors_table.c.run_id, validation_errors_table.c.row_id)
 
 # === Transform Errors (WP-11.99b: Transform Error Routing) ===
 

@@ -20,8 +20,6 @@ Import patterns:
     from elspeth.core.config import RetrySettings, ElspethSettings
 """
 
-from typing import TYPE_CHECKING
-
 from elspeth.contracts.aggregation_checkpoint import (
     AggregationCheckpointState,
     AggregationNodeCheckpoint,
@@ -289,18 +287,6 @@ from elspeth.contracts.url import (
     SanitizedWebhookUrl,
 )
 
-if TYPE_CHECKING:
-    TIER_1_ERRORS: tuple[type[Exception], ...]
-
-
-def __getattr__(name: str) -> tuple[type[Exception], ...]:
-    if name == "TIER_1_ERRORS":
-        from elspeth.contracts import errors as errors_mod
-
-        return errors_mod.TIER_1_ERRORS
-    raise AttributeError(name)
-
-
 __all__ = [  # Grouped by category for readability
     # audit
     "Artifact",
@@ -313,7 +299,6 @@ __all__ = [  # Grouped by category for readability
     "FrameworkBugError",
     "GracefulShutdownError",
     "OrchestrationInvariantError",
-    "TIER_1_ERRORS",
     "MaxRetriesExceeded",
     "PassThroughContractViolation",
     "PluginContractViolation",

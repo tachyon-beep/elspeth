@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 
 def test_all_four_pre_migration_members_remain_tier_1() -> None:
     from elspeth.contracts.errors import (
@@ -68,6 +70,16 @@ def test_errors_module_tier_1_errors_is_live_view_not_snapshot() -> None:
         tier_registry._REGISTRY.remove(_TempViolation)
         tier_registry._REASONS.pop(_TempViolation, None)
         tier_registry._FROZEN = prior_frozen
+
+
+def test_contracts_package_root_does_not_expose_tier_1_errors() -> None:
+    import elspeth.contracts as contracts_mod
+
+    assert "TIER_1_ERRORS" not in contracts_mod.__all__
+    with pytest.raises(AttributeError):
+        _ = contracts_mod.TIER_1_ERRORS  # type: ignore[attr-defined]
+    with pytest.raises(ImportError, match="TIER_1_ERRORS"):
+        exec("from elspeth.contracts import TIER_1_ERRORS", {})
 
 
 def test_tier_1_reason_is_non_empty_for_all_members() -> None:

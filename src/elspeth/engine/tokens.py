@@ -123,6 +123,8 @@ class TokenManager:
         source_node_id: str,
         row_index: int,
         source_row: SourceRow,
+        *,
+        validation_error_id: str | None = None,
     ) -> TokenInfo:
         """Create a token for a quarantined row.
 
@@ -178,6 +180,13 @@ class TokenManager:
             data=pipeline_row.to_dict(),
             quarantined=True,
         )
+
+        if validation_error_id is not None:
+            self._data_flow.link_validation_error_to_row(
+                run_id=run_id,
+                error_id=validation_error_id,
+                row_id=row.row_id,
+            )
 
         # Create initial token
         token = self._data_flow.create_token(row_id=row.row_id)

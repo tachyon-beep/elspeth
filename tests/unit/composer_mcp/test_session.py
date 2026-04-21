@@ -98,6 +98,92 @@ class TestSessionManager:
         data = json.loads(files[0].read_text())
         assert data["metadata"]["name"] == "json-check"
 
+    def test_save_rejects_stale_version_and_preserves_newer_state(self, manager: SessionManager) -> None:
+        sid, original = manager.new_session(name="original")
+        manager.save(sid, original)
+        newer = original.with_metadata({"name": "newer"})
+        manager.save(sid, newer)
+
+        with pytest.raises(ValueError, match="stale"):
+            manager.save(sid, original)
+
+        loaded = manager.load(sid)
+        assert loaded.metadata.name == "newer"
+        assert loaded.version == newer.version
+
+    def test_save_pre_replace_failure_preserves_prior_file(
+        self,
+        manager: SessionManager,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sid, original = manager.new_session(name="before")
+        manager.save(sid, original)
+        updated = original.with_metadata({"name": "after"})
+
+        def fail_replace(_self: Path, _target: Path) -> None:
+            raise OSError("replace failed")
+
+        monkeypatch.setattr(Path, "replace", fail_replace)
+
+        with pytest.raises(OSError, match="replace failed"):
+            manager.save(sid, updated)
+
+        loaded = manager.load(sid)
+        assert loaded.metadata.name == "before"
+        assert loaded.version == original.version
+
+    def test_list_sessions_skips_invalid_filename_even_with_valid_payload(
+        self,
+        manager: SessionManager,
+        scratch_dir: Path,
+    ) -> None:
+        sid, state = manager.new_session(name="canonical")
+        manager.save(sid, state)
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        (scratch_dir / "legacy.backup.json").write_text(json.dumps(state.to_dict()))
+
+        sessions = manager.list_sessions()
+
+        assert {session["session_id"] for session in sessions} == {sid}
+
+    def test_list_sessions_skips_valid_shape_filename_with_malformed_json(
+        self,
+        manager: SessionManager,
+        scratch_dir: Path,
+    ) -> None:
+        sid, state = manager.new_session(name="canonical")
+        manager.save(sid, state)
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        (scratch_dir / "000000000000.json").write_text("{not valid json")
+
+        sessions = manager.list_sessions()
+
+        assert {session["session_id"] for session in sessions} == {sid}
+
+    def test_list_sessions_skips_valid_shape_filename_missing_required_fields(
+        self,
+        manager: SessionManager,
+        scratch_dir: Path,
+    ) -> None:
+        sid, state = manager.new_session(name="canonical")
+        manager.save(sid, state)
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+        (scratch_dir / "111111111111.json").write_text(
+            json.dumps(
+                {
+                    "metadata": {},
+                    "source": None,
+                    "nodes": [],
+                    "edges": [],
+                    "outputs": [],
+                }
+            )
+        )
+
+        sessions = manager.list_sessions()
+
+        assert {session["session_id"] for session in sessions} == {sid}
+
 
 class TestSessionIdValidation:
     """Tier-3 boundary guards: session_id comes from LLM-controlled MCP args.

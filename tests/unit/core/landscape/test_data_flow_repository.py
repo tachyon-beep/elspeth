@@ -258,6 +258,45 @@ class TestRegisterNodeDirect:
         assert node_r2 is not None
         # Both exist — composite PK working
 
+    def test_fingerprints_secret_fields_before_persisting_node_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """register_node must not persist raw secrets into nodes.config_json."""
+        from elspeth.contracts.security import secret_fingerprint
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
+
+        _db, repo, _fac = _make_repo()
+        node = repo.register_node(
+            run_id="run-1",
+            plugin_name="azure_blob",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={
+                "account_name": "audit-safe",
+                "api_key": "top-secret-key",
+                "nested": {
+                    "client_secret": "nested-secret",
+                    "connection_string": "postgresql://user:password@example.test/db",
+                },
+            },
+            node_id="source-secret",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+
+        parsed = json.loads(node.config_json)
+        assert parsed["account_name"] == "audit-safe"
+        assert "api_key" not in parsed
+        assert parsed["api_key_fingerprint"] == secret_fingerprint("top-secret-key", key=b"test-fingerprint-key")
+        assert "client_secret" not in parsed["nested"]
+        assert parsed["nested"]["client_secret_fingerprint"] == secret_fingerprint(
+            "nested-secret",
+            key=b"test-fingerprint-key",
+        )
+        assert "connection_string" not in parsed["nested"]
+        assert parsed["nested"]["connection_string_fingerprint"] == secret_fingerprint(
+            "postgresql://user:password@example.test/db",
+            key=b"test-fingerprint-key",
+        )
+
 
 class TestRegisterEdgeAndEdgeMapDirect:
     """Tests for DataFlowRepository edge registration and edge map via direct repo."""
