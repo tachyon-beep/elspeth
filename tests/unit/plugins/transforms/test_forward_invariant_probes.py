@@ -14,6 +14,7 @@ from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 from elspeth.plugins.transforms.llm.transform import LLMTransform
+from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 from elspeth.plugins.transforms.truncate import Truncate
 from elspeth.plugins.transforms.type_coerce import TypeCoerce
 from elspeth.plugins.transforms.value_transform import ValueTransform
@@ -32,6 +33,17 @@ from tests.fixtures.factories import make_context
         pytest.param(AzureContentSafety, {"content_safety_probe_text"}, id="AzureContentSafety"),
         pytest.param(AzurePromptShield, {"prompt_shield_probe_text"}, id="AzurePromptShield"),
         pytest.param(LLMTransform, {"llm_probe_text", "llm_response"}, id="LLMTransform"),
+        pytest.param(
+            RAGRetrievalTransform,
+            {
+                "rag_probe_query",
+                "policy__rag_context",
+                "policy__rag_score",
+                "policy__rag_count",
+                "policy__rag_sources",
+            },
+            id="RAGRetrievalTransform",
+        ),
         pytest.param(
             WebScrapeTransform,
             {

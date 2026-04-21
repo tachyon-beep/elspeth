@@ -70,6 +70,9 @@ class TestTransformLifecycle:
         transform = _make_transform()
         transform.close()
 
+    def test_declares_truthful_pass_through(self) -> None:
+        assert RAGRetrievalTransform.passes_through_input is True
+
     def test_declared_output_fields(self):
         transform = _make_transform()
         expected = frozenset(
@@ -102,6 +105,32 @@ class TestTransformLifecycle:
 
         with pytest.raises(RuntimeError, match="state_id"):
             transform.process(row, ctx)
+
+    def test_forward_probe_preserves_query_field_and_close_remains_safe(self) -> None:
+        transform = RAGRetrievalTransform(RAGRetrievalTransform.probe_config())
+        original_provider = MagicMock()
+        transform._provider = original_provider
+
+        result = transform.execute_forward_invariant_probe(
+            transform.forward_invariant_probe_rows(
+                _make_row({"baseline": "kept"}),
+            ),
+            _mock_ctx(),
+        )
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["baseline"] == "kept"
+        assert result.row["rag_probe_query"] == "What is the policy?"
+        assert result.row["policy__rag_context"] == "1. Probe context"
+        assert result.row["policy__rag_count"] == 1
+        assert result.row["policy__rag_score"] == 0.95
+        assert transform._provider is original_provider
+        assert transform._on_start_called is False
+        original_provider.search.assert_not_called()
+
+        transform.close()
+        original_provider.close.assert_called_once()
 
 
 def _ready_provider_result():

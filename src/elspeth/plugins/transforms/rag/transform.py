@@ -18,10 +18,11 @@ from typing import TYPE_CHECKING, Any
 import structlog
 
 from elspeth.contracts import Determinism, TransformResult, propagate_contract
-from elspeth.contracts.errors import RetrievalNotReadyError, TransformErrorReason
+from elspeth.contracts.errors import FrameworkBugError, RetrievalNotReadyError, TransformErrorReason
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.clients.retrieval.base import RetrievalError
+from elspeth.plugins.infrastructure.clients.retrieval.types import RetrievalChunk
 from elspeth.plugins.transforms.rag.config import PROVIDERS, RAGRetrievalConfig
 from elspeth.plugins.transforms.rag.formatter import format_context
 from elspeth.plugins.transforms.rag.query import QueryBuilder
@@ -56,9 +57,87 @@ class RAGRetrievalTransform(BaseTransform):
 
     name = "rag_retrieval"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:27ea317d53f5dd88"
+    source_file_hash: str | None = "sha256:523ec694cf538f97"
     determinism: Determinism = Determinism.EXTERNAL_CALL
     config_model = RAGRetrievalConfig
+    passes_through_input = True
+    _provider: RetrievalProvider | None
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal no-network config for the ADR-009 forward invariant."""
+        return {
+            "output_prefix": "policy",
+            "query_field": "rag_probe_query",
+            "provider": "azure_search",
+            "provider_config": {
+                "endpoint": "https://invariant.example.search.windows.net",
+                "index": "invariant-probe",
+                "api_key": "probe-key",
+            },
+            "schema": {"mode": "observed"},
+        }
+
+    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
+        """Inject a deterministic retrieval query for invariant probing."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="rag_probe_query",
+                value="What is the policy?",
+            )
+        ]
+
+    def execute_forward_invariant_probe(
+        self,
+        probe_rows: list[PipelineRow],
+        ctx: Any,
+    ) -> TransformResult:
+        """Exercise the real retrieval path with a provider-agnostic local double."""
+        if len(probe_rows) != 1:
+            raise FrameworkBugError(
+                f"{self.__class__.__name__}.execute_forward_invariant_probe() "
+                f"received {len(probe_rows)} rows; RAG invariant probes require exactly 1 row."
+            )
+
+        class _InvariantProvider:
+            def __init__(self) -> None:
+                self.last_skipped_count = 0
+                self.last_skipped_reasons: list[object] = []
+
+            def search(
+                self,
+                query: str,
+                top_k: int,
+                min_score: float,
+                *,
+                state_id: str,
+                token_id: str | None,
+            ) -> list[RetrievalChunk]:
+                del query, top_k, min_score, state_id, token_id
+                return [
+                    RetrievalChunk(
+                        content="Probe context",
+                        score=0.95,
+                        source_id="probe-doc",
+                        metadata={"kind": "invariant"},
+                    )
+                ]
+
+            def close(self) -> None:
+                return None
+
+        original_provider = self._provider
+        original_on_start_called = self._on_start_called
+        probe_provider = _InvariantProvider()
+        try:
+            self.__dict__["_provider"] = probe_provider
+            self._on_start_called = True
+            return super().execute_forward_invariant_probe(probe_rows, ctx)
+        finally:
+            self._on_start_called = original_on_start_called
+            self.__dict__["_provider"] = original_provider
+            probe_provider.close()
 
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
