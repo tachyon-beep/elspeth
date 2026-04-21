@@ -1037,7 +1037,7 @@ class ZeroEmissionSuccessContractViolation(PluginContractViolation, AuditEvidenc
 
 @tier_1_error(
     reason=(
-        "ADR-010 F3 (elspeth-5fc876138d): sink transactional-boundary invariant "
+        "ADR-010 §H2 landing scope F3: sink transactional-boundary invariant "
         "distinct from pre-write VAL contract — must crash, never absorbed by on_error."
     ),
     caller_module=__name__,
@@ -1046,10 +1046,9 @@ class SinkTransactionalInvariantError(PluginContractViolation):
     """Raised by a sink's inline commit-boundary check when state diverges
     between contract evaluation and the transactional write.
 
-    **Two-layer sink invariant architecture** (ADR-010 F3,
-    issue elspeth-5fc876138d):
+    **Two-layer sink invariant architecture** (ADR-010 §H2 landing scope F3):
 
-    - **Layer 1 — pre-write declaration contract** (e.g. the Phase 2C
+    - **Layer 1 — pre-write declaration contract** (currently
       ``SinkRequiredFieldsContract``): dispatcher-owned, fires BEFORE
       ``sink.write()``, raises a ``DeclarationContractViolation`` subclass
       with a ``payload_schema``. Triage SQL:
@@ -1063,7 +1062,7 @@ class SinkTransactionalInvariantError(PluginContractViolation):
       from the inline sink check. Triage SQL:
       ``WHERE exception_type = 'SinkTransactionalInvariantError'``.
 
-    Before F3 (pre-ADR-010 §Semantics amendment, 2026-04-20) both layers
+    Before the F3 split (pre-ADR-010 §Semantics amendment, 2026-04-20) both layers
     raised ``PluginContractViolation`` and the audit table conflated pre-
     write contract failures with commit-boundary failures — the auditor
     could not distinguish "intent validation failed" from "state diverged

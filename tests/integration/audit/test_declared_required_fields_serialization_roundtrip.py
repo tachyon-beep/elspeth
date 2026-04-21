@@ -10,6 +10,7 @@ from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     DeclarationContract,
     DeclarationContractViolation,
+    DispatchSite,
     ExampleBundle,
     PreEmissionInputs,
     _clear_registry_for_tests,
@@ -132,6 +133,14 @@ class _SecondaryPreEmissionViolation(DeclarationContractViolation):
     payload_schema = _SecondaryPayload
 
 
+class _SecretPayload(TypedDict):
+    marker: str
+
+
+class _SecretRoundTripViolation(DeclarationContractViolation):
+    payload_schema = _SecretPayload
+
+
 class _SecondaryPreEmissionContract(DeclarationContract):
     name = "secondary_declared_required_test"
     payload_schema: type = _SecondaryPayload
@@ -153,11 +162,69 @@ class _SecondaryPreEmissionContract(DeclarationContract):
 
     @classmethod
     def negative_example(cls) -> ExampleBundle:
-        raise NotImplementedError
+        inputs = PreEmissionInputs(
+            plugin=_plugin(),
+            node_id="declared-required-secondary-neg-node",
+            run_id="declared-required-secondary-neg-run",
+            row_id="declared-required-secondary-neg-row",
+            token_id="declared-required-secondary-neg-token",
+            input_row=_row(("account_id",)),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset({"account_id"}),
+        )
+        return ExampleBundle(site=DispatchSite.PRE_EMISSION, args=(inputs,))
 
     @classmethod
     def positive_example_does_not_apply(cls) -> ExampleBundle:
-        raise NotImplementedError
+        inputs = PreEmissionInputs(
+            plugin=_plugin(declared_input_fields=frozenset()),
+            node_id="declared-required-secondary-non-app-node",
+            run_id="declared-required-secondary-non-app-run",
+            row_id="declared-required-secondary-non-app-row",
+            token_id="declared-required-secondary-non-app-token",
+            input_row=_row(("account_id",)),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset({"account_id"}),
+        )
+        return ExampleBundle(site=DispatchSite.PRE_EMISSION, args=(inputs,))
+
+
+class _SecretPreEmissionContract(DeclarationContract):
+    name = "declared_required_fields_secret_roundtrip"
+    payload_schema: type = _SecretPayload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("pre_emission_check")
+    def pre_emission_check(self, inputs: PreEmissionInputs) -> None:
+        raise _SecretRoundTripViolation(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        inputs = PreEmissionInputs(
+            plugin=_plugin(),
+            node_id="declared-required-secret-neg-node",
+            run_id="declared-required-secret-neg-run",
+            row_id="declared-required-secret-neg-row",
+            token_id="declared-required-secret-neg-token",
+            input_row=_row(("account_id",)),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset({"account_id"}),
+        )
+        return ExampleBundle(site=DispatchSite.PRE_EMISSION, args=(inputs,))
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
 
 
 class TestDeclaredRequiredFieldsRoundTrip:
@@ -256,3 +323,40 @@ class TestDeclaredRequiredFieldsRoundTrip:
         declared_child = next(entry for entry in context["violations"] if entry["exception_type"] == "DeclaredRequiredInputFieldsViolation")
         assert declared_child["contract_name"] == "declared_required_fields"
         assert declared_child["payload"]["missing"] == ["customer_id"]
+
+    def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        register_declaration_contract(_SecretPreEmissionContract())
+
+        run_id = "run-declared-required-fields-secret"
+        row_id = "row-declared-required-fields-secret"
+        token_id = "token-declared-required-fields-secret"
+        node_id = "node-declared-required-fields"
+        setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
+
+        try:
+            run_pre_emission_checks(
+                inputs=PreEmissionInputs(
+                    plugin=_plugin(node_id=node_id),
+                    node_id=node_id,
+                    run_id=run_id,
+                    row_id=row_id,
+                    token_id=token_id,
+                    input_row=_row(("account_id",)),
+                    static_contract=frozenset(),
+                    effective_input_fields=frozenset({"account_id"}),
+                )
+            )
+        except _SecretRoundTripViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="executor_pre_process",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected _SecretRoundTripViolation")
+
+        context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
+        assert "sk-abcdef" not in json.dumps(context)
+        assert context["contract_name"] == "declared_required_fields_secret_roundtrip"
+        assert context["payload"]["marker"] == "<redacted-secret>"

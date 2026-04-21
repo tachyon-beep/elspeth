@@ -79,8 +79,8 @@ def tier_1_error(_cls: type | None = None, *, reason: str, caller_module: str): 
             any non-literal value (variable, f-string, attribute, etc.)
             because the value is the primary input to the module-prefix
             allowlist check (``elspeth.contracts.*`` / ``elspeth.engine.*``
-            / ``elspeth.core.*``). ADR-010 M8 (issue elspeth-3af772b9e3)
-            replaced the prior ``inspect.stack()`` scheme because
+            / ``elspeth.core.*``). ADR-010 §Decision 2 M8 replaced the
+            prior ``inspect.stack()`` scheme because
             frame-offset introspection breaks silently if any decorator
             or metaclass wrapping is added between ``@tier_1_error`` and
             the class — a future contributor's innocent-looking wrapper

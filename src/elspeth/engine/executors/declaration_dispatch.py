@@ -1,7 +1,6 @@
 """Declaration-contract runtime dispatcher (ADR-010 §Decision 3 + §Semantics).
 
-Adopts **audit-complete with aggregation** posture per comment #417 on
-`elspeth-425047a599` (ADR-010 §Semantics amendment, 2026-04-20). On a (row,
+Adopts **audit-complete with aggregation** posture per ADR-010 §Semantics. On a (row,
 call-site) tuple that would violate multiple registered contracts, the
 dispatcher DOES NOT short-circuit on the first violation — it collects every
 contract's raised audit-evidence exception, attaches dispatcher attribution
@@ -177,8 +176,8 @@ def run_pre_emission_checks(inputs: PreEmissionInputs) -> None:
     Called from ``TransformExecutor`` before generic input validation and
     before ``transform.process()``. This preserves first-class attribution
     for declaration mismatches when a plugin's ``input_schema`` would also
-    reject the same missing field. First adopter landing: Phase 2B's
-    ``DeclaredRequiredFieldsContract`` will register here.
+    reject the same missing field. The current adopter is
+    ``DeclaredRequiredFieldsContract``.
     """
     _dispatch(
         site=DispatchSite.PRE_EMISSION,
@@ -228,7 +227,7 @@ def run_boundary_checks(
 ) -> None:
     """Dispatch all applicable boundary contracts for one row at a time.
 
-    Phase 2C wires this into:
+    Current boundary adopters wire this into:
     - ``RowProcessor.process_row()`` after token creation on the source side
     - ``SinkExecutor.write()`` before Layer 2/schema checks on sink paths
     """

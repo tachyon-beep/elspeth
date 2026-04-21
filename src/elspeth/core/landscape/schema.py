@@ -31,7 +31,7 @@ metadata = MetaData()
 # Epoch history (pre-1.0 policy — bumps require DB recreation):
 #   1 → initial
 #   2 → Phase 5 schema contracts + operation I/O hashes (pre-ADR-010)
-#   3 → ADR-010 M3 (issue elspeth-1c8185dfec): runtime_val_manifest_json
+#   3 → ADR-010 §Decision 3 M3: runtime_val_manifest_json
 #        column on runs_table records the declaration + Tier-1 registries
 #        in effect at run start, enabling auditor queries like "which VAL
 #        contracts were in force during run X?"
@@ -72,7 +72,7 @@ runs_table = Table(
     # Stores the run-level schema contract with field resolution and types
     Column("schema_contract_json", Text),  # Full contract with field resolution and types
     Column("schema_contract_hash", String(16)),  # version_hash for integrity verification
-    # Runtime-VAL manifest for audit trail (ADR-010 M3, issue elspeth-1c8185dfec).
+    # Runtime-VAL manifest for audit trail (ADR-010 §Decision 3 M3).
     # Captures the set of DeclarationContract and Tier-1 error classes
     # registered at bootstrap, serialized as canonical JSON. Enables auditor
     # queries like "which VAL contracts were in force during run X?" and

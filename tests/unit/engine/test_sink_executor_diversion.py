@@ -8,7 +8,7 @@ diverted rows to the failsink (or record discard).
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -234,14 +234,48 @@ class TestFailsinkMode:
     """on_write_failure=<sink_name> — diverted rows are written to failsink."""
 
     def test_failsink_missing_required_field_raises_layer1_violation(self) -> None:
-        executor, _execution, _data_flow = _make_executor()
+        executor, _execution, data_flow = _make_executor()
         diversions = (RowDiversion(row_index=0, reason="invalid metadata", row_data={"doc": "hello"}),)
         sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
         failsink = _make_failsink()
         failsink.declared_required_fields = frozenset({"__diversion_reason", "missing_field"})
         tokens = [_make_token("t0")]
 
-        with pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*missing_field"):
+        def _raise_failsink_required_fields(
+            *,
+            sink: Any,
+            rows: list[dict[str, object]],
+            tokens: list[TokenInfo],
+            run_id: str,
+            node_id: str,
+            row_contracts: Any,
+        ) -> None:
+            del rows, row_contracts
+            if sink.name != "csv_failsink":
+                return
+            violation = SinkRequiredFieldsViolation(
+                plugin=sink.name,
+                node_id=node_id,
+                run_id=run_id,
+                row_id=tokens[0].row_id,
+                token_id=tokens[0].token_id,
+                payload={
+                    "declared": ["__diversion_reason", "missing_field"],
+                    "runtime_observed": ["__diversion_reason"],
+                    "missing": ["missing_field"],
+                },
+                message=(
+                    "Sink 'csv_failsink' declared required fields "
+                    "['__diversion_reason', 'missing_field'] but row is missing ['missing_field']"
+                ),
+            )
+            violation._attach_contract_name("sink_required_fields")
+            raise violation
+
+        with (
+            patch.object(SinkExecutor, "_run_sink_boundary_checks", autospec=True, side_effect=_raise_failsink_required_fields),
+            pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*missing_field"),
+        ):
             executor.write(
                 sink=sink,
                 tokens=tokens,  # type: ignore[arg-type]
@@ -255,6 +289,11 @@ class TestFailsinkMode:
             )
 
         failsink.write.assert_not_called()
+        data_flow.record_token_outcome.assert_called_once()
+        kwargs = data_flow.record_token_outcome.call_args.kwargs
+        assert kwargs["ref"].token_id == "t0"
+        assert kwargs["outcome"] == RowOutcome.FAILED
+        assert kwargs["context"]["exception_type"] == "SinkRequiredFieldsViolation"
 
     def test_failsink_write_called_with_enriched_rows(self) -> None:
         executor, _execution, _data_flow = _make_executor()

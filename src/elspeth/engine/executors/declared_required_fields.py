@@ -5,10 +5,10 @@ This contract registers for ONE dispatch site:
     * ``pre_emission_check`` — single-row path from ``TransformExecutor``
       before ``transform.process()`` runs.
 
-Phase 2B deliberately scopes ADR-013 to non-batch transforms. There is no
-batch-pre-execution dispatch surface in the framework today, so batch-aware
-transforms that declare ``declared_input_fields`` fail closed via both
-construction-time normalization and this contract's ``applies_to`` guard.
+This contract applies only to single-row transforms. The framework has no
+batch-pre-execution dispatch surface, so a batch-aware transform that declares
+``declared_input_fields`` fails closed via both construction-time
+normalization and this contract's ``applies_to`` guard.
 """
 
 from __future__ import annotations

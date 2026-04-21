@@ -1,7 +1,6 @@
-"""Runtime-VAL manifest builder (ADR-010 M3, issue elspeth-1c8185dfec).
+"""Runtime-VAL manifest builder (ADR-010 §Decision 3 M3).
 
-Extended under the ADR-010 §Semantics amendment (2026-04-20, N1 per-site
-manifest, issue elspeth-10dc0b747f): the serialized manifest now carries
+Extended under ADR-010 §H2 landing scope N1: the serialized manifest now carries
 per-contract dispatch-site claims so the runs-row records not just *which*
 contracts were active during run X but *which dispatch sites* each
 contract implemented.

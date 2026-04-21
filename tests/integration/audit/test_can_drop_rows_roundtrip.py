@@ -12,12 +12,16 @@ from elspeth.contracts.declaration_contracts import (
     AggregateDeclarationContractViolation,
     BatchFlushInputs,
     BatchFlushOutputs,
+    DeclarationContract,
     DeclarationContractViolation,
+    DispatchSite,
+    ExampleBundle,
     PostEmissionInputs,
     PostEmissionOutputs,
     _clear_registry_for_tests,
     _restore_registry_snapshot_for_tests,
     _snapshot_registry_for_tests,
+    implements_dispatch_site,
     register_declaration_contract,
 )
 from elspeth.contracts.enums import NodeStateStatus
@@ -163,6 +167,45 @@ class _SecretRoundTripViolation(DeclarationContractViolation):
     payload_schema = _SecretPayload
 
 
+class _SecretRoundTripContract(DeclarationContract):
+    name = "can_drop_rows_secret_roundtrip"
+    payload_schema: type = _SecretPayload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        raise _SecretRoundTripViolation(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        inputs = PostEmissionInputs(
+            plugin=_plugin(),
+            node_id="can-drop-secret-neg-node",
+            run_id="can-drop-secret-neg-run",
+            row_id="can-drop-secret-neg-row",
+            token_id="can-drop-secret-neg-token",
+            input_row=_row(("source",)),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset({"source"}),
+        )
+        outputs = PostEmissionOutputs(emitted_rows=(_row(("source",)),))
+        return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(inputs, outputs))
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
+
+
 class _HonestFilterTransform(BaseTransform):
     name = "honest_filter_transform"
     input_schema: type[PluginSchema] = _TestSchema
@@ -268,32 +311,41 @@ class TestCanDropRowsRoundTrip:
         assert context["payload"]["emitted_count"] == 0
 
     def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        register_declaration_contract(_SecretRoundTripContract())
+
         run_id = "run-can-drop-rows-secret"
         row_id = "row-can-drop-rows-secret"
         token_id = "token-can-drop-rows-secret"
         node_id = "node-can-drop-rows"
         setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
 
-        violation = _SecretRoundTripViolation(
-            plugin="CanDropRowsTransform",
+        inputs = PostEmissionInputs(
+            plugin=_plugin(node_id=node_id),
             node_id=node_id,
             run_id=run_id,
             row_id=row_id,
             token_id=token_id,
-            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
-            message="secret round-trip test",
+            input_row=_row(("source",)),
+            static_contract=frozenset(),
+            effective_input_fields=frozenset({"source"}),
         )
-        violation._attach_contract_name("can_drop_rows_secret_roundtrip")
+        outputs = PostEmissionOutputs(emitted_rows=(_row(("source",)),))
 
-        error = ExecutionError(
-            exception=str(violation),
-            exception_type=type(violation).__name__,
-            phase="executor_post_process",
-            context=violation.to_audit_dict(),
-        )
+        try:
+            run_post_emission_checks(inputs=inputs, outputs=outputs)
+        except _SecretRoundTripViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="executor_post_process",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected _SecretRoundTripViolation")
 
         context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
         assert "sk-abcdef" not in json.dumps(context)
+        assert context["contract_name"] == "can_drop_rows_secret_roundtrip"
         assert context["payload"]["marker"] == "<redacted-secret>"
 
     def test_aggregate_round_trip_with_pass_through(self) -> None:

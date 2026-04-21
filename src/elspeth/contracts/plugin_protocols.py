@@ -199,8 +199,8 @@ class SourceProtocol(Protocol):
         dispatch anchor, as LLMTransform does — **MUST** override this
         to emit ``oneOf`` + ``$defs`` over every branch. Rendering the
         anchor alone publishes a contract missing every variant-specific
-        required field, which is the exact failure mode tracked as bug
-        elspeth-dcf12c061b.
+        required field, which is exactly the contract this API exists to
+        prevent.
 
         This docstring is the canonical contract cross-referenced from
         the Transform, BatchTransform, and Sink Protocol variants and
@@ -373,7 +373,7 @@ class TransformProtocol(Protocol):
         Same contract as :meth:`SourceProtocol.get_config_schema` — see
         there for the canonical specification, including the
         MUST-override rule for plugins whose effective configuration is
-        a discriminated union (elspeth-dcf12c061b). LLMTransform is the
+        a discriminated union. LLMTransform is the
         motivating example: it dispatches on ``config["provider"]`` at
         runtime, so :meth:`~elspeth.plugins.transforms.llm.transform.LLMTransform.get_config_schema`
         overrides to emit ``oneOf`` + ``$defs`` over every provider

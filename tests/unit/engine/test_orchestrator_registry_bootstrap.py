@@ -135,9 +135,8 @@ def test_bootstrap_fails_when_specific_contract_conditionally_skipped(_isolate_b
     passed. The new set-equality check must raise with ``missing:`` naming
     ``passes_through_input`` explicitly.
 
-    This is the acceptance criterion from elspeth-b03c6112c0 ("ConditionalRegistration
-    test path — wrapping a contract's registration in an `if` that skips fails
-    bootstrap loudly").
+    This is the ADR-010 C2 acceptance criterion: wrapping a required contract
+    registration in a skipped conditional must fail bootstrap loudly.
     """
     from typing import TypedDict
 
@@ -249,7 +248,7 @@ def test_bootstrap_fails_when_extra_contract_registered(_isolate_both_registries
 
 
 def test_bootstrap_passes_when_registry_exactly_matches_manifest(_isolate_both_registries) -> None:
-    """The happy path: registry == EXPECTED_CONTRACTS → no exception, registries freeze.
+    """The happy path: registry == EXPECTED_CONTRACT_SITES → no exception, registries freeze.
 
     Verifies the set-equality check permits the nominal case. Uses the
     importlib.reload pattern to re-trigger the authoritative bootstrap module

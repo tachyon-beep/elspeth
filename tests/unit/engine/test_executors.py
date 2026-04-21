@@ -439,6 +439,11 @@ class TestTransformExecutor:
             executor.execute_transform(transform, token, ctx)
 
         transform.process.assert_not_called()
+        factory.data_flow.record_token_outcome.assert_called_once()
+        kwargs = factory.data_flow.record_token_outcome.call_args.kwargs
+        assert kwargs["ref"].token_id == "tok_declared_required"
+        assert kwargs["outcome"] == RowOutcome.FAILED
+        assert kwargs["context"]["exception_type"] == "DeclaredRequiredInputFieldsViolation"
 
     # --- Success path ---
 
@@ -2687,7 +2692,36 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"):
+        def _raise_sink_required_fields(
+            *,
+            sink: Any,
+            rows: list[dict[str, object]],
+            tokens: list[TokenInfo],
+            run_id: str,
+            node_id: str,
+            row_contracts: list[SchemaContract | None] | None,
+        ) -> None:
+            del rows, row_contracts
+            violation = SinkRequiredFieldsViolation(
+                plugin=sink.name,
+                node_id=node_id,
+                run_id=run_id,
+                row_id=tokens[0].row_id,
+                token_id=tokens[0].token_id,
+                payload={
+                    "declared": ["id", "name"],
+                    "runtime_observed": ["id"],
+                    "missing": ["name"],
+                },
+                message="Sink 'test_sink' declared required fields ['id', 'name'] but row is missing ['name']",
+            )
+            violation._attach_contract_name("sink_required_fields")
+            raise violation
+
+        with (
+            patch.object(SinkExecutor, "_run_sink_boundary_checks", autospec=True, side_effect=_raise_sink_required_fields),
+            pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"),
+        ):
             executor.write(
                 sink,
                 [token],
@@ -2714,7 +2748,36 @@ class TestSinkExecutor:
         ctx = make_context()
         pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
 
-        with pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"):
+        def _raise_sink_required_fields(
+            *,
+            sink: Any,
+            rows: list[dict[str, object]],
+            tokens: list[TokenInfo],
+            run_id: str,
+            node_id: str,
+            row_contracts: list[SchemaContract | None] | None,
+        ) -> None:
+            del rows, row_contracts
+            violation = SinkRequiredFieldsViolation(
+                plugin=sink.name,
+                node_id=node_id,
+                run_id=run_id,
+                row_id=tokens[1].row_id,
+                token_id=tokens[1].token_id,
+                payload={
+                    "declared": ["id", "name"],
+                    "runtime_observed": ["id"],
+                    "missing": ["name"],
+                },
+                message="Sink 'test_sink' declared required fields ['id', 'name'] but row is missing ['name']",
+            )
+            violation._attach_contract_name("sink_required_fields")
+            raise violation
+
+        with (
+            patch.object(SinkExecutor, "_run_sink_boundary_checks", autospec=True, side_effect=_raise_sink_required_fields),
+            pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"),
+        ):
             executor.write(
                 sink,
                 tokens,
@@ -2725,6 +2788,11 @@ class TestSinkExecutor:
             )
 
         sink.write.assert_not_called()
+        assert factory.data_flow.record_token_outcome.call_count == 2
+        for call in factory.data_flow.record_token_outcome.call_args_list:
+            kwargs = call.kwargs
+            assert kwargs["outcome"] == RowOutcome.FAILED
+            assert kwargs["context"]["exception_type"] == "SinkRequiredFieldsViolation"
 
     def test_missing_required_field_after_coalesce_shows_contract_context(self) -> None:
         """When a required field is missing and the contract marks it optional,
@@ -2911,6 +2979,10 @@ class TestSinkExecutor:
             )
 
         sink.write.assert_not_called()
+        factory.data_flow.record_token_outcome.assert_called_once()
+        kwargs = factory.data_flow.record_token_outcome.call_args.kwargs
+        assert kwargs["outcome"] == RowOutcome.FAILED
+        assert kwargs["context"]["exception_type"] == "SinkTransactionalInvariantError"
 
     # --- Successful write ---
 
@@ -5100,6 +5172,11 @@ class TestPassThroughCrossCheck:
         assert violation.row_id == "row_7"
         assert violation.token_id == "tok_7"
         assert violation.runtime_observed == frozenset({"value"})
+        factory.data_flow.record_token_outcome.assert_called_once()
+        kwargs = factory.data_flow.record_token_outcome.call_args.kwargs
+        assert kwargs["ref"].token_id == "tok_7"
+        assert kwargs["outcome"] == RowOutcome.FAILED
+        assert kwargs["context"]["exception_type"] == "PassThroughContractViolation"
 
     def test_cross_check_raises_when_payload_drops_key_but_contract_unchanged(self) -> None:
         """Emitted row reuses input contract but drops a payload key → violation.

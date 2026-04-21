@@ -1,8 +1,7 @@
 """DeclarationContract framework (ADR-010 §Decision 3, amended 2026-04-20).
 
-H2 landing (issue elspeth-425047a599): the 2A single-site protocol is extended
-to a 4-site nominal-ABC framework with collect-then-raise audit-complete
-dispatch (ADR-010 §Semantics, anchored at comment #417 on H2).
+The 2A single-site protocol is extended to a 4-site nominal-ABC framework with
+collect-then-raise audit-complete dispatch (ADR-010 §Semantics).
 
 ## Public surface
 
@@ -63,6 +62,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
+from threading import RLock
 from types import MappingProxyType
 from typing import (
     Any,
@@ -165,11 +165,9 @@ class PreEmissionInputs:
     """Bundle passed to pre-emission contracts (runs BEFORE transform.process()).
 
     No ``emitted_rows`` — emission hasn't happened. Pre-emission contracts
-    (e.g. ``DeclaredRequiredFieldsContract`` in Phase 2B) validate that
-    the input row carries every field the transform's declared_required_fields
-    names, before the transform runs and potentially crashes on a missing
-    field (which would mis-attribute the failure to the transform's
-    ``process()`` body rather than the declaration violation).
+    validate declarations that must hold before the transform runs, so a
+    missing prerequisite field is attributed to the declaration mismatch
+    rather than to a downstream crash inside ``process()``.
 
     Panel F1 resolution (no ``override_input_fields`` sentinel): the caller
     (``TransformExecutor``) derives ``effective_input_fields`` from
@@ -267,9 +265,10 @@ class BatchFlushInputs:
         if isinstance(value, list):
             object.__setattr__(self, "buffered_tokens", tuple(value))
         elif isinstance(value, tuple):
-            pass  # already canonical — items are TokenInfo dataclasses, considered frozen at the caller.
+            pass
         else:
             raise TypeError(f"BatchFlushInputs.buffered_tokens must be list or tuple, got {type(value).__name__!r}")
+        freeze_fields(self, "buffered_tokens")
 
 
 @dataclass(frozen=True, slots=True)
@@ -296,7 +295,7 @@ class BatchFlushOutputs:
 
 @dataclass(frozen=True, slots=True)
 class BoundaryInputs:
-    """Bundle for row-attributed boundary dispatch (source / sink, Phase 2C).
+    """Bundle for row-attributed boundary dispatch (source / sink).
 
     Boundary contracts execute once per row, not once per batch. The bundle
     therefore carries the row's stable identity (``row_id``, ``token_id``),
@@ -329,9 +328,9 @@ class BoundaryInputs:
 class BoundaryOutputs:
     """Outputs bundle for boundary dispatch.
 
-    Most Phase 2C boundary adopters read only ``BoundaryInputs``. The bundle
+    Most current boundary adopters read only ``BoundaryInputs``. The bundle
     remains so the dispatcher signature ``boundary_check(inputs, outputs)``
-    matches the other three sites structurally and future boundary adopters
+    matches the other three sites structurally, and future boundary adopters
     have a place to hang explicit output evidence if needed.
     """
 
@@ -345,6 +344,7 @@ class BoundaryOutputs:
             pass
         else:
             raise TypeError(f"BoundaryOutputs.rows must be list or tuple, got {type(value).__name__!r}")
+        freeze_fields(self, "rows")
 
 
 # =============================================================================
@@ -383,6 +383,14 @@ class ExampleBundle:
 
     site: DispatchSite
     args: tuple[Any, ...]
+
+    def __post_init__(self) -> None:
+        value: object = self.args
+        if isinstance(value, list):
+            object.__setattr__(self, "args", tuple(value))
+        elif not isinstance(value, tuple):
+            raise TypeError(f"ExampleBundle.args must be list or tuple, got {type(value).__name__!r}")
+        freeze_fields(self, "args")
 
 
 _EXAMPLE_SITE_SUFFIXES: Mapping[DispatchSite, str] = MappingProxyType(
@@ -434,8 +442,8 @@ def _collect_example_bundles(
 ) -> tuple[ExampleBundle, ...]:
     """Return every example bundle declared for ``contract``.
 
-    Phase 2B multi-site adopters need shared-harness coverage at every
-    claimed dispatch site. The base classmethod remains mandatory for
+    Multi-site adopters need shared-harness coverage at every claimed
+    dispatch site. The base classmethod remains mandatory for
     backwards compatibility; additional sites are surfaced via optional
     ``<base_method_name>_<site>`` helpers whose suffix is derived from the
     dispatch-site enum.
@@ -489,7 +497,7 @@ def positive_example_does_not_apply_bundles(contract: DeclarationContract) -> tu
 
 
 # =============================================================================
-# H5 Layer 1 — deny-by-default payload_schema (issue elspeth-3956044fb7)
+# ADR-010 §Payload-schema enforcement — deny-by-default payload_schema
 # =============================================================================
 #
 # The framework declares ``payload_schema`` on each contract; Layer 1 wires
@@ -563,7 +571,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
     MUST override ``payload_schema`` (H5 Layer 1 deny-by-default).
 
     ``contract_name`` is dispatcher-attributed via ``_attach_contract_name``
-    (C4 closure, issue elspeth-d74fe81529). Contracts MUST NOT supply
+    (ADR-010 §Decision 3 contract-name attribution). Contracts MUST NOT supply
     ``contract_name`` at construction. ``contract_name`` is exposed as a
     read-only property; ``_attach_contract_name`` is one-shot.
     """
@@ -612,8 +620,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
                 f"{cls.__name__}.payload_schema must be a TypedDict "
                 f"(got {schema!r}). Declare a purpose-built TypedDict "
                 f"subclass for this violation's payload shape — this is "
-                f"the H5 Layer 1 deny-by-default gate "
-                f"(issue elspeth-3956044fb7)."
+                f"the ADR-010 payload-schema gate."
             )
         required_keys, optional_keys = _resolve_typeddict_key_sets(schema)
         allowed = required_keys | optional_keys
@@ -626,7 +633,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
                 f"{sorted(allowed)!r}. Undeclared payload keys could carry "
                 f"secret formats the scrubber does not yet recognise — "
                 f"declare every key on the violation's payload_schema "
-                f"TypedDict (issue elspeth-3956044fb7 / H5 Layer 1)."
+                f"TypedDict (ADR-010 §Payload-schema enforcement)."
             )
         missing = required_keys - payload_keys
         if missing:
@@ -636,7 +643,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
                 f"{sorted(required_keys)!r} as required. Supply every "
                 f"required key at construction time — the audit trail "
                 f"needs all declared context for triage "
-                f"(issue elspeth-3956044fb7 / H5 Layer 1)."
+                f"(ADR-010 §Payload-schema enforcement)."
             )
 
     @property
@@ -651,7 +658,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
                 "through the dispatcher so their contract_name can be "
                 "derived from the firing contract's registry entry. "
                 "Caller-supplied names were removed to close the spoofing "
-                "vector (issue elspeth-d74fe81529 / ADR-010 C4)."
+                "vector (ADR-010 §Decision 3 contract-name attribution)."
             )
         return cn
 
@@ -917,6 +924,7 @@ def derive_effective_input_fields(input_row: Any) -> frozenset[str]:
 
 _REGISTRY: list[DeclarationContract] = []
 _REGISTRY_BY_SITE: dict[DispatchSite, list[DeclarationContract]] = {site: [] for site in DispatchSite}
+_REGISTRY_LOCK = RLock()
 _FROZEN: bool = False
 
 
@@ -1045,60 +1053,62 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
         ValueError: duplicate ``name``; or contract claims zero dispatch
             sites.
     """
-    if _FROZEN:
-        raise FrameworkBugError(f"Cannot register {contract.name!r}: declaration-contract registry is frozen.")
+    with _REGISTRY_LOCK:
+        if _FROZEN:
+            raise FrameworkBugError(f"Cannot register {contract.name!r}: declaration-contract registry is frozen.")
 
-    if not isinstance(contract, DeclarationContract):
-        raise TypeError(
-            f"register_declaration_contract requires a DeclarationContract "
-            f"subclass instance; got {type(contract).__name__!r}. ADR-010 "
-            f"§Alternative 3 rejection of structural Protocol matching "
-            f"stands — contracts MUST inherit the nominal ABC."
-        )
-
-    # payload_schema validation (H5 Layer 1 — same as 2A).
-    try:
-        payload_schema = contract.payload_schema
-    except AttributeError:
-        raise TypeError(f"Contract {contract.name!r} missing required payload_schema attribute") from None
-    if not isinstance(payload_schema, type):
-        raise TypeError(f"Contract {contract.name!r} payload_schema must be a type (TypedDict subclass)")
-
-    # Example-classmethod callability — N2 Layer A / B harnesses require both.
-    for method_name in ("negative_example", "positive_example_does_not_apply"):
-        try:
-            method = getattr(type(contract), method_name)
-        except AttributeError:
+        if not isinstance(contract, DeclarationContract):
             raise TypeError(
-                f"Contract {contract.name!r} missing required {method_name!r} classmethod (ADR-010 §Decision 3 + N2 Layer A/B harness)."
-            ) from None
-        if not callable(method):
-            raise TypeError(f"Contract {contract.name!r}.{method_name} must be callable")
+                f"register_declaration_contract requires a DeclarationContract "
+                f"subclass instance; got {type(contract).__name__!r}. ADR-010 "
+                f"§Alternative 3 rejection of structural Protocol matching "
+                f"stands — contracts MUST inherit the nominal ABC."
+            )
 
-    # Claimed-sites validation (H2 §Fix direction + N1 MC3).
-    sites = _collect_contract_sites(contract)
-    if not sites:
-        raise ValueError(
-            f"Contract {contract.name!r} claims zero dispatch sites. A "
-            f"contract must decorate at least one dispatch method with "
-            f'@implements_dispatch_site("<site>") — otherwise the '
-            f"dispatcher will never invoke it and the contract is "
-            f"non-functional."
-        )
+        # payload_schema validation (H5 Layer 1 — same as 2A).
+        try:
+            payload_schema = contract.payload_schema
+        except AttributeError:
+            raise TypeError(f"Contract {contract.name!r} missing required payload_schema attribute") from None
+        if not isinstance(payload_schema, type):
+            raise TypeError(f"Contract {contract.name!r} payload_schema must be a type (TypedDict subclass)")
 
-    # Uniqueness.
-    for existing in _REGISTRY:
-        if existing.name == contract.name:
-            raise ValueError(f"duplicate contract name {contract.name!r}: already registered")
+        # Example-classmethod callability — N2 Layer A / B harnesses require both.
+        for method_name in ("negative_example", "positive_example_does_not_apply"):
+            try:
+                method = getattr(type(contract), method_name)
+            except AttributeError:
+                raise TypeError(
+                    f"Contract {contract.name!r} missing required {method_name!r} classmethod (ADR-010 §Decision 3 + N2 Layer A/B harness)."
+                ) from None
+            if not callable(method):
+                raise TypeError(f"Contract {contract.name!r}.{method_name} must be callable")
 
-    _REGISTRY.append(contract)
-    for site_name in sites:
-        _REGISTRY_BY_SITE[DispatchSite(site_name)].append(contract)
+        # Claimed-sites validation (H2 §Fix direction + N1 MC3).
+        sites = _collect_contract_sites(contract)
+        if not sites:
+            raise ValueError(
+                f"Contract {contract.name!r} claims zero dispatch sites. A "
+                f"contract must decorate at least one dispatch method with "
+                f'@implements_dispatch_site("<site>") — otherwise the '
+                f"dispatcher will never invoke it and the contract is "
+                f"non-functional."
+            )
+
+        # Uniqueness.
+        for existing in _REGISTRY:
+            if existing.name == contract.name:
+                raise ValueError(f"duplicate contract name {contract.name!r}: already registered")
+
+        _REGISTRY.append(contract)
+        for site_name in sites:
+            _REGISTRY_BY_SITE[DispatchSite(site_name)].append(contract)
 
 
 def registered_declaration_contracts() -> Sequence[DeclarationContract]:
     """Return the full contract registry (across all sites)."""
-    return tuple(_REGISTRY)
+    with _REGISTRY_LOCK:
+        return tuple(_REGISTRY)
 
 
 def registered_declaration_contracts_for_site(
@@ -1109,7 +1119,8 @@ def registered_declaration_contracts_for_site(
     Order preserved from registration order within the site. Used by the
     dispatcher's site-filtered iteration.
     """
-    return tuple(_REGISTRY_BY_SITE[site])
+    with _REGISTRY_LOCK:
+        return tuple(_REGISTRY_BY_SITE[site])
 
 
 def contract_sites(contract: DeclarationContract) -> frozenset[DispatchSiteName]:
@@ -1123,12 +1134,14 @@ def contract_sites(contract: DeclarationContract) -> frozenset[DispatchSiteName]
 def freeze_declaration_registry() -> None:
     """Seal the registry. Called at end of orchestrator bootstrap."""
     global _FROZEN
-    _FROZEN = True
+    with _REGISTRY_LOCK:
+        _FROZEN = True
 
 
 def declaration_registry_is_frozen() -> bool:
     """Return whether the registry has been sealed by bootstrap."""
-    return _FROZEN
+    with _REGISTRY_LOCK:
+        return _FROZEN
 
 
 # =============================================================================
@@ -1155,10 +1168,11 @@ def _clear_registry_for_tests() -> None:
     """
     global _FROZEN
     _require_pytest_process("_clear_registry_for_tests")
-    _REGISTRY.clear()
-    for site_list in _REGISTRY_BY_SITE.values():
-        site_list.clear()
-    _FROZEN = False
+    with _REGISTRY_LOCK:
+        _REGISTRY.clear()
+        for site_list in _REGISTRY_BY_SITE.values():
+            site_list.clear()
+        _FROZEN = False
 
 
 def _snapshot_registry_for_tests() -> tuple[
@@ -1173,8 +1187,9 @@ def _snapshot_registry_for_tests() -> tuple[
     necessary for correct restore semantics).
     """
     _require_pytest_process("_snapshot_registry_for_tests")
-    per_site_copy = {site: list(lst) for site, lst in _REGISTRY_BY_SITE.items()}
-    return list(_REGISTRY), per_site_copy, _FROZEN
+    with _REGISTRY_LOCK:
+        per_site_copy = {site: list(lst) for site, lst in _REGISTRY_BY_SITE.items()}
+        return list(_REGISTRY), per_site_copy, _FROZEN
 
 
 def _restore_registry_snapshot_for_tests(
@@ -1186,15 +1201,15 @@ def _restore_registry_snapshot_for_tests(
 ) -> None:
     """Test-only: restore from a ``_snapshot_registry_for_tests`` tuple.
 
-    Not safe under concurrent reads: the top-level registry restore uses slice
-    assignment, but the per-site map is still restored one site's list at a
-    time. Concurrent iterators over the registry may therefore observe a
-    partially restored test snapshot during teardown.
+    Restores the global list, per-site lists, and frozen flag under one
+    registry lock so concurrent readers cannot observe a partially restored
+    snapshot during teardown.
     """
     global _FROZEN
     _require_pytest_process("_restore_registry_snapshot_for_tests")
     registry_copy, per_site_copy, frozen_flag = snapshot
-    _REGISTRY[:] = registry_copy
-    for site, lst in per_site_copy.items():
-        _REGISTRY_BY_SITE[site][:] = lst
-    _FROZEN = frozen_flag
+    with _REGISTRY_LOCK:
+        _REGISTRY[:] = registry_copy
+        for site in DispatchSite:
+            _REGISTRY_BY_SITE[site][:] = per_site_copy[site]
+        _FROZEN = frozen_flag

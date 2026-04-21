@@ -343,6 +343,41 @@ def test_emitted_rows_non_list_non_tuple_raises() -> None:
         PostEmissionOutputs(emitted_rows=_LazySeq([1, 2, 3]))  # type: ignore[arg-type]
 
 
+def test_batch_flush_inputs_deep_freezes_nested_buffered_tokens() -> None:
+    inputs = BatchFlushInputs(
+        plugin=object(),
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        buffered_tokens=[{"outer": ["inner"]}],  # type: ignore[arg-type]
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+    assert isinstance(inputs.buffered_tokens, tuple)
+    assert isinstance(inputs.buffered_tokens[0], MappingProxyType)
+    assert inputs.buffered_tokens[0]["outer"] == ("inner",)
+
+
+def test_boundary_outputs_deep_freezes_nested_rows() -> None:
+    from elspeth.contracts.declaration_contracts import BoundaryOutputs
+
+    outputs = BoundaryOutputs(rows=[{"outer": ["inner"]}])  # type: ignore[arg-type]
+    assert isinstance(outputs.rows, tuple)
+    assert isinstance(outputs.rows[0], MappingProxyType)
+    assert outputs.rows[0]["outer"] == ("inner",)
+
+
+def test_example_bundle_deep_freezes_nested_args() -> None:
+    bundle = ExampleBundle(
+        site=DispatchSite.POST_EMISSION,
+        args=[{"outer": ["inner"]}],  # type: ignore[arg-type]
+    )
+    assert isinstance(bundle.args, tuple)
+    assert isinstance(bundle.args[0], MappingProxyType)
+    assert bundle.args[0]["outer"] == ("inner",)
+
+
 def test_negative_example_fires_the_violation() -> None:
     """This is the invariant every 2B/2C contract must satisfy.
 

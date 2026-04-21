@@ -206,8 +206,7 @@ def prepare_for_run() -> None:
     if declaration_registry_is_frozen():
         return
 
-    # ADR-010 §Decision 3 + issue elspeth-b03c6112c0 (C2) + N1 extension
-    # (issue elspeth-10dc0b747f — per-site manifest, H2 landing 2026-04-20):
+    # ADR-010 §Decision 3 manifest gate, extended by §H2 landing scope N1:
     # Assert SET EQUALITY between every registered (contract_name,
     # dispatch_site) pair and every pair in ``EXPECTED_CONTRACT_SITES``
     # BEFORE freezing. The original C2 closure checked contract-name
@@ -218,8 +217,7 @@ def prepare_for_run() -> None:
     #
     # Every plugin behaviour recorded as "compliant" (no violation raised)
     # must be evidence of every applicable contract's method having been
-    # invoked — under audit-complete semantics (ADR-010 §Semantics
-    # amendment, comment #417 on elspeth-425047a599) absence of violation
+    # invoked — under audit-complete semantics (ADR-010 §Semantics) absence of violation
     # means "checked and passed," which is only true if the dispatcher
     # actually dispatched to the contract for its claimed sites. The N1
     # manifest closes the (name, site) drift vector the C2 set-of-names
@@ -256,7 +254,7 @@ def prepare_for_run() -> None:
             )
         raise RuntimeError(
             "Declaration contract registry mismatch at orchestrator bootstrap "
-            "(N1 per-site manifest — ADR-010 §Decision 3 + issue elspeth-10dc0b747f).\n"
+            "(ADR-010 §Decision 3 manifest gate + §H2 landing scope N1).\n"
             f"  Expected (manifest):  {sorted((n, sorted(s)) for n, s in expected_sites.items())!r}\n"
             f"  Registered:           {sorted((n, sorted(s)) for n, s in registered_sites.items())!r}\n"
             f"  Missing names (not registered but in manifest): {sorted(missing_names)!r}\n"

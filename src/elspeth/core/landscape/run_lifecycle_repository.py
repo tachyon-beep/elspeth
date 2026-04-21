@@ -97,7 +97,7 @@ class RunLifecycleRepository:
             schema_contract_json = audit_record.to_json()
             schema_contract_hash = schema_contract.version_hash()
 
-        # ADR-010 M3 (issue elspeth-1c8185dfec): record the declaration +
+        # ADR-010 §Decision 3 M3: record the declaration +
         # Tier-1 registries that were in force at run start. Canonicalised
         # JSON so the value is stable across Python invocations and suitable
         # for hash-based cross-run regression detection. Must run AFTER the

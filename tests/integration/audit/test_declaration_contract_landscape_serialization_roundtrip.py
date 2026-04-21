@@ -1,39 +1,44 @@
-"""DeclarationContractViolation -> Landscape -> explain() round-trip.
+"""DeclarationContractViolation -> dispatcher -> Landscape -> explain() round-trip.
 
 CLAUDE.md attributability mandate: for any output, explain(recorder, run_id,
-token_id) must prove complete lineage. This test exercises the generic violation
-shape end-to-end so the Landscape schema compatibility is proven before any
-Phase 2B contract relies on it (ADR-010 reviewer B16).
-
-Pattern: direct ExecutionRepository API calls (begin_node_state +
-complete_node_state) rather than full engine setup, mirroring how the
-pass-through test calls processor internals directly. The NodeStateGuard
-path that wires AuditEvidenceBase.to_audit_dict() into ExecutionError.context
-is exercised via the same code path the engine uses at runtime.
+token_id) must prove complete lineage. These tests exercise declaration
+violations end-to-end through the dispatcher before they are recorded to the
+Landscape, so contract-name attribution is proven on the same path production
+uses at runtime.
 """
 
 from __future__ import annotations
 
 import json
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from elspeth.contracts import NodeStateFailed, NodeType
-from elspeth.contracts.declaration_contracts import DeclarationContractViolation
+from elspeth.contracts.declaration_contracts import (
+    AggregateDeclarationContractViolation,
+    DeclarationContract,
+    DeclarationContractViolation,
+    DispatchSite,
+    ExampleBundle,
+    PostEmissionInputs,
+    PostEmissionOutputs,
+    _clear_registry_for_tests,
+    _restore_registry_snapshot_for_tests,
+    _snapshot_registry_for_tests,
+    implements_dispatch_site,
+    register_declaration_contract,
+)
 from elspeth.contracts.enums import NodeStateStatus
 from elspeth.contracts.errors import ExecutionError
 from elspeth.core.landscape.lineage import explain
+from elspeth.engine.executors.declaration_dispatch import run_post_emission_checks
 from tests.fixtures.landscape import make_recorder_with_run, register_test_node
-
-# H5 Layer 1: Landscape round-trip exercises a rich payload shape (nested
-# dicts, multiple field types). The round-trip contract's payload_schema
-# declares every key the test carries.
 
 
 class _RoundTripPayload(TypedDict):
     field_name: str
     expected_type: str
     observed_type: str
-    nested: dict
+    nested: dict[str, Any]
 
 
 class _RoundTripViolation(DeclarationContractViolation):
@@ -48,11 +53,20 @@ class _SecretViolation(DeclarationContractViolation):
     payload_schema = _SecretPayload
 
 
-def _setup_landscape(*, run_id: str, row_id: str, token_id: str, node_id: str):
-    """Create a landscape with one run, source node, row, token, and transform node.
+class _AggregateChildPayload(TypedDict):
+    reason: str
 
-    Returns the RecorderSetup from make_recorder_with_run.
-    """
+
+class _AggregateChildViolationA(DeclarationContractViolation):
+    payload_schema = _AggregateChildPayload
+
+
+class _AggregateChildViolationB(DeclarationContractViolation):
+    payload_schema = _AggregateChildPayload
+
+
+def _setup_landscape(*, run_id: str, row_id: str, token_id: str, node_id: str):
+    """Create a landscape with one run, source node, row, token, and transform node."""
     setup = make_recorder_with_run(
         run_id=run_id,
         source_node_id="source-0",
@@ -76,20 +90,219 @@ def _setup_landscape(*, run_id: str, row_id: str, token_id: str, node_id: str):
     return setup
 
 
+def _plugin():
+    plugin = type("RoundTripPlugin", (), {})()
+    plugin.name = "FakeTransform"
+    return plugin
+
+
+def _post_emission_inputs(*, run_id: str, row_id: str, token_id: str, node_id: str) -> PostEmissionInputs:
+    return PostEmissionInputs(
+        plugin=_plugin(),
+        node_id=node_id,
+        run_id=run_id,
+        row_id=row_id,
+        token_id=token_id,
+        input_row={"amount": "not_an_int"},
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+
+
+def _post_emission_outputs() -> PostEmissionOutputs:
+    return PostEmissionOutputs(emitted_rows=({"amount": "not_an_int"},))
+
+
+def _record_failure(
+    setup,
+    *,
+    token_id: str,
+    node_id: str,
+    run_id: str,
+    input_data: dict[str, Any],
+    error: ExecutionError,
+) -> dict[str, Any]:
+    state = setup.factory.execution.begin_node_state(
+        token_id=token_id,
+        node_id=node_id,
+        run_id=run_id,
+        step_index=1,
+        input_data=input_data,
+    )
+    setup.factory.execution.complete_node_state(
+        state.state_id,
+        NodeStateStatus.FAILED,
+        duration_ms=1.0,
+        error=error,
+    )
+
+    lineage = explain(
+        query=setup.factory.query,
+        data_flow=setup.factory.data_flow,
+        run_id=run_id,
+        token_id=token_id,
+    )
+    assert lineage is not None
+    failed_states = [ns for ns in lineage.node_states if isinstance(ns, NodeStateFailed)]
+    assert len(failed_states) == 1
+    assert failed_states[0].error_json is not None
+    return json.loads(failed_states[0].error_json)["context"]
+
+
+class _RoundTripContract(DeclarationContract):
+    name = "test_roundtrip"
+    payload_schema: type = _RoundTripPayload
+
+    def applies_to(self, plugin: object) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        raise _RoundTripViolation(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={
+                "field_name": "amount",
+                "expected_type": "int",
+                "observed_type": "str",
+                "nested": {"inner": [1, 2, 3]},
+            },
+            message="round-trip test violation",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return ExampleBundle(
+            site=DispatchSite.POST_EMISSION,
+            args=(
+                _post_emission_inputs(run_id="neg-run", row_id="neg-row", token_id="neg-token", node_id="neg-node"),
+                _post_emission_outputs(),
+            ),
+        )
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
+
+
+class _SecretContract(DeclarationContract):
+    name = "secret_test"
+    payload_schema: type = _SecretPayload
+
+    def applies_to(self, plugin: object) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        raise _SecretViolation(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"api_key": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret test",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return ExampleBundle(
+            site=DispatchSite.POST_EMISSION,
+            args=(
+                _post_emission_inputs(
+                    run_id="secret-neg-run", row_id="secret-neg-row", token_id="secret-neg-token", node_id="secret-neg-node"
+                ),
+                _post_emission_outputs(),
+            ),
+        )
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
+
+
+class _AggregateChildContractA(DeclarationContract):
+    name = "contract_a"
+    payload_schema: type = _AggregateChildPayload
+
+    def applies_to(self, plugin: object) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        raise _AggregateChildViolationA(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"reason": "child-a-triggered"},
+            message="first child violation",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return ExampleBundle(
+            site=DispatchSite.POST_EMISSION,
+            args=(
+                _post_emission_inputs(run_id="agg-a-neg-run", row_id="agg-a-neg-row", token_id="agg-a-neg-token", node_id="agg-a-neg-node"),
+                _post_emission_outputs(),
+            ),
+        )
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
+
+
+class _AggregateChildContractB(DeclarationContract):
+    name = "contract_b"
+    payload_schema: type = _AggregateChildPayload
+
+    def applies_to(self, plugin: object) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        raise _AggregateChildViolationB(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"reason": "child-b-triggered"},
+            message="second child violation",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return ExampleBundle(
+            site=DispatchSite.POST_EMISSION,
+            args=(
+                _post_emission_inputs(run_id="agg-b-neg-run", row_id="agg-b-neg-row", token_id="agg-b-neg-token", node_id="agg-b-neg-node"),
+                _post_emission_outputs(),
+            ),
+        )
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
+
+
 class TestDeclarationContractViolationRoundTrip:
-    """Verify DeclarationContractViolation serializes losslessly through the Landscape."""
+    """Verify declaration violations serialize losslessly through the Landscape."""
+
+    def setup_method(self) -> None:
+        self._snapshot = _snapshot_registry_for_tests()
+        _clear_registry_for_tests()
+
+    def teardown_method(self) -> None:
+        _restore_registry_snapshot_for_tests(self._snapshot)
 
     def test_violation_payload_survives_landscape_round_trip(self) -> None:
-        """to_audit_dict() must be fully recoverable via explain().
-
-        Flow:
-          1. Build a DeclarationContractViolation with nested payload.
-          2. Record it to the Landscape as a FAILED node state via
-             ExecutionRepository (the same code path NodeStateGuard uses).
-          3. Call explain() on the token.
-          4. Parse the NodeStateFailed.error_json and assert every payload
-             field is present and correct — including nested structures.
-        """
         run_id = "run-roundtrip"
         row_id = "row-roundtrip"
         token_id = "tok-roundtrip"
@@ -102,72 +315,31 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        violation = _RoundTripViolation(
-            plugin="FakeTransform",
-            node_id=node_id,
-            run_id=run_id,
-            row_id=row_id,
-            token_id=token_id,
-            payload={
-                "field_name": "amount",
-                "expected_type": "int",
-                "observed_type": "str",
-                "nested": {"inner": [1, 2, 3]},
-            },
-            message="round-trip test violation",
-        )
-        # Integration test simulates dispatcher attribution — in production
-        # run_runtime_checks calls _attach_contract_name before the violation
-        # reaches to_audit_dict.
-        violation._attach_contract_name("test_roundtrip")
+        register_declaration_contract(_RoundTripContract())
+        try:
+            run_post_emission_checks(
+                inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
+                outputs=_post_emission_outputs(),
+            )
+        except _RoundTripViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="executor_post_process",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected _RoundTripViolation")
 
-        audit_context = violation.to_audit_dict()
-
-        exc_error = ExecutionError(
-            exception=str(violation),
-            exception_type=type(violation).__name__,
-            phase="executor_post_process",
-            context=audit_context,
-        )
-
-        state = setup.factory.execution.begin_node_state(
+        context = _record_failure(
+            setup,
             token_id=token_id,
             node_id=node_id,
             run_id=run_id,
-            step_index=1,
             input_data={"amount": "not_an_int"},
+            error=error,
         )
 
-        setup.factory.execution.complete_node_state(
-            state.state_id,
-            NodeStateStatus.FAILED,
-            duration_ms=1.0,
-            error=exc_error,
-        )
-
-        lineage = explain(
-            query=setup.factory.query,
-            data_flow=setup.factory.data_flow,
-            run_id=run_id,
-            token_id=token_id,
-        )
-
-        assert lineage is not None, "explain() returned None — token not found"
-
-        failed_states = [ns for ns in lineage.node_states if isinstance(ns, NodeStateFailed)]
-        assert len(failed_states) == 1, f"expected 1 FAILED node state, got {len(failed_states)}"
-
-        failed = failed_states[0]
-        assert failed.error_json is not None, "FAILED node state has no error_json"
-
-        error_record = json.loads(failed.error_json)
-        # error_json structure: {"exception": ..., "type": ..., "context": {...}}
-        context = error_record["context"]
-
-        # H5 Layer 1: the recorded exception_type is the concrete violation
-        # subclass (every violation now subclasses DeclarationContractViolation
-        # and declares its own payload_schema). The class name is what
-        # triage reads — the base-class name would be a lossy approximation.
         assert context["exception_type"] == "_RoundTripViolation"
         assert context["contract_name"] == "test_roundtrip"
         assert context["plugin"] == "FakeTransform"
@@ -184,11 +356,6 @@ class TestDeclarationContractViolationRoundTrip:
         assert payload["nested"]["inner"] == [1, 2, 3]
 
     def test_secrets_in_payload_are_scrubbed_before_landscape_write(self) -> None:
-        """Reviewer B7/F-4: audit record must never contain unredacted secrets.
-
-        The scrub happens in to_audit_dict() before the context reaches the
-        Landscape. Verify the redacted form is what survives the round-trip.
-        """
         run_id = "run-secret"
         row_id = "row-secret"
         token_id = "tok-secret"
@@ -201,89 +368,47 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        violation = _SecretViolation(
-            plugin="FakeTransform",
-            node_id=node_id,
-            run_id=run_id,
-            row_id=row_id,
-            token_id=token_id,
-            payload={"api_key": "sk-abcdef1234567890abcdef1234567890"},
-            message="secret test",
-        )
-        violation._attach_contract_name("secret_test")
+        register_declaration_contract(_SecretContract())
+        try:
+            run_post_emission_checks(
+                inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
+                outputs=_post_emission_outputs(),
+            )
+        except _SecretViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="executor_post_process",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected _SecretViolation")
 
-        audit_context = violation.to_audit_dict()
-
-        exc_error = ExecutionError(
-            exception=str(violation),
-            exception_type=type(violation).__name__,
-            phase="executor_post_process",
-            context=audit_context,
-        )
-
-        state = setup.factory.execution.begin_node_state(
+        context = _record_failure(
+            setup,
             token_id=token_id,
             node_id=node_id,
             run_id=run_id,
-            step_index=1,
             input_data={"api_key": "[redacted-in-input]"},
+            error=error,
         )
 
-        setup.factory.execution.complete_node_state(
-            state.state_id,
-            NodeStateStatus.FAILED,
-            duration_ms=1.0,
-            error=exc_error,
-        )
-
-        lineage = explain(
-            query=setup.factory.query,
-            data_flow=setup.factory.data_flow,
-            run_id=run_id,
-            token_id=token_id,
-        )
-
-        assert lineage is not None
-        failed_states = [ns for ns in lineage.node_states if isinstance(ns, NodeStateFailed)]
-        assert len(failed_states) == 1
-
-        error_record = json.loads(failed_states[0].error_json)
-        context = error_record["context"]
-
-        # The raw secret must not appear anywhere in the serialized audit record.
         assert "sk-abcdef" not in json.dumps(context)
+        assert context["contract_name"] == "secret_test"
         assert context["payload"]["api_key"] == "<redacted-secret>"
 
 
-# H2/N3 aggregate E2E round-trip (F5 acceptance bullet from elspeth-121b268aec).
-# When two applicable contracts fire on one row, the dispatcher wraps their
-# violations into AggregateDeclarationContractViolation. An auditor querying
-# the Landscape must see is_aggregate=true and a violations array with every
-# child's to_audit_dict payload — proving the audit-complete posture from
-# comment #417 on H2 ends up in the legal record, not just the in-memory
-# exception.
-
-
-class _AggregateChildPayload(TypedDict):
-    reason: str
-
-
-class _AggregateChildViolationA(DeclarationContractViolation):
-    payload_schema = _AggregateChildPayload
-
-
-class _AggregateChildViolationB(DeclarationContractViolation):
-    payload_schema = _AggregateChildPayload
-
-
 class TestAggregateDeclarationContractViolationRoundTrip:
-    """N3 + F5: multi-violation aggregate survives Landscape serialisation."""
+    """Verify aggregate declaration violations survive Landscape serialisation."""
+
+    def setup_method(self) -> None:
+        self._snapshot = _snapshot_registry_for_tests()
+        _clear_registry_for_tests()
+
+    def teardown_method(self) -> None:
+        _restore_registry_snapshot_for_tests(self._snapshot)
 
     def test_aggregate_payload_survives_landscape_round_trip(self) -> None:
-        from elspeth.contracts.declaration_contracts import (
-            AggregateDeclarationContractViolation,
-        )
-
         run_id = "run-aggregate"
         row_id = "row-aggregate"
         token_id = "tok-aggregate"
@@ -296,72 +421,32 @@ class TestAggregateDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        child_a = _AggregateChildViolationA(
-            plugin="FakeTransform",
-            node_id=node_id,
-            run_id=run_id,
-            row_id=row_id,
-            token_id=token_id,
-            payload={"reason": "child-a-triggered"},
-            message="first child violation",
-        )
-        child_a._attach_contract_name("contract_a")
+        register_declaration_contract(_AggregateChildContractA())
+        register_declaration_contract(_AggregateChildContractB())
+        try:
+            run_post_emission_checks(
+                inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
+                outputs=_post_emission_outputs(),
+            )
+        except AggregateDeclarationContractViolation as aggregate:
+            error = ExecutionError(
+                exception=str(aggregate),
+                exception_type=type(aggregate).__name__,
+                phase="declaration_dispatch",
+                context=aggregate.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected AggregateDeclarationContractViolation")
 
-        child_b = _AggregateChildViolationB(
-            plugin="FakeTransform",
-            node_id=node_id,
-            run_id=run_id,
-            row_id=row_id,
-            token_id=token_id,
-            payload={"reason": "child-b-triggered"},
-            message="second child violation",
-        )
-        child_b._attach_contract_name("contract_b")
-
-        aggregate = AggregateDeclarationContractViolation(
-            plugin="FakeTransform",
-            violations=(child_a, child_b),
-            message="2 contracts fired on the row",
-        )
-        aggregate._attach_by_dispatcher()
-
-        audit_context = aggregate.to_audit_dict()
-        exc_error = ExecutionError(
-            exception=str(aggregate),
-            exception_type=type(aggregate).__name__,
-            phase="declaration_dispatch",
-            context=audit_context,
-        )
-
-        state = setup.factory.execution.begin_node_state(
+        context = _record_failure(
+            setup,
             token_id=token_id,
             node_id=node_id,
             run_id=run_id,
-            step_index=1,
             input_data={"amount": "not_an_int"},
-        )
-        setup.factory.execution.complete_node_state(
-            state.state_id,
-            NodeStateStatus.FAILED,
-            duration_ms=1.0,
-            error=exc_error,
+            error=error,
         )
 
-        lineage = explain(
-            query=setup.factory.query,
-            data_flow=setup.factory.data_flow,
-            run_id=run_id,
-            token_id=token_id,
-        )
-        assert lineage is not None
-        failed_states = [ns for ns in lineage.node_states if isinstance(ns, NodeStateFailed)]
-        assert len(failed_states) == 1
-        assert failed_states[0].error_json is not None
-
-        error_record = json.loads(failed_states[0].error_json)
-        context = error_record["context"]
-
-        # Aggregate's to_audit_dict carries is_aggregate=True + violations list.
         assert context["exception_type"] == "AggregateDeclarationContractViolation"
         assert context["is_aggregate"] is True
         assert "contract_name" not in context, "aggregate must NOT emit contract_name (C5/S2-001)"

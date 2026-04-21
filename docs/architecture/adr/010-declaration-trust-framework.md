@@ -75,7 +75,7 @@ Runtime-checkable protocol carrying:
 
 `static_check` is NOT in the 2A protocol. Walker refactor is fully Phase 2B scope — designing a `static_check` shape without a second real walker-aware declaration would be premature abstraction (the ADR-009 §Alternatives #1 concern). Phase 2B's first declaration will validate the walker-side extension.
 
-Registry freezes at bootstrap; orchestrator asserts set-equality between `{c.name for c in registered_declaration_contracts()}` and the `EXPECTED_CONTRACTS` manifest at the same point (prevents silent runtime VAL disable — reviewer B9's concern; the weaker non-empty check was replaced by the manifest gate per issue `elspeth-b03c6112c0` / C2).
+Registry freezes at bootstrap; orchestrator asserts equality between the registered per-contract dispatch-site map and the `EXPECTED_CONTRACT_SITES` manifest at the same point (prevents silent runtime VAL disable — reviewer B9's concern; the weaker non-empty check was replaced first by the C2 manifest gate and then tightened to per-site equality by Amendment A3/N1).
 
 `DeclarationContractViolation` inherits `AuditEvidenceBase`. Every subclass declares its own `payload_schema` (TypedDict). At construction, `__init__` rejects any payload carrying undeclared keys or missing a required key (issue `elspeth-3956044fb7` / H5 Layer 1 — see **Payload-schema enforcement** below). After validation, the payload is deep-frozen; on `to_audit_dict` it is passed through `scrub_payload_for_audit` (H5 Layer 2 defence-in-depth).
 
@@ -155,7 +155,7 @@ Rejected. The five-reviewer panel's security review identified this as a Critica
 
 ### Alternative 4: defer the entire `DeclarationContract` protocol to Phase 2B
 
-Considered seriously in review. Rejected because: (a) the nominal `AuditEvidenceBase` widening and `@tier_1_error` decorator have immediate cleanup value independent of the protocol; (b) Task 0's paper-sketch pre-flight validates the protocol shape before code is written, satisfying rule-of-three; (c) Task 11's `CreatesTokensContract` preview proves the shape works for the first real 2B case. The remaining residual risk (protocol reshape in 2B) is bounded by the small 2A protocol surface.
+Considered seriously in review. Rejected because: (a) the nominal `AuditEvidenceBase` widening and `@tier_1_error` decorator have immediate cleanup value independent of the protocol; (b) Task 0's paper-sketch pre-flight validates the protocol shape before code is written, satisfying rule-of-three; (c) the `DeclaredOutputFieldsContract` sketch named in §Context already exercised the shape before implementation, and the later adopters recorded in §Adoption State confirmed the shape remained viable after ADR-015 retired the exploratory `CreatesTokensContract` preview. The remaining residual risk (protocol reshape in 2B) is bounded by the small 2A protocol surface.
 
 ## References
 
@@ -308,7 +308,7 @@ manifest:
 - **F5** (`elspeth-121b268aec`): E2E Landscape round-trip acceptance
   incorporated into each relevant ticket. Aggregate round-trip test
   added at
-  `tests/integration/audit/test_declaration_contract_landscape_roundtrip.py`.
+  `tests/integration/audit/test_declaration_contract_landscape_serialization_roundtrip.py`.
 - **H1 amendment** (`elspeth-5dae105959`): NFR derivation extended to
   account for per-site dispatch (≤4 call sites × per-site N) — existing
   parametrised benchmark unchanged, applies per site.

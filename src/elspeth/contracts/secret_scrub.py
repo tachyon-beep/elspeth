@@ -21,7 +21,7 @@ _REDACTED = "<redacted-secret>"
 
 # Heuristic patterns. Order matters — longer / more specific first.
 #
-# H5 Layer 2 additions (issue elspeth-3956044fb7 — closed-set blind spots):
+# ADR-010 §Payload-schema enforcement H5 Layer 2 additions — closed-set blind spots:
 #  - Azure SAS ``sig=`` parameter. The whole-string redaction rule means any
 #    URI containing a SAS signature has the entire URI replaced — structure
 #    (container name, blob path) would otherwise leak alongside the
@@ -59,7 +59,7 @@ _PATTERNS: tuple[re.Pattern[str], ...] = (
 # Key-name match is case-insensitive (see ``_scrub_value``). Every entry must
 # be lowercase here; the lookup applies ``.lower()`` on the observed key.
 #
-# H5 Layer 2 additions (issue elspeth-3956044fb7): bearer/session tokens
+# ADR-010 §Payload-schema enforcement H5 Layer 2 additions: bearer/session tokens
 # carried under non-``authorization`` keys, and connection-string keys
 # whose value may carry credentials even if the string itself doesn't
 # happen to match a regex above.

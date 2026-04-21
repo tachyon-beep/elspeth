@@ -1,5 +1,6 @@
 """TransformExecutor - wraps transform.process() with audit recording."""
 
+import hashlib
 import time
 from typing import TYPE_CHECKING, Any, cast
 
@@ -11,7 +12,10 @@ from elspeth.contracts import (
     TokenInfo,
     TransformProtocol,
 )
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.declaration_contracts import (
+    AggregateDeclarationContractViolation,
+    DeclarationContractViolation,
     PostEmissionInputs,
     PostEmissionOutputs,
     PreEmissionInputs,
@@ -20,10 +24,14 @@ from elspeth.contracts.declaration_contracts import (
 from elspeth.contracts.enums import (
     NodeStateStatus,
     RoutingMode,
+    RowOutcome,
 )
 from elspeth.contracts.errors import (
+    AuditIntegrityError,
     OrchestrationInvariantError,
+    PassThroughContractViolation,
     PluginContractViolation,
+    ZeroEmissionSuccessContractViolation,
 )
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
@@ -104,6 +112,48 @@ class TransformExecutor:
         # at module scope in engine.executors.pass_through (ADR-009 §Clause 2).
         # Both this executor and the processor's batch-flush cross-check share
         # the same instrument without needing constructor plumbing.
+
+    def _record_terminal_contract_failure(
+        self,
+        *,
+        transform: TransformProtocol,
+        token: TokenInfo,
+        run_id: str,
+        violation: (
+            DeclarationContractViolation
+            | AggregateDeclarationContractViolation
+            | PassThroughContractViolation
+            | ZeroEmissionSuccessContractViolation
+        ),
+    ) -> None:
+        """Persist the matching FAILED token_outcome for declaration-path failures."""
+        if self._data_flow is None:
+            raise OrchestrationInvariantError(
+                f"TransformExecutor.data_flow is None but declaration-path failures for "
+                f"transform '{transform.name}' must record terminal token_outcomes."
+            )
+
+        if type(violation) is PassThroughContractViolation:
+            summary = f"PassThroughContractViolation:{transform.name}:{sorted(violation.divergence_set)}"
+        else:
+            summary = f"{type(violation).__name__}:{transform.name}"
+        error_hash = hashlib.sha256(summary.encode()).hexdigest()[:16]
+
+        try:
+            self._data_flow.record_token_outcome(
+                ref=TokenRef(token_id=token.token_id, run_id=run_id),
+                outcome=RowOutcome.FAILED,
+                error_hash=error_hash,
+                context=violation.to_audit_dict(),
+            )
+        except Exception as record_failure:
+            raise AuditIntegrityError(
+                f"Failed to record {type(violation).__name__} FAILED outcome for token "
+                f"{token.token_id!r} (transform={transform.name!r}, node={transform.node_id!r}). "
+                f"Node state is already FAILED but terminal token_outcome is missing. "
+                f"Recorder failure: {type(record_failure).__name__}: {record_failure}. "
+                f"Original violation: {violation!s}"
+            ) from record_failure
 
     def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
         """Get or create shared batch adapter for a mixin-based transform.
@@ -249,8 +299,8 @@ class TransformExecutor:
                     )
 
             # --- PRE-EMISSION DECLARATION-CONTRACT DISPATCH (ADR-010 §Decision 3 + F2) ---
-            # Fires BEFORE generic input_schema validation so pre-emission adopters
-            # (Phase 2B's DeclaredRequiredFieldsContract) can attribute missing
+            # Fires BEFORE generic input_schema validation so the current
+            # pre-emission adopter (DeclaredRequiredFieldsContract) can attribute missing
             # declared input fields to ADR-013 rather than collapsing them into a
             # generic validation error when the schema requires the same field.
             # It also runs BEFORE transform.process() so a missing-field crash in
@@ -265,18 +315,27 @@ class TransformExecutor:
                 if transform._output_schema_config is not None
                 else frozenset()
             )
-            run_pre_emission_checks(
-                inputs=PreEmissionInputs(
-                    plugin=transform,
-                    node_id=transform.node_id or "",
+            try:
+                run_pre_emission_checks(
+                    inputs=PreEmissionInputs(
+                        plugin=transform,
+                        node_id=transform.node_id or "",
+                        run_id=ctx.run_id,
+                        row_id=token.row_id,
+                        token_id=token.token_id,
+                        input_row=token.row_data,
+                        static_contract=static_contract,
+                        effective_input_fields=effective_input_fields,
+                    ),
+                )
+            except (DeclarationContractViolation, AggregateDeclarationContractViolation) as violation:
+                self._record_terminal_contract_failure(
+                    transform=transform,
+                    token=token,
                     run_id=ctx.run_id,
-                    row_id=token.row_id,
-                    token_id=token.token_id,
-                    input_row=token.row_data,
-                    static_contract=static_contract,
-                    effective_input_fields=effective_input_fields,
-                ),
-            )
+                    violation=violation,
+                )
+                raise
 
             # --- INPUT VALIDATION (pre-execution) ---
             # Validate input against input_schema before calling process().
@@ -405,29 +464,43 @@ class TransformExecutor:
                     emitted_rows = tuple(result.rows)
                 else:
                     emitted_rows = ()
-                verify_zero_emission_declaration_path(
-                    plugin=transform,
-                    plugin_name=transform.name,
-                    node_id=transform.node_id,
-                    run_id=ctx.run_id,
-                    row_id=token.row_id,
-                    token_id=token.token_id,
-                    emitted_count=len(emitted_rows),
-                    used_success_empty=result.rows is not None and len(result.rows) == 0,
-                )
-                run_post_emission_checks(
-                    inputs=PostEmissionInputs(
+                try:
+                    verify_zero_emission_declaration_path(
                         plugin=transform,
-                        node_id=transform.node_id or "",
+                        plugin_name=transform.name,
+                        node_id=transform.node_id,
                         run_id=ctx.run_id,
                         row_id=token.row_id,
                         token_id=token.token_id,
-                        input_row=token.row_data,
-                        static_contract=static_contract,
-                        effective_input_fields=effective_input_fields,
-                    ),
-                    outputs=PostEmissionOutputs(emitted_rows=emitted_rows),
-                )
+                        emitted_count=len(emitted_rows),
+                        used_success_empty=result.rows is not None and len(result.rows) == 0,
+                    )
+                    run_post_emission_checks(
+                        inputs=PostEmissionInputs(
+                            plugin=transform,
+                            node_id=transform.node_id or "",
+                            run_id=ctx.run_id,
+                            row_id=token.row_id,
+                            token_id=token.token_id,
+                            input_row=token.row_data,
+                            static_contract=static_contract,
+                            effective_input_fields=effective_input_fields,
+                        ),
+                        outputs=PostEmissionOutputs(emitted_rows=emitted_rows),
+                    )
+                except (
+                    DeclarationContractViolation,
+                    AggregateDeclarationContractViolation,
+                    PassThroughContractViolation,
+                    ZeroEmissionSuccessContractViolation,
+                ) as violation:
+                    self._record_terminal_contract_failure(
+                        transform=transform,
+                        token=token,
+                        run_id=ctx.run_id,
+                        violation=violation,
+                    )
+                    raise
 
             # Populate audit fields
             # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.

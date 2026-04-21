@@ -1,7 +1,7 @@
 """Property tests for ADR-010 dispatch surfaces (H2 §Acceptance F-QA-5).
 
-Closes the final §Acceptance bullet on ``elspeth-425047a599`` (H2). The prior
-H2-B landing at commit 009b6009 delivered the bundle types
+Closes the final ADR-010 H2 acceptance bullet. The prior H2-B landing at
+commit 009b6009 delivered the bundle types
 (``PreEmissionInputs`` / ``PostEmissionInputs`` / ``BatchFlushInputs`` /
 ``BoundaryInputs``) as frozen slots dataclasses with no ``Optional``/``None``
 fields, satisfying the *structural* half of F-QA-5. This file delivers the
@@ -22,8 +22,8 @@ Three properties per surface x 4 surfaces = 12 ``@given`` tests.
   branch of ``_dispatch`` is total.
 
 * **Property B** — N=1 raiser ⇒ dispatcher raises via reference equality
-  (N6 regression invariant — ADR-010 §Semantics amendment comment #417 on
-  ``elspeth-425047a599``). Asserts ``type(raised) is <original subclass>`` AND
+  (N6 regression invariant — ADR-010 §Semantics). Asserts
+  ``type(raised) is <original subclass>`` AND
   ``id(raised) == id(contract.last_raised)`` so an accidental
   "aggregation-of-one" wrapper regresses this test.
 
@@ -100,9 +100,9 @@ class _TestViolationB(DeclarationContractViolation):
 #
 # Every strategy below is a plain ``st.builds(...)`` call. No ``assume()``
 # filter, no ``@st.composite`` workaround, no ``.filter(...)`` shrinker tax.
-# ``BoundaryInputs.row_contract`` is intentionally nullable in Phase 2C to
-# support failsink-enriched rows that have no corresponding primary contract;
-# the strategy models that optionality directly rather than by filtering.
+# ``BoundaryInputs.row_contract`` is intentionally nullable because a
+# failsink-enriched row may have no corresponding primary contract; the
+# strategy models that optionality directly rather than by filtering.
 
 _IDENTITY_CHARS = st.characters(
     whitelist_categories=("Ll", "Lu", "Nd"),
@@ -552,6 +552,86 @@ class _BoundaryRaiserB(DeclarationContract):
         return _example_boundary()
 
 
+class _PreEmissionNeverRaises(DeclarationContract):
+    name: ClassVar[str] = "test_pre_emission_never_raises"
+    payload_schema: ClassVar[type] = _Payload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("pre_emission_check")
+    def pre_emission_check(self, inputs: PreEmissionInputs) -> None:
+        return None
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return _example_pre_emission()
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return _example_pre_emission()
+
+
+class _PostEmissionNeverRaises(DeclarationContract):
+    name: ClassVar[str] = "test_post_emission_never_raises"
+    payload_schema: ClassVar[type] = _Payload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        return None
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return _example_post_emission()
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return _example_post_emission()
+
+
+class _BatchFlushNeverRaises(DeclarationContract):
+    name: ClassVar[str] = "test_batch_flush_never_raises"
+    payload_schema: ClassVar[type] = _Payload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("batch_flush_check")
+    def batch_flush_check(self, inputs: BatchFlushInputs, outputs: BatchFlushOutputs) -> None:
+        return None
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return _example_batch_flush()
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return _example_batch_flush()
+
+
+class _BoundaryNeverRaises(DeclarationContract):
+    name: ClassVar[str] = "test_boundary_never_raises"
+    payload_schema: ClassVar[type] = _Payload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("boundary_check")
+    def boundary_check(self, inputs: BoundaryInputs, outputs: BoundaryOutputs) -> None:
+        return None
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return _example_boundary()
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return _example_boundary()
+
+
 # =============================================================================
 # Registry-isolation helpers (S2-008 gated)
 # =============================================================================
@@ -671,6 +751,38 @@ def _boundary_two_raisers():
     _restore_registry_snapshot_for_tests(snapshot)
 
 
+@pytest.fixture
+def _pre_emission_never_raises():
+    snapshot = _isolate_registry()
+    register_declaration_contract(_PreEmissionNeverRaises())
+    yield
+    _restore_registry_snapshot_for_tests(snapshot)
+
+
+@pytest.fixture
+def _post_emission_never_raises():
+    snapshot = _isolate_registry()
+    register_declaration_contract(_PostEmissionNeverRaises())
+    yield
+    _restore_registry_snapshot_for_tests(snapshot)
+
+
+@pytest.fixture
+def _batch_flush_never_raises():
+    snapshot = _isolate_registry()
+    register_declaration_contract(_BatchFlushNeverRaises())
+    yield
+    _restore_registry_snapshot_for_tests(snapshot)
+
+
+@pytest.fixture
+def _boundary_never_raises():
+    snapshot = _isolate_registry()
+    register_declaration_contract(_BoundaryNeverRaises())
+    yield
+    _restore_registry_snapshot_for_tests(snapshot)
+
+
 # Hypothesis default is 100 examples; the dispatcher is pure-Python, no I/O,
 # microsecond-scale per-example. Default — 100 x 12 tests = 1200 dispatcher
 # invocations per suite run, under a second total.
@@ -701,6 +813,16 @@ def test_pre_emission_empty_registry_returns_none(_empty_registry, bundle):
     Exercises the strategy's derivability (F-QA-5 structural half) and the
     0-violation branch of ``_dispatch``.
     """
+    assert run_pre_emission_checks(bundle) is None
+
+
+@given(bundle=pre_emission_inputs_strategy())  # -> PreEmissionInputs
+@_DISPATCH_PROPERTY_SETTINGS
+def test_pre_emission_applicable_non_raising_registry_returns_none(
+    _pre_emission_never_raises,
+    bundle,
+):
+    """Property A' — applicable contracts that all pass still return None."""
     assert run_pre_emission_checks(bundle) is None
 
 
@@ -768,6 +890,20 @@ def test_post_emission_empty_registry_returns_none(_empty_registry, inputs, outp
     outputs=post_emission_outputs_strategy(),
 )
 @_DISPATCH_PROPERTY_SETTINGS
+def test_post_emission_applicable_non_raising_registry_returns_none(
+    _post_emission_never_raises,
+    inputs,
+    outputs,
+):
+    """Property A' (post-emission) — see pre-emission analogue."""
+    assert run_post_emission_checks(inputs, outputs) is None
+
+
+@given(  # -> PostEmissionInputs, PostEmissionOutputs
+    inputs=post_emission_inputs_strategy(),
+    outputs=post_emission_outputs_strategy(),
+)
+@_DISPATCH_PROPERTY_SETTINGS
 def test_post_emission_n1_raises_via_reference_identity(
     _post_emission_single_raiser,
     inputs,
@@ -816,6 +952,20 @@ def test_post_emission_n2_raises_aggregate(
 @_DISPATCH_PROPERTY_SETTINGS
 def test_batch_flush_empty_registry_returns_none(_empty_registry, inputs, outputs):
     """Property A (batch-flush) — see pre-emission analogue."""
+    assert run_batch_flush_checks(inputs, outputs) is None
+
+
+@given(  # -> BatchFlushInputs, BatchFlushOutputs
+    inputs=batch_flush_inputs_strategy(),
+    outputs=batch_flush_outputs_strategy(),
+)
+@_DISPATCH_PROPERTY_SETTINGS
+def test_batch_flush_applicable_non_raising_registry_returns_none(
+    _batch_flush_never_raises,
+    inputs,
+    outputs,
+):
+    """Property A' (batch-flush) — see pre-emission analogue."""
     assert run_batch_flush_checks(inputs, outputs) is None
 
 
@@ -878,6 +1028,20 @@ def test_boundary_empty_registry_returns_none(_empty_registry, inputs, outputs):
     Property tests here lock the dispatcher shape in before the adopters
     start depending on it.
     """
+    assert run_boundary_checks(inputs, outputs) is None
+
+
+@given(  # -> BoundaryInputs, BoundaryOutputs
+    inputs=boundary_inputs_strategy(),
+    outputs=boundary_outputs_strategy(),
+)
+@_DISPATCH_PROPERTY_SETTINGS
+def test_boundary_applicable_non_raising_registry_returns_none(
+    _boundary_never_raises,
+    inputs,
+    outputs,
+):
+    """Property A' (boundary) — see pre-emission analogue."""
     assert run_boundary_checks(inputs, outputs) is None
 
 

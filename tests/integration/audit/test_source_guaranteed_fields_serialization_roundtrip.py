@@ -12,6 +12,7 @@ from elspeth.contracts.declaration_contracts import (
     BoundaryOutputs,
     DeclarationContract,
     DeclarationContractViolation,
+    DispatchSite,
     ExampleBundle,
     _clear_registry_for_tests,
     _restore_registry_snapshot_for_tests,
@@ -167,11 +168,69 @@ class _SecondaryBoundaryContract(DeclarationContract):
 
     @classmethod
     def negative_example(cls) -> ExampleBundle:
-        raise NotImplementedError
+        inputs = BoundaryInputs(
+            plugin=_plugin(),
+            node_id="source-secondary-neg-node",
+            run_id="source-secondary-neg-run",
+            row_id="source-secondary-neg-row",
+            token_id="source-secondary-neg-token",
+            static_contract=frozenset({"customer_id", "account_id"}),
+            row_data={"account_id": "v"},
+            row_contract=_contract(("account_id",)),
+        )
+        return ExampleBundle(site=DispatchSite.BOUNDARY, args=(inputs, BoundaryOutputs()))
 
     @classmethod
     def positive_example_does_not_apply(cls) -> ExampleBundle:
-        raise NotImplementedError
+        inputs = BoundaryInputs(
+            plugin=_plugin(declared_guaranteed_fields=frozenset()),
+            node_id="source-secondary-non-app-node",
+            run_id="source-secondary-non-app-run",
+            row_id="source-secondary-non-app-row",
+            token_id="source-secondary-non-app-token",
+            static_contract=frozenset(),
+            row_data={"customer_id": "v"},
+            row_contract=_contract(("customer_id",)),
+        )
+        return ExampleBundle(site=DispatchSite.BOUNDARY, args=(inputs, BoundaryOutputs()))
+
+
+class _SecretBoundaryContract(DeclarationContract):
+    name: ClassVar[str] = "source_guaranteed_fields_secret_roundtrip"
+    payload_schema: ClassVar[type] = _SecretPayload
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("boundary_check")
+    def boundary_check(self, inputs: BoundaryInputs, outputs: BoundaryOutputs) -> None:
+        raise _SecretRoundTripViolation(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
+            message="secret round-trip test",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        inputs = BoundaryInputs(
+            plugin=_plugin(),
+            node_id="source-secret-neg-node",
+            run_id="source-secret-neg-run",
+            row_id="source-secret-neg-row",
+            token_id="source-secret-neg-token",
+            static_contract=frozenset({"customer_id"}),
+            row_data={"customer_id": "v"},
+            row_contract=_contract(("customer_id",)),
+        )
+        return ExampleBundle(site=DispatchSite.BOUNDARY, args=(inputs, BoundaryOutputs()))
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
 
 
 class TestSourceGuaranteedFieldsRoundTrip:
@@ -268,30 +327,39 @@ class TestSourceGuaranteedFieldsRoundTrip:
         assert child_types == {"SourceGuaranteedFieldsViolation", "_SecondaryBoundaryViolation"}
 
     def test_secret_like_payload_value_is_scrubbed_before_landscape_round_trip(self) -> None:
+        register_declaration_contract(_SecretBoundaryContract())
+
         run_id = "run-source-guaranteed-fields-secret"
         row_id = "row-source-guaranteed-fields-secret"
         token_id = "token-source-guaranteed-fields-secret"
         node_id = "source-guaranteed-fields-node"
         setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
 
-        violation = _SecretRoundTripViolation(
-            plugin="SourceGuaranteedFieldsSource",
-            node_id=node_id,
-            run_id=run_id,
-            row_id=row_id,
-            token_id=token_id,
-            payload={"marker": "sk-abcdef1234567890abcdef1234567890"},
-            message="secret round-trip test",
-        )
-        violation._attach_contract_name("source_guaranteed_fields_secret_roundtrip")
-
-        error = ExecutionError(
-            exception=str(violation),
-            exception_type=type(violation).__name__,
-            phase="source_boundary_check",
-            context=violation.to_audit_dict(),
-        )
+        try:
+            run_boundary_checks(
+                inputs=BoundaryInputs(
+                    plugin=_plugin(node_id=node_id),
+                    node_id=node_id,
+                    run_id=run_id,
+                    row_id=row_id,
+                    token_id=token_id,
+                    static_contract=frozenset({"customer_id"}),
+                    row_data={"customer_id": "v"},
+                    row_contract=_contract(("customer_id",)),
+                ),
+                outputs=BoundaryOutputs(),
+            )
+        except _SecretRoundTripViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="source_boundary_check",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected _SecretRoundTripViolation")
 
         context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
         assert "sk-abcdef" not in json.dumps(context)
+        assert context["contract_name"] == "source_guaranteed_fields_secret_roundtrip"
         assert context["payload"]["marker"] == "<redacted-secret>"

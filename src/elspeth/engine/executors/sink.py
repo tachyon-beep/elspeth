@@ -189,8 +189,7 @@ class SinkExecutor:
                     ) from e
 
         if sink.declared_required_fields:
-            # TWO-LAYER SINK INVARIANT ARCHITECTURE (ADR-010 F3 —
-            # issue elspeth-5fc876138d, amendment 2026-04-20).
+            # TWO-LAYER SINK INVARIANT ARCHITECTURE (ADR-010 §H2 landing scope F3).
             #
             # This inline check is the TRANSACTIONAL BACKSTOP (Layer 2).
             # It runs INSIDE the sink's commit boundary where the dispatcher-
@@ -198,7 +197,7 @@ class SinkExecutor:
             # cannot see partial state. The two layers serve different audit
             # purposes:
             #
-            #   * Layer 1 (pre-write contract, 2C): intent validation.
+            #   * Layer 1 (pre-write declaration contract): intent validation.
             #     Triage SQL: WHERE exception_type = 'SinkRequiredFieldsViolation'
             #     (the concrete 2C contract class).
             #   * Layer 2 (THIS check): transactional backstop.
@@ -272,6 +271,44 @@ class SinkExecutor:
             phase=phase,
             context=exc.to_audit_dict(),
         )
+
+    def _record_boundary_failure_outcomes(
+        self,
+        *,
+        tokens: Sequence[TokenInfo],
+        sink_name: str,
+        phase: str,
+        violation: (DeclarationContractViolation | AggregateDeclarationContractViolation | SinkTransactionalInvariantError),
+    ) -> None:
+        """Record FAILED token_outcomes for sink boundary failures before write."""
+        base_context = dict(violation.to_audit_dict())
+        failing_token_id = base_context["token_id"] if "token_id" in base_context else None
+        failing_row_id = base_context["row_id"] if "row_id" in base_context else None
+        error_hash = hashlib.sha256(f"{type(violation).__name__}:{sink_name}:{phase}".encode()).hexdigest()[:16]
+
+        for token in tokens:
+            context = dict(base_context)
+            context["token_id"] = token.token_id
+            context["row_id"] = token.row_id
+            if failing_token_id is not None:
+                context["failing_token_id"] = failing_token_id
+            if failing_row_id is not None:
+                context["failing_row_id"] = failing_row_id
+            try:
+                self._data_flow.record_token_outcome(
+                    ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                    context=context,
+                )
+            except Exception as record_failure:
+                raise AuditIntegrityError(
+                    f"Failed to record {type(violation).__name__} FAILED outcome for token "
+                    f"{token.token_id!r} during {phase} at sink {sink_name!r}. "
+                    f"Node states are already FAILED but terminal token_outcomes are incomplete. "
+                    f"Recorder failure: {type(record_failure).__name__}: {record_failure}. "
+                    f"Original violation: {violation!s}"
+                ) from record_failure
 
     @staticmethod
     def _run_sink_boundary_checks(
@@ -456,19 +493,37 @@ class SinkExecutor:
                     token_ids=sink_token_ids,
                 ):
                     row_contracts = [t.row_data.contract for t in tokens]
-                    self._run_sink_boundary_checks(
-                        sink=sink,
-                        rows=rows,
-                        tokens=tokens,
-                        run_id=ctx.run_id,
-                        node_id=sink_node_id,
-                        row_contracts=row_contracts,
-                    )
+                    try:
+                        self._run_sink_boundary_checks(
+                            sink=sink,
+                            rows=rows,
+                            tokens=tokens,
+                            run_id=ctx.run_id,
+                            node_id=sink_node_id,
+                            row_contracts=row_contracts,
+                        )
 
-                    # Centralized input validation (before sink.write).
-                    # Wrong types at a sink boundary are upstream plugin bugs (Tier 2).
-                    # Pass per-row contracts for context-aware error messages.
-                    self._validate_sink_input(sink, rows, contracts=row_contracts)
+                        # Centralized input validation (before sink.write).
+                        # Wrong types at a sink boundary are upstream plugin bugs (Tier 2).
+                        # Pass per-row contracts for context-aware error messages.
+                        self._validate_sink_input(sink, rows, contracts=row_contracts)
+                    except (
+                        DeclarationContractViolation,
+                        AggregateDeclarationContractViolation,
+                        SinkTransactionalInvariantError,
+                    ) as boundary_violation:
+                        self._complete_states_failed(
+                            states=all_states,
+                            duration_ms=0.0,
+                            error=self._build_boundary_error(exc=boundary_violation, phase="sink_write"),
+                        )
+                        self._record_boundary_failure_outcomes(
+                            tokens=tokens,
+                            sink_name=sink.name,
+                            phase="sink_write",
+                            violation=boundary_violation,
+                        )
+                        raise
 
                     # Reset diversion log and call sink.write()
                     sink._reset_diversion_log()
@@ -509,13 +564,6 @@ class SinkExecutor:
                     "artifact_path": artifact_info.path_or_uri,
                     "content_hash": artifact_info.content_hash,
                 }
-        except (DeclarationContractViolation, AggregateDeclarationContractViolation, PluginContractViolation) as e:
-            self._complete_states_failed(
-                states=all_states,
-                duration_ms=0.0,
-                error=self._build_boundary_error(exc=e, phase="sink_write"),
-            )
-            raise
         except contract_errors.TIER_1_ERRORS as e:
             self._best_effort_cleanup(all_states, e, "sink_write")
             raise
@@ -648,37 +696,50 @@ class SinkExecutor:
                 # already open from the pre-phase).
                 failsink._reset_diversion_log()
                 try:
-                    self._run_sink_boundary_checks(
-                        sink=failsink,
-                        rows=enriched_rows,
-                        tokens=[token for token, _idx, _state in primary_divert_states],
-                        run_id=ctx.run_id,
-                        node_id=failsink_node_id,
-                        row_contracts=None,
-                    )
-                    # Validate enriched rows against failsink required fields.
-                    # skip_schema=True because the executor injects __diversion_*
-                    # fields that are outside the failsink's declared schema —
-                    # a fixed-schema failsink (extra="forbid") would reject them.
-                    # Required-field checking still catches missing upstream fields.
-                    # Inside the try block so failures close primary divert states.
-                    # Don't pass primary-path contracts here: the failsink's
-                    # declared_required_fields are diagnostic-shaped (e.g.,
-                    # __diversion_reason) and have no relationship to the
-                    # primary contract's field optionality. Annotating with
-                    # "optional in coalesce merge" would be misdirection —
-                    # the operator is debugging a failsink write, not a
-                    # missing primary field.
-                    self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
+                    try:
+                        self._run_sink_boundary_checks(
+                            sink=failsink,
+                            rows=enriched_rows,
+                            tokens=[token for token, _idx, _state in primary_divert_states],
+                            run_id=ctx.run_id,
+                            node_id=failsink_node_id,
+                            row_contracts=None,
+                        )
+                        # Validate enriched rows against failsink required fields.
+                        # skip_schema=True because the executor injects __diversion_*
+                        # fields that are outside the failsink's declared schema —
+                        # a fixed-schema failsink (extra="forbid") would reject them.
+                        # Required-field checking still catches missing upstream fields.
+                        # Inside the try block so failures close primary divert states.
+                        # Don't pass primary-path contracts here: the failsink's
+                        # declared_required_fields are diagnostic-shaped (e.g.,
+                        # __diversion_reason) and have no relationship to the
+                        # primary contract's field optionality. Annotating with
+                        # "optional in coalesce merge" would be misdirection —
+                        # the operator is debugging a failsink write, not a
+                        # missing primary field.
+                        self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
+                    except (
+                        DeclarationContractViolation,
+                        AggregateDeclarationContractViolation,
+                        SinkTransactionalInvariantError,
+                    ) as boundary_violation:
+                        primary_divert_pairs = [(t, s) for t, _, s in primary_divert_states]
+                        self._complete_states_failed(
+                            states=primary_divert_pairs,
+                            duration_ms=0.0,
+                            error=self._build_boundary_error(exc=boundary_violation, phase="failsink_write"),
+                        )
+                        self._record_boundary_failure_outcomes(
+                            tokens=[token for token, _idx, _state in primary_divert_states],
+                            sink_name=failsink.name,
+                            phase="failsink_write",
+                            violation=boundary_violation,
+                        )
+                        raise
+
                     failsink_write_result = failsink.write(enriched_rows, ctx)
                     failsink.flush()
-                except (DeclarationContractViolation, AggregateDeclarationContractViolation, PluginContractViolation) as e:
-                    self._complete_states_failed(
-                        states=[(t, s) for t, _, s in primary_divert_states],
-                        duration_ms=0.0,
-                        error=self._build_boundary_error(exc=e, phase="failsink_write"),
-                    )
-                    raise
                 except contract_errors.TIER_1_ERRORS:
                     raise
                 except Exception as e:
