@@ -13,17 +13,32 @@ from __future__ import annotations
 import pytest
 
 from elspeth.contracts.declaration_contracts import (
+    BatchFlushInputs,
+    BatchFlushOutputs,
     PostEmissionInputs,
     PostEmissionOutputs,
+    _clear_registry_for_tests,
+    _restore_registry_snapshot_for_tests,
+    _snapshot_registry_for_tests,
     derive_effective_input_fields,
+    register_declaration_contract,
 )
 from elspeth.contracts.errors import (
     FrameworkBugError,
     OrchestrationInvariantError,
     PassThroughContractViolation,
+    UnexpectedEmptyEmissionViolation,
 )
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.engine.executors.pass_through import PassThroughDeclarationContract
+from elspeth.engine.executors.can_drop_rows import CanDropRowsContract
+from elspeth.engine.executors.declaration_dispatch import (
+    run_batch_flush_checks,
+    run_post_emission_checks,
+)
+from elspeth.engine.executors.pass_through import (
+    PassThroughDeclarationContract,
+    verify_pass_through,
+)
 
 
 def _contract(fields: tuple[str, ...]) -> SchemaContract:
@@ -48,6 +63,10 @@ def _row(fields: tuple[str, ...]) -> PipelineRow:
     return PipelineRow(dict.fromkeys(fields, "v"), _contract(fields))
 
 
+def _empty_row() -> PipelineRow:
+    return PipelineRow({}, _contract(()))
+
+
 class _FakeTransform:
     name = "Fake"
     node_id = "n-1"
@@ -56,6 +75,14 @@ class _FakeTransform:
     declared_input_fields = frozenset()
     is_batch_aware = False
     _output_schema_config = None
+
+
+@pytest.fixture()
+def _isolated_registry():
+    snapshot = _snapshot_registry_for_tests()
+    _clear_registry_for_tests()
+    yield
+    _restore_registry_snapshot_for_tests(snapshot)
 
 
 def test_applies_to_uses_direct_attribute() -> None:
@@ -130,6 +157,20 @@ def test_post_emission_check_empty_emission_is_noop_when_can_drop_rows_true() ->
         effective_input_fields=derive_effective_input_fields(input_row),
     )
     c.post_emission_check(inputs, PostEmissionOutputs(emitted_rows=()))
+
+
+def test_verify_pass_through_empty_emission_is_noop_when_effective_input_fields_empty() -> None:
+    verify_pass_through(
+        input_fields=frozenset(),
+        emitted_rows=(),
+        can_drop_rows=False,
+        static_contract=frozenset(),
+        transform_name="Fake",
+        transform_node_id="n-1",
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+    )
 
 
 def test_derive_effective_input_fields_crashes_on_missing_contract() -> None:
@@ -244,3 +285,53 @@ def test_batch_flush_check_raises_on_divergence() -> None:
     with pytest.raises(PassThroughContractViolation) as exc_info:
         c.batch_flush_check(inputs, outputs)
     assert exc_info.value.divergence_set == frozenset({"b"})
+
+
+def test_dispatcher_zero_emission_with_empty_effective_input_fields_raises_only_can_drop_rows(
+    _isolated_registry,
+) -> None:
+    register_declaration_contract(PassThroughDeclarationContract())
+    register_declaration_contract(CanDropRowsContract())
+
+    plugin = _FakeTransform()
+    input_row = _empty_row()
+    inputs = PostEmissionInputs(
+        plugin=plugin,
+        node_id=plugin.node_id,
+        run_id="r",
+        row_id="rw",
+        token_id="t",
+        input_row=input_row,
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+
+    with pytest.raises(UnexpectedEmptyEmissionViolation) as exc_info:
+        run_post_emission_checks(inputs=inputs, outputs=PostEmissionOutputs(emitted_rows=()))
+
+    assert exc_info.value.payload["emitted_count"] == 0
+
+
+def test_batch_flush_dispatcher_zero_emission_with_empty_effective_input_fields_raises_only_can_drop_rows(
+    _isolated_registry,
+) -> None:
+    register_declaration_contract(PassThroughDeclarationContract())
+    register_declaration_contract(CanDropRowsContract())
+
+    plugin = _FakeTransform()
+    input_row = _empty_row()
+    inputs = BatchFlushInputs(
+        plugin=plugin,
+        node_id=plugin.node_id,
+        run_id="r-batch",
+        row_id="rw-batch",
+        token_id="t-batch",
+        buffered_tokens=(input_row,),
+        static_contract=frozenset(),
+        effective_input_fields=frozenset(),
+    )
+
+    with pytest.raises(UnexpectedEmptyEmissionViolation) as exc_info:
+        run_batch_flush_checks(inputs=inputs, outputs=BatchFlushOutputs(emitted_rows=()))
+
+    assert exc_info.value.payload["emitted_count"] == 0

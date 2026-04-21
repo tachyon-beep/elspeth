@@ -24,7 +24,11 @@ from elspeth.contracts.errors import (
     UnexpectedEmptyEmissionViolation,
 )
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
-from elspeth.engine.executors.can_drop_rows import CanDropRowsContract
+from elspeth.engine.executors.can_drop_rows import (
+    CanDropRowsContract,
+    verify_can_drop_rows,
+    verify_zero_emission_declaration_path,
+)
 from elspeth.engine.executors.declaration_dispatch import (
     run_batch_flush_checks,
     run_post_emission_checks,
@@ -101,6 +105,22 @@ def test_applies_to_on_plugin_missing_attribute_crashes() -> None:
 
     with pytest.raises(AttributeError):
         contract.applies_to(_NoAttr())
+
+
+@pytest.mark.parametrize(
+    ("attr_name", "bad_value"),
+    [
+        ("passes_through_input", "false"),
+        ("can_drop_rows", 0),
+    ],
+)
+def test_applies_to_rejects_non_boolean_flags(attr_name: str, bad_value: object) -> None:
+    contract = CanDropRowsContract()
+    plugin = _plugin()
+    setattr(plugin, attr_name, bad_value)
+
+    with pytest.raises(TypeError, match=rf"{attr_name} must be bool"):
+        contract.applies_to(plugin)
 
 
 def test_contract_claims_both_dispatch_sites() -> None:
@@ -188,6 +208,41 @@ def test_batch_flush_check_raises_on_zero_rows() -> None:
         contract.batch_flush_check(inputs, BatchFlushOutputs(emitted_rows=()))
 
     assert exc_info.value.payload["emitted_count"] == 0
+
+
+def test_verify_can_drop_rows_rejects_non_boolean_flags_before_building_payload() -> None:
+    plugin = _plugin()
+    plugin.passes_through_input = 1
+    plugin.can_drop_rows = 0
+
+    with pytest.raises(TypeError, match=r"passes_through_input must be bool"):
+        verify_can_drop_rows(
+            plugin=plugin,
+            plugin_name=plugin.name,
+            node_id=plugin.node_id or "",
+            run_id="run-1",
+            row_id="row-1",
+            token_id="token-1",
+            emitted_count=0,
+        )
+
+
+def test_verify_zero_emission_declaration_path_rejects_non_boolean_flags() -> None:
+    plugin = _plugin()
+    plugin.passes_through_input = "false"
+    plugin.can_drop_rows = "false"
+
+    with pytest.raises(TypeError, match=r"passes_through_input must be bool"):
+        verify_zero_emission_declaration_path(
+            plugin=plugin,
+            plugin_name=plugin.name,
+            node_id=plugin.node_id or "",
+            run_id="run-1",
+            row_id="row-1",
+            token_id="token-1",
+            emitted_count=0,
+            used_success_empty=True,
+        )
 
 
 def test_dispatcher_aggregates_with_pass_through_on_zero_rows(_isolated_registry) -> None:

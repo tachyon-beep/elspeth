@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.contracts.plugin_context import PluginContext
-from tests.fixtures.factories import make_source_context
+from tests.fixtures.factories import make_context, make_source_context
 
 DYNAMIC_SCHEMA = {"mode": "observed"}
 QUARANTINE_SINK = "quarantine"
@@ -115,6 +115,66 @@ class TestTextSource:
         rows = list(source.load(ctx))
 
         assert [row.row for row in rows] == [{"item": "first"}, {"item": ""}, {"item": "second"}]
+
+    def test_invalid_encoding_line_quarantines_but_valid_lines_continue(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Malformed bytes should quarantine one line, not abort the whole file."""
+        from elspeth.plugins.sources.text_source import TextSource
+
+        text_file = tmp_path / "bad.txt"
+        text_file.write_bytes(b"good1\n\xff\ngood3\n")
+
+        source = TextSource(
+            {
+                "path": str(text_file),
+                "column": "line",
+                "schema": DYNAMIC_SCHEMA,
+                "on_validation_failure": QUARANTINE_SINK,
+            }
+        )
+
+        rows = list(source.load(ctx))
+
+        assert len(rows) == 3
+        assert rows[0].is_quarantined is False
+        assert rows[0].row == {"line": "good1"}
+
+        quarantined = rows[1]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_error is not None
+        assert "line 2" in quarantined.quarantine_error
+        assert "utf-8" in quarantined.quarantine_error.lower()
+        assert quarantined.row["__line_number__"] == 2
+        assert "__raw_bytes_hex__" in quarantined.row
+
+        assert rows[2].is_quarantined is False
+        assert rows[2].row == {"line": "good3"}
+
+    def test_skipped_blank_lines_record_audit_summary(self, tmp_path: Path) -> None:
+        """Configured blank-line skipping should still leave audit evidence."""
+        from elspeth.plugins.sources.text_source import TextSource
+
+        text_file = tmp_path / "blank.txt"
+        text_file.write_text("first\n\n   \nsecond\n", encoding="utf-8")
+
+        source = TextSource(
+            {
+                "path": str(text_file),
+                "column": "line",
+                "schema": DYNAMIC_SCHEMA,
+                "on_validation_failure": QUARANTINE_SINK,
+            }
+        )
+        ctx = make_context(node_id="source")
+
+        rows = list(source.load(ctx))
+
+        assert [row.row for row in rows] == [{"line": "first"}, {"line": "second"}]
+        assert ctx.landscape.record_validation_error.call_count == 1
+
+        call = ctx.landscape.record_validation_error.call_args
+        assert call.kwargs["row_data"]["__skipped_blank_lines__"] == 2
+        assert call.kwargs["destination"] == "discard"
+        assert "skipped 2 blank line" in call.kwargs["error"].lower()
 
     def test_file_not_found_raises(self, ctx: PluginContext) -> None:
         from elspeth.plugins.sources.text_source import TextSource

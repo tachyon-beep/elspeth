@@ -1,5 +1,7 @@
 """Tests for SourceRow with SchemaContract integration."""
 
+import inspect
+
 import pytest
 
 from elspeth.contracts.results import SourceRow
@@ -52,12 +54,12 @@ class TestSourceRowWithContract:
         assert pipeline_row["name"] == "Alice"
 
     def test_valid_without_contract_raises(self) -> None:
-        """SourceRow.valid() without contract raises at construction.
+        """SourceRow.valid() without contract fails at the public API boundary.
 
         Bug fix: elspeth-a27e71979f. The invariant is now enforced in
         __post_init__ instead of failing later at to_pipeline_row().
         """
-        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+        with pytest.raises(TypeError, match="contract"):
             SourceRow.valid({"id": 1})
 
     def test_to_pipeline_row_raises_if_quarantined(self, sample_contract: SchemaContract) -> None:
@@ -75,13 +77,20 @@ class TestSourceRowWithContract:
 class TestSourceRowContractInvariant:
     """Valid SourceRow must have a contract — catches bugs at construction, not tokenization."""
 
+    def test_valid_signature_requires_contract_without_default(self) -> None:
+        """SourceRow.valid() should mechanically require contract at the API boundary."""
+        contract_param = inspect.signature(SourceRow.valid).parameters["contract"]
+
+        assert contract_param.kind is inspect.Parameter.KEYWORD_ONLY
+        assert contract_param.default is inspect.Parameter.empty
+
     def test_valid_without_contract_raises(self) -> None:
-        """SourceRow.valid() without contract raises ValueError.
+        """SourceRow.valid() without contract raises TypeError.
 
         Bug fix: elspeth-a27e71979f. Previously, contract=None was accepted
         for valid rows, causing a crash later at tokenization.
         """
-        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+        with pytest.raises(TypeError, match="contract"):
             SourceRow.valid({"id": 1})
 
     def test_valid_with_contract_succeeds(self) -> None:

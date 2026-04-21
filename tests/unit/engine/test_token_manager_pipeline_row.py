@@ -68,7 +68,7 @@ class TestTokenManagerCreateInitialToken:
         assert call_kwargs["data"] == {"amount": 100}
 
     def test_create_initial_token_requires_contract(self) -> None:
-        """create_initial_token should raise ValueError if SourceRow has no contract.
+        """SourceRow.valid() should fail fast when contract is omitted.
 
         This is a critical guard - if a source plugin returns SourceRow without
         contract, we crash immediately with a clear message rather than propagating
@@ -83,7 +83,7 @@ class TestTokenManagerCreateInitialToken:
         # Since elspeth-a27e71979f, SourceRow.__post_init__ rejects contract=None
         # at construction time, so the engine's guard is now unreachable via
         # normal construction. Verify the earlier guard fires instead.
-        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+        with pytest.raises(TypeError, match="contract"):
             SourceRow.valid({"amount": 100})
 
 

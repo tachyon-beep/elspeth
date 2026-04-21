@@ -5,10 +5,11 @@ the Data Manifesto).  They inherit from ``_StrictResponse`` so that
 coercion and unknown fields crash rather than silently passing through —
 the Landscape record and the HTTP response must agree exactly.
 
-Request models use plain ``BaseModel`` semantics: client input is Tier 3
-and the boundary-layer coercion rules (documented in ``tier-model-deep-dive``)
-apply.  Request-side extra-field rejection is considered per-model rather
-than globally; see ``web/blobs/schemas.py`` for the companion pattern.
+Request models keep normal ``BaseModel`` coercion semantics: client input
+is Tier 3 and the boundary-layer coercion rules (documented in
+``tier-model-deep-dive``) apply.  They still reject unknown keys
+mechanically so stale or typoed client payloads fail closed at the HTTP
+boundary instead of being silently reinterpreted by the route layer.
 """
 
 from __future__ import annotations
@@ -17,9 +18,10 @@ from datetime import datetime
 from uuid import UUID
 
 import pydantic
-from pydantic import BaseModel, ConfigDict, JsonValue
+from pydantic import BaseModel, ConfigDict, JsonValue, field_validator
 
 from elspeth.web.sessions.protocol import SessionRunStatus
+from elspeth.web.validation import has_visible_content
 
 
 class _StrictResponse(BaseModel):
@@ -36,10 +38,28 @@ class _StrictResponse(BaseModel):
     model_config = ConfigDict(strict=True, extra="forbid")
 
 
-class CreateSessionRequest(BaseModel):
+class _RequestModel(BaseModel):
+    """Tier 3 request base: allow coercion, reject unknown keys."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _require_visible_content(value: str, *, field_label: str) -> str:
+    """Reject strings that contain no visible characters."""
+    if not has_visible_content(value):
+        raise ValueError(f"{field_label} must contain at least one visible character")
+    return value
+
+
+class CreateSessionRequest(_RequestModel):
     """Request body for POST /api/sessions."""
 
-    title: str = "New session"
+    title: str = pydantic.Field(default="New session", min_length=1)
+
+    @field_validator("title")
+    @classmethod
+    def _validate_title(cls, value: str) -> str:
+        return _require_visible_content(value, field_label="Session title")
 
 
 class SessionResponse(_StrictResponse):
@@ -54,11 +74,16 @@ class SessionResponse(_StrictResponse):
     forked_from_message_id: str | None = None
 
 
-class SendMessageRequest(BaseModel):
+class SendMessageRequest(_RequestModel):
     """Request body for POST /api/sessions/{id}/messages."""
 
     content: str = pydantic.Field(min_length=1)
     state_id: UUID | None = None
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content(cls, value: str) -> str:
+        return _require_visible_content(value, field_label="Message content")
 
 
 type ToolCallObject = dict[str, JsonValue]
@@ -122,11 +147,16 @@ class CompositionStateResponse(_StrictResponse):
     created_at: datetime
 
 
-class ForkSessionRequest(BaseModel):
+class ForkSessionRequest(_RequestModel):
     """Request body for POST /api/sessions/{id}/fork."""
 
     from_message_id: UUID
-    new_message_content: str
+    new_message_content: str = pydantic.Field(min_length=1)
+
+    @field_validator("new_message_content")
+    @classmethod
+    def _validate_new_message_content(cls, value: str) -> str:
+        return _require_visible_content(value, field_label="Fork message content")
 
 
 class ForkSessionResponse(_StrictResponse):
@@ -137,7 +167,7 @@ class ForkSessionResponse(_StrictResponse):
     composition_state: CompositionStateResponse | None = None
 
 
-class RevertStateRequest(BaseModel):
+class RevertStateRequest(_RequestModel):
     """Request body for POST /api/sessions/{id}/state/revert."""
 
     state_id: UUID

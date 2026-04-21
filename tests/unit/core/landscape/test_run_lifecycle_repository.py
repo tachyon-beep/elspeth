@@ -170,6 +170,21 @@ class TestBeginRunRuntimeValManifest:
             assert key in recorded_by_name, f"Tier-1 class {key} missing from manifest"
             assert recorded_by_name[key] == tier_1_reason(cls)
 
+    def test_manifest_includes_landscape_record_error(self) -> None:
+        """Recorder-failure marker types must be registered and serialized."""
+        from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_reason
+        from elspeth.core.landscape.errors import LandscapeRecordError
+
+        db, _ = _make_repo(run_id="m3-landscape-record-error")
+        manifest = self._fetch_manifest(db, "m3-landscape-record-error")
+
+        assert LandscapeRecordError in TIER_1_ERRORS
+
+        recorded_by_name = {(e["class_module"], e["class_name"]): e["reason"] for e in manifest["tier_1_errors"]}
+        key = (LandscapeRecordError.__module__, LandscapeRecordError.__name__)
+        assert key in recorded_by_name
+        assert recorded_by_name[key] == tier_1_reason(LandscapeRecordError)
+
     def test_manifest_changes_when_declaration_registry_is_patched(self) -> None:
         """Temporarily removing a contract from the registry changes the recorded manifest.
 

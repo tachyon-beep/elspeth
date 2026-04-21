@@ -82,7 +82,7 @@ def verify_pass_through(
     other contract's raise on the same row.
     """
     if not emitted_rows:
-        if can_drop_rows:
+        if can_drop_rows or not input_fields:
             return
         _VIOLATIONS_COUNTER.add(1, {"transform": transform_name})
         raise PassThroughContractViolation(

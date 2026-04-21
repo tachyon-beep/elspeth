@@ -1,13 +1,14 @@
-"""Tier 1 strictness regression tests for secrets response schemas.
+"""Regression tests for secrets request/response schemas.
 
 The secrets API's response models serialize system-owned metadata —
 secret names, scopes, resolvability flags.  The request-side schema
-(``CreateSecretRequest``) remains a plain ``BaseModel`` because it is a
-Tier 3 boundary; its own field validators already perform the relevant
-boundary checks.
+(``CreateSecretRequest``) is still a Tier 3 boundary, but it now rejects
+unknown keys so malformed write payloads fail closed instead of being
+silently normalized.
 
-These tests verify that Tier 1 responses reject coercion and extra
-fields, mirroring the execution module's strictness contract.
+These tests verify both boundaries:
+- request-side extra-key rejection for writes
+- response-side strictness for system-owned metadata
 """
 
 from __future__ import annotations
@@ -16,10 +17,29 @@ import pytest
 from pydantic import ValidationError
 
 from elspeth.web.secrets.schemas import (
+    CreateSecretRequest,
     CreateSecretResponse,
     SecretInventoryResponse,
     ValidateSecretResponse,
 )
+
+
+class TestCreateSecretRequest:
+    def test_rejects_unknown_scope_field(self) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            CreateSecretRequest(
+                name="API_KEY",
+                value="hunter2",
+                scope="server",  # type: ignore[call-arg]
+            )
+
+    def test_rejects_unknown_available_field(self) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            CreateSecretRequest(
+                name="API_KEY",
+                value="hunter2",
+                available=True,  # type: ignore[call-arg]
+            )
 
 
 class TestSecretStrictCoercionRejected:
@@ -90,6 +110,34 @@ class TestSecretResponseHappyPath:
     def test_validate_response(self) -> None:
         resp = ValidateSecretResponse(name="api_key", available=False)
         assert resp.available is False
+
+
+class TestSecretScopeDomain:
+    def test_inventory_rejects_invalid_scope(self) -> None:
+        with pytest.raises(ValidationError, match="scope"):
+            SecretInventoryResponse(
+                name="api_key",
+                scope="bogus",  # type: ignore[arg-type]
+                available=True,
+                source_kind="env",
+            )
+
+    def test_create_response_rejects_invalid_scope(self) -> None:
+        with pytest.raises(ValidationError, match="scope"):
+            CreateSecretResponse(
+                name="api_key",
+                scope="bogus",  # type: ignore[arg-type]
+            )
+
+    def test_inventory_schema_emits_scope_enum(self) -> None:
+        scope_schema = SecretInventoryResponse.model_json_schema()["properties"]["scope"]
+
+        assert scope_schema["enum"] == ["user", "server", "org"]
+
+    def test_create_response_schema_emits_scope_enum(self) -> None:
+        scope_schema = CreateSecretResponse.model_json_schema()["properties"]["scope"]
+
+        assert scope_schema["enum"] == ["user", "server", "org"]
 
 
 class TestSecretStrictnessViaJson:

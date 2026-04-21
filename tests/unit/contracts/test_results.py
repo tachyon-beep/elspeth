@@ -266,6 +266,11 @@ class TestTransformResultErrorInvariants:
         with pytest.raises(ValueError, match="MUST provide reason"):
             TransformResult(status="error", row=None, reason=None)
 
+    def test_error_without_reason_key_raises(self) -> None:
+        """status='error' payloads must include the required 'reason' key."""
+        with pytest.raises(ValueError, match=r"MUST include reason\['reason'\]"):
+            TransformResult.error({})
+
     def test_error_with_row_raises(self) -> None:
         """status='error' with row set raises ValueError."""
         with pytest.raises(ValueError, match="MUST NOT include output data"):

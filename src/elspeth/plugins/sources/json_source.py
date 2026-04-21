@@ -136,7 +136,7 @@ class JSONSource(BaseSource):
 
     name = "json"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:793c6e2ffc3ed895"
+    source_file_hash: str | None = "sha256:71a82deab29b2ed3"
     config_model = JSONSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
@@ -489,8 +489,8 @@ class JSONSource(BaseSource):
             # Validate against locked contract to catch type drift on inferred fields.
             # Pydantic's extra="allow" accepts any type for extras — the contract
             # knows the inferred types from the first row and enforces them here.
-            contract = self.get_schema_contract()
-            if contract is not None and contract.locked:
+            contract = self.require_schema_contract()
+            if contract.locked:
                 violations = contract.validate(validated_row)
                 if violations:
                     error_msg = "; ".join(str(v) for v in violations)

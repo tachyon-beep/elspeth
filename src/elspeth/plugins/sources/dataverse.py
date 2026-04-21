@@ -192,7 +192,7 @@ class DataverseSource(BaseSource):
 
     name = "dataverse"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:7fbcf803bb0f952d"
+    source_file_hash: str | None = "sha256:5534f2a7ab459e40"
     determinism = Determinism.EXTERNAL_CALL  # Live REST API, not static file read
     config_model = DataverseSourceConfig
 
@@ -702,8 +702,8 @@ class DataverseSource(BaseSource):
                     # Validate against locked contract to catch type drift on
                     # inferred fields. Pydantic extra="allow" accepts any type
                     # for extras — the contract enforces inferred types here.
-                    contract = self._contract_builder.contract if self._contract_builder is not None else self.get_schema_contract()
-                    if contract is not None and contract.locked:
+                    contract = self._contract_builder.contract if self._contract_builder is not None else self.require_schema_contract()
+                    if contract.locked:
                         violations = contract.validate(validated_row)
                         if violations:
                             error_msg = "; ".join(str(v) for v in violations)

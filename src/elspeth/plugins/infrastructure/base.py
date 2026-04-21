@@ -980,6 +980,17 @@ class BaseSource(ABC):
         """
         return self._schema_contract
 
+    def require_schema_contract(self) -> SchemaContract:
+        """Return the current schema contract or crash on framework invariant failure."""
+        contract = self.get_schema_contract()
+        if contract is None:
+            raise FrameworkBugError(
+                f"{type(self).__name__} attempted to yield SourceRow.valid() before establishing "
+                "a schema contract. Source plugins must call set_schema_contract() before "
+                "emitting valid rows."
+            )
+        return contract
+
     def set_schema_contract(self, contract: SchemaContract) -> None:
         """Set or update the schema contract.
 

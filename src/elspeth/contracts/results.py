@@ -155,22 +155,29 @@ class TransformResult:
                 "Use TransformResult.success(row, ...) for single-row or "
                 "TransformResult.success_multi(rows, ...) for multi-row output."
             )
-        if self.status == "error" and self.reason is None:
-            raise ValueError(
-                "TransformResult with status='error' MUST provide reason. "
-                "Use TransformResult.error({'reason': '...'}) to create error results. "
-                "Missing reason is a plugin bug."
-            )
-        if self.status == "error" and (self.row is not None or self.rows is not None):
-            raise ValueError(
-                "TransformResult with status='error' MUST NOT include output data (row or rows). "
-                "Error results carry reason only, not data. This is a plugin bug."
-            )
-        if self.status == "error" and self.success_reason is not None:
-            raise ValueError(
-                "TransformResult with status='error' MUST NOT include success_reason. "
-                "Error results carry reason only. This is a plugin bug."
-            )
+        if self.status == "error":
+            if self.reason is None:
+                raise ValueError(
+                    "TransformResult with status='error' MUST provide reason. "
+                    "Use TransformResult.error({'reason': '...'}) to create error results. "
+                    "Missing reason is a plugin bug."
+                )
+            if "reason" not in self.reason:
+                raise ValueError(
+                    "TransformResult with status='error' MUST include reason['reason']. "
+                    "Use TransformResult.error({'reason': '...'}) to create error results. "
+                    "Missing reason['reason'] is a plugin bug."
+                )
+            if self.row is not None or self.rows is not None:
+                raise ValueError(
+                    "TransformResult with status='error' MUST NOT include output data (row or rows). "
+                    "Error results carry reason only, not data. This is a plugin bug."
+                )
+            if self.success_reason is not None:
+                raise ValueError(
+                    "TransformResult with status='error' MUST NOT include success_reason. "
+                    "Error results carry reason only. This is a plugin bug."
+                )
 
     @property
     def is_multi_row(self) -> bool:
@@ -507,7 +514,7 @@ class SourceRow:
     """Result from source loading - either valid data or quarantined invalid data.
 
     ALL rows from sources MUST be wrapped in SourceRow:
-    - Valid rows: SourceRow.valid(row_dict)
+    - Valid rows: SourceRow.valid(row_dict, contract=contract)
     - Invalid rows: SourceRow.quarantined(row_data, error, destination)
 
     This makes source outcomes first-class engine concepts:
@@ -565,13 +572,14 @@ class SourceRow:
     def valid(
         cls,
         row: dict[str, Any],
-        contract: SchemaContract | None = None,
+        *,
+        contract: SchemaContract,
     ) -> SourceRow:
         """Create a valid source row.
 
         Args:
             row: Validated row data
-            contract: Optional schema contract for the row
+            contract: Schema contract for the row
 
         Returns:
             SourceRow with is_quarantined=False

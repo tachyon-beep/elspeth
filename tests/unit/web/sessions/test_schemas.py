@@ -31,11 +31,21 @@ class TestCreateSessionRequest:
         req = CreateSessionRequest(title="My pipeline")
         assert req.title == "My pipeline"
 
+    @pytest.mark.parametrize("title", ["", "   ", "\u200b", "\ufeff"])
+    def test_rejects_blank_or_invisible_title(self, title: str) -> None:
+        with pytest.raises(ValidationError):
+            CreateSessionRequest(title=title)
+
 
 class TestSendMessageRequest:
     def test_rejects_empty_content(self) -> None:
         with pytest.raises(ValidationError, match="content"):
             SendMessageRequest(content="")
+
+    @pytest.mark.parametrize("content", ["   ", "\u200b", "\ufeff"])
+    def test_rejects_blank_or_invisible_only_content(self, content: str) -> None:
+        with pytest.raises(ValidationError):
+            SendMessageRequest(content=content)
 
     def test_accepts_nonempty_content(self) -> None:
         req = SendMessageRequest(content="hello")
@@ -69,6 +79,14 @@ class TestForkSessionRequest:
         with pytest.raises(ValidationError):
             ForkSessionRequest(from_message_id="not-a-uuid", new_message_content="fork")
 
+    @pytest.mark.parametrize("content", ["", "   ", "\u200b", "\ufeff"])
+    def test_rejects_blank_or_invisible_new_message_content(self, content: str) -> None:
+        with pytest.raises(ValidationError):
+            ForkSessionRequest(
+                from_message_id="550e8400-e29b-41d4-a716-446655440000",
+                new_message_content=content,
+            )
+
     def test_accepts_valid_uuid(self) -> None:
         import uuid
 
@@ -80,6 +98,40 @@ class TestRevertStateRequest:
     def test_rejects_invalid_uuid(self) -> None:
         with pytest.raises(ValidationError):
             RevertStateRequest(state_id="not-a-uuid")
+
+
+class TestSessionRequestExtraFieldsRejected:
+    @pytest.mark.parametrize(
+        ("model_cls", "payload"),
+        [
+            (CreateSessionRequest, {"title": "Chat", "legacy": "x"}),
+            (
+                SendMessageRequest,
+                {
+                    "content": "hello",
+                    "stateId": "550e8400-e29b-41d4-a716-446655440000",
+                },
+            ),
+            (
+                ForkSessionRequest,
+                {
+                    "from_message_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "new_message_content": "fork",
+                    "extra": True,
+                },
+            ),
+            (
+                RevertStateRequest,
+                {
+                    "state_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "extra": "x",
+                },
+            ),
+        ],
+    )
+    def test_request_model_rejects_unknown_keys(self, model_cls: type[object], payload: dict[str, object]) -> None:
+        with pytest.raises(ValidationError, match="extra"):
+            model_cls.model_validate(payload)
 
 
 class TestRunResponse:

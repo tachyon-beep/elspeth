@@ -9,12 +9,16 @@ The response models inherit from ``_StrictResponse`` so that
 promise: a future refactor that accidentally forwards a secret value
 into the response constructor crashes instead of being silently emitted.
 ``strict=True`` additionally blocks type coercion on audit metadata.
+The request model also rejects unknown keys so malformed secret writes
+fail closed at the HTTP boundary instead of being silently normalized
+into successful writes.
 """
 
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from elspeth.contracts.secrets import SecretScope
 from elspeth.web.validation import has_visible_content
 
 
@@ -28,13 +32,15 @@ class SecretInventoryResponse(_StrictResponse):
     """Public metadata for a secret reference -- NEVER includes the value."""
 
     name: str
-    scope: str
+    scope: SecretScope
     available: bool
     source_kind: str = ""
 
 
 class CreateSecretRequest(BaseModel):
     """Write-only request body for creating/updating a user-scoped secret."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
     value: str = Field(min_length=1, max_length=65536)
@@ -51,7 +57,7 @@ class CreateSecretResponse(_StrictResponse):
     """Write-only acknowledgement -- NEVER includes the value."""
 
     name: str
-    scope: str
+    scope: SecretScope
 
 
 class ValidateSecretResponse(_StrictResponse):

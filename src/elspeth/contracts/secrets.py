@@ -8,6 +8,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
+SecretScope = Literal["user", "server", "org"]
+
 
 class SecretsError(Exception):
     """Base for all secrets-subsystem errors.
@@ -72,7 +74,7 @@ class CreateSecretResult:
     """
 
     name: str
-    scope: Literal["user", "server", "org"]
+    scope: SecretScope
     fingerprint: str
 
 
@@ -86,7 +88,7 @@ class ResolvedSecret:
 
     name: str
     value: str
-    scope: Literal["user", "server", "org"]
+    scope: SecretScope
     fingerprint: str
 
     def __repr__(self) -> str:
@@ -107,7 +109,7 @@ class SecretInventoryItem:
     """
 
     name: str
-    scope: Literal["user", "server", "org"]
+    scope: SecretScope
     available: bool
     source_kind: str = ""
 

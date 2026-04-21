@@ -170,6 +170,28 @@ class TestCreateSecret:
         assert resp2.status_code == 201
         assert resp2.json()["name"] == "KEY"
 
+    def test_rejects_unknown_scope_field(self) -> None:
+        """Unsupported request keys must fail closed with 422."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "KEY", "value": "val", "scope": "server"},
+        )
+        assert resp.status_code == 422
+
+    def test_rejects_unknown_available_field(self) -> None:
+        """Stale client payload keys must not be silently dropped."""
+        app = _make_app()
+        client = TestClient(app)
+
+        resp = client.post(
+            "/api/secrets",
+            json={"name": "KEY", "value": "val", "available": True},
+        )
+        assert resp.status_code == 422
+
     def test_rejects_whitespace_only_value(self) -> None:
         """SECURITY: whitespace-only secret values must be rejected."""
         app = _make_app()

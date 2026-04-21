@@ -177,7 +177,7 @@ class TestRowProcessorPipelineRow:
         # normal construction. Verify the earlier guard fires instead.
         from elspeth.contracts import SourceRow
 
-        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+        with pytest.raises(TypeError, match="contract"):
             SourceRow.valid({"amount": 100})
 
 

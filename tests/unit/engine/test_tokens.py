@@ -811,7 +811,7 @@ class TestTokenManagerBoundaryPaths:
         # Since elspeth-a27e71979f, SourceRow.__post_init__ rejects contract=None
         # at construction time, so the engine's guard is now unreachable via
         # normal construction. Verify the earlier guard fires instead.
-        with pytest.raises(ValueError, match=r"[Vv]alid.*contract"):
+        with pytest.raises(TypeError, match="contract"):
             SourceRow.valid({"value": 42})
 
     def test_create_quarantine_token_rejects_non_quarantined_source_row(self) -> None:

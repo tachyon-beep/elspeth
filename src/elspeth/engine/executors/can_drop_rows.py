@@ -13,7 +13,7 @@ success output is now allowed only when the plugin explicitly declares
 
 from __future__ import annotations
 
-from typing import Any, ClassVar, cast
+from typing import Any, ClassVar
 
 from elspeth.contracts.declaration_contracts import (
     BatchFlushInputs,
@@ -58,6 +58,15 @@ def _build_row(fields: tuple[str, ...]) -> PipelineRow:
     return PipelineRow(dict.fromkeys(fields, "v"), contract)
 
 
+def _require_bool_flag(plugin: Any, *, attr_name: str) -> bool:
+    """Return a declaration flag only when it is an exact ``bool``."""
+
+    value = getattr(plugin, attr_name)
+    if type(value) is not bool:
+        raise TypeError(f"{type(plugin).__name__}.{attr_name} must be bool, got {type(value).__name__!r}.")
+    return value
+
+
 def verify_can_drop_rows(
     *,
     plugin: Any,
@@ -71,6 +80,8 @@ def verify_can_drop_rows(
     """Raise when a pass-through transform emitted zero rows without opt-in."""
     if emitted_count != 0:
         return
+    passes_through_input = _require_bool_flag(plugin, attr_name="passes_through_input")
+    can_drop_rows = _require_bool_flag(plugin, attr_name="can_drop_rows")
 
     raise UnexpectedEmptyEmissionViolation(
         plugin=plugin_name,
@@ -79,8 +90,8 @@ def verify_can_drop_rows(
         row_id=row_id,
         token_id=token_id,
         payload={
-            "passes_through_input": cast(bool, plugin.passes_through_input),
-            "can_drop_rows": cast(bool, plugin.can_drop_rows),
+            "passes_through_input": passes_through_input,
+            "can_drop_rows": can_drop_rows,
             "emitted_count": emitted_count,
         },
         message=(
@@ -113,7 +124,9 @@ def verify_zero_emission_declaration_path(
         return
     if emitted_count != 0:
         return
-    if cast(bool, plugin.passes_through_input):
+    passes_through_input = _require_bool_flag(plugin, attr_name="passes_through_input")
+    can_drop_rows = _require_bool_flag(plugin, attr_name="can_drop_rows")
+    if passes_through_input:
         return
 
     raise ZeroEmissionSuccessContractViolation(
@@ -122,8 +135,8 @@ def verify_zero_emission_declaration_path(
         run_id=run_id,
         row_id=row_id,
         token_id=token_id,
-        passes_through_input=cast(bool, plugin.passes_through_input),
-        can_drop_rows=cast(bool, plugin.can_drop_rows),
+        passes_through_input=passes_through_input,
+        can_drop_rows=can_drop_rows,
         emitted_count=emitted_count,
         message=(
             f"Transform {plugin_name!r} (node {node_id!r}) returned "
@@ -141,7 +154,9 @@ class CanDropRowsContract(DeclarationContract):
     payload_schema: ClassVar[type] = UnexpectedEmptyEmissionPayload
 
     def applies_to(self, plugin: Any) -> bool:
-        return cast(bool, plugin.passes_through_input) and not cast(bool, plugin.can_drop_rows)
+        passes_through_input = _require_bool_flag(plugin, attr_name="passes_through_input")
+        can_drop_rows = _require_bool_flag(plugin, attr_name="can_drop_rows")
+        return passes_through_input and not can_drop_rows
 
     @implements_dispatch_site("post_emission_check")
     def post_emission_check(

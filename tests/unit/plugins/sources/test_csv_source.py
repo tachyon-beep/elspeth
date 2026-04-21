@@ -385,6 +385,35 @@ class TestCSVSourceQuarantineYielding:
         assert not results[2].is_quarantined
         assert results[2].row == {"id": "3", "name": "carol"}
 
+    def test_unterminated_quoted_field_quarantines_and_stops_processing(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Malformed quoted input should quarantine instead of merging later rows.
+
+        Regression test for elspeth-8df72d9e80: default csv.reader leniency can
+        merge later physical rows into an unterminated quoted field unless the
+        parser is created in strict mode.
+        """
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "unterminated_quote.csv"
+        csv_file.write_text('id,name\n1,"alice\n2,bob\n3,carol\n')
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 1
+        quarantined = results[0]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_error is not None
+        assert "CSV parse error" in quarantined.quarantine_error
+        assert quarantined.row["__line_number__"] == 4
+
     def test_csv_error_in_data_rows_stops_processing(self, tmp_path: Path, ctx: PluginContext) -> None:
         """csv.Error in the main row loop stops processing — no silent continuation.
 
@@ -662,6 +691,51 @@ class TestCSVSourceQuarantineYielding:
 
         assert not results[2].is_quarantined
         assert results[2].row == {"id": "3", "name": "carol"}
+
+    def test_leading_blank_lines_are_skipped_before_header_discovery(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Leading blank lines should not become a zero-column header."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "leading_blank.csv"
+        csv_file.write_text("\nid,name\n1,alice\n\n2,bob\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 2
+        assert [row.row for row in results] == [
+            {"id": "1", "name": "alice"},
+            {"id": "2", "name": "bob"},
+        ]
+        assert all(result.is_quarantined is False for result in results)
+
+    def test_skipped_blank_lines_do_not_record_validation_errors(self, tmp_path: Path) -> None:
+        """Intentionally skipped blank lines should not inflate validation_errors."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "blank_lines.csv"
+        csv_file.write_text("id,name\n1,alice\n\n2,bob\n\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+        ctx = make_context(node_id="source")
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 2
+        assert ctx.landscape.record_validation_error.call_count == 0
 
     def test_malformed_header_csv_error_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Header parse csv.Error is quarantined (Tier-3 boundary), not raised."""

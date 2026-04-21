@@ -318,7 +318,7 @@ class AzureBlobSource(BaseSource):
 
     name = "azure_blob"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:2bf2ccfa5d11ff7a"
+    source_file_hash: str | None = "sha256:268b97f2a370881b"
     config_model = AzureBlobSourceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -895,8 +895,8 @@ class AzureBlobSource(BaseSource):
             # Validate against locked contract to catch type drift on inferred
             # fields. Pydantic extra="allow" accepts any type for extras — the
             # contract knows inferred types from the first row and enforces here.
-            contract = self.get_schema_contract()
-            if contract is not None and contract.locked:
+            contract = self.require_schema_contract()
+            if contract.locked:
                 violations = contract.validate(validated_row)
                 if violations:
                     error_msg = "; ".join(str(v) for v in violations)

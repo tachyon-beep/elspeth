@@ -26,6 +26,19 @@ from elspeth.plugins.infrastructure.config_base import SourceDataConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 
+def _contains_surrogateescape_chars(value: str) -> bool:
+    """Return True when value contains surrogateescape-decoded bytes."""
+    return any(0xDC80 <= ord(char) <= 0xDCFF for char in value)
+
+
+def _surrogateescape_line_to_bytes(value: str, encoding: str) -> bytes:
+    """Encode a surrogateescape-decoded line back to bytes for quarantine."""
+    try:
+        return value.encode(encoding, errors="surrogateescape")
+    except UnicodeEncodeError:
+        return value.encode("utf-8", errors="surrogateescape")
+
+
 class TextSourceConfig(SourceDataConfig):
     """Configuration for the plain-text line source plugin."""
 
@@ -58,7 +71,7 @@ class TextSource(BaseSource):
 
     name = "text"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:1ce671a021bc5960"
+    source_file_hash: str | None = "sha256:c76a93b112ac51ca"
     config_model = TextSourceConfig
     _on_validation_failure: str
 
@@ -121,15 +134,32 @@ class TextSource(BaseSource):
 
         self._first_valid_row_processed = False
         line_num = 0
+        skipped_blank_lines = 0
 
         try:
-            with open(self._path, encoding=self._encoding, newline="") as f:
-                for line_num, raw_line in enumerate(f, start=1):  # noqa: B007
+            with open(self._path, encoding=self._encoding, errors="surrogateescape", newline="") as f:
+                for line_num, raw_line in enumerate(f, start=1):
+                    if _contains_surrogateescape_chars(raw_line):
+                        raw_bytes = _surrogateescape_line_to_bytes(raw_line, self._encoding)
+                        quarantined = self._record_parse_error(
+                            ctx=ctx,
+                            row={
+                                "file_path": str(self._path),
+                                "__line_number__": line_num,
+                                "__raw_bytes_hex__": raw_bytes.hex(),
+                            },
+                            error_msg=f"Text parse error at line {line_num}: invalid {self._encoding} encoding",
+                        )
+                        if quarantined is not None:
+                            yield quarantined
+                        continue
+
                     value = raw_line.rstrip("\r\n")
                     if self._strip_whitespace:
                         value = value.strip()
 
                     if self._skip_blank_lines and value == "":
+                        skipped_blank_lines += 1
                         continue
 
                     # Shared composer/runtime contract helper depends on this:
@@ -151,6 +181,19 @@ class TextSource(BaseSource):
             if quarantined is not None:
                 yield quarantined
 
+        if skipped_blank_lines > 0:
+            # Audit the source-boundary filtering decision without inventing
+            # synthetic quarantine rows for intentionally skipped blanks.
+            ctx.record_validation_error(
+                row={
+                    "file_path": str(self._path),
+                    "__skipped_blank_lines__": skipped_blank_lines,
+                },
+                error=f"Text source skipped {skipped_blank_lines} blank line(s) due to skip_blank_lines=True",
+                schema_mode="parse",
+                destination="discard",
+            )
+
         if not self._first_valid_row_processed and self._contract_builder is not None:
             self.set_schema_contract(self._contract_builder.contract.with_locked())
 
@@ -166,8 +209,8 @@ class TextSource(BaseSource):
                 self.set_schema_contract(self._contract_builder.contract)
                 self._first_valid_row_processed = True
 
-            contract = self.get_schema_contract()
-            if contract is not None and contract.locked:
+            contract = self.require_schema_contract()
+            if contract.locked:
                 violations = contract.validate(validated_row)
                 if violations:
                     error_msg = "; ".join(str(v) for v in violations)
