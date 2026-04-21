@@ -12,7 +12,7 @@ Uses BaseAzureSafetyTransform for shared batch infrastructure.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypedDict
 
 from pydantic import BaseModel, Field
 
@@ -95,6 +95,19 @@ _AZURE_CATEGORY_MAP: dict[str, str] = {
 _EXPECTED_CATEGORIES: frozenset[str] = frozenset(_AZURE_CATEGORY_MAP.values())
 
 
+class _ContentSafetyProbeRequestBody(TypedDict):
+    text: str
+
+
+class _ContentSafetyProbeCategory(TypedDict):
+    category: str
+    severity: int
+
+
+class _ContentSafetyProbeResponseBody(TypedDict):
+    categoriesAnalysis: list[_ContentSafetyProbeCategory]
+
+
 class AzureContentSafety(BaseAzureSafetyTransform):
     """Analyze content using Azure Content Safety API.
 
@@ -107,13 +120,79 @@ class AzureContentSafety(BaseAzureSafetyTransform):
 
     name = "azure_content_safety"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:e6aed8e68e4e8fe2"
+    source_file_hash: str | None = "sha256:312759fdb2889836"
     config_model = AzureContentSafetyConfig
+    passes_through_input = True
+
+    @classmethod
+    def probe_config(cls) -> dict[str, Any]:
+        """Minimal config for the ADR-009 forward invariant."""
+        return {
+            "endpoint": "https://test.cognitiveservices.azure.com",
+            "api_key": "test-key",
+            "fields": ["content_safety_probe_text"],
+            "thresholds": {
+                "hate": 6,
+                "violence": 6,
+                "sexual": 6,
+                "self_harm": 6,
+            },
+            "schema": {"mode": "observed"},
+        }
 
     def __init__(self, config: dict[str, Any]) -> None:
         cfg = AzureContentSafetyConfig.from_dict(config, plugin_name=self.name)
         super().__init__(config, cfg, "AzureContentSafetySchema")
         self._thresholds = cfg.thresholds
+
+    def forward_invariant_probe_rows(self, probe: Any) -> list[Any]:
+        """Inject a deterministic safe content field for invariant probing."""
+        return [
+            self._augment_invariant_probe_row(
+                probe,
+                field_name="content_safety_probe_text",
+                value="safe content",
+            )
+        ]
+
+    def execute_forward_invariant_probe(
+        self,
+        probe_rows: list[Any],
+        ctx: Any,
+    ) -> TransformResult:
+        """Exercise the real single-row validation path with a local fake client."""
+
+        class _ProbeResponse:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> _ContentSafetyProbeResponseBody:
+                return {
+                    "categoriesAnalysis": [
+                        {"category": "Hate", "severity": 0},
+                        {"category": "Violence", "severity": 0},
+                        {"category": "Sexual", "severity": 0},
+                        {"category": "SelfHarm", "severity": 0},
+                    ]
+                }
+
+        class _ProbeClient:
+            def post(
+                self,
+                url: str,
+                json: _ContentSafetyProbeRequestBody,
+            ) -> _ProbeResponse:
+                del url, json
+                return _ProbeResponse()
+
+            def close(self) -> None:
+                return None
+
+        return self._execute_forward_invariant_probe_with_client(
+            probe_rows,
+            ctx,
+            client=_ProbeClient(),
+        )
 
     def _analyze_field(
         self,

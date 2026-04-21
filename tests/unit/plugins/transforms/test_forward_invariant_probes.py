@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import pytest
 
+from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 from elspeth.plugins.transforms.keyword_filter import KeywordFilter
 from elspeth.plugins.transforms.truncate import Truncate
 from elspeth.plugins.transforms.type_coerce import TypeCoerce
@@ -26,6 +28,8 @@ from tests.fixtures.factories import make_context
         pytest.param(TypeCoerce, {"type_coerce_probe_1"}, id="TypeCoerce"),
         pytest.param(KeywordFilter, {"keyword_filter_probe_1"}, id="KeywordFilter"),
         pytest.param(ValueTransform, {"value_transform_probe_added_1"}, id="ValueTransform"),
+        pytest.param(AzureContentSafety, {"content_safety_probe_text"}, id="AzureContentSafety"),
+        pytest.param(AzurePromptShield, {"prompt_shield_probe_text"}, id="AzurePromptShield"),
         pytest.param(
             WebScrapeTransform,
             {

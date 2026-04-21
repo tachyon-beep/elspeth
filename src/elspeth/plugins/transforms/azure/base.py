@@ -24,7 +24,7 @@ from pydantic import Field, field_validator
 from elspeth.contracts import Determinism
 from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
-from elspeth.contracts.errors import PluginRetryableError
+from elspeth.contracts.errors import FrameworkBugError, PluginRetryableError
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin, OutputPort
@@ -210,6 +210,47 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         raise NotImplementedError(
             f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
         )
+
+    def _execute_forward_invariant_probe_with_client(
+        self,
+        probe_rows: list[PipelineRow],
+        ctx: TransformContext,
+        *,
+        client: Any,
+    ) -> TransformResult:
+        """Drive the single-row validation path with a hermetic HTTP client."""
+        if len(probe_rows) != 1:
+            raise FrameworkBugError(
+                f"{self.__class__.__name__}.execute_forward_invariant_probe() "
+                f"received {len(probe_rows)} rows; Azure safety probes require exactly 1 row."
+            )
+
+        had_client_override = "_get_http_client" in self.__dict__
+        original_get_http_client = self._get_http_client
+        state_id = ctx.state_id or "invariant-probe-state"
+        token_id = ctx.token.token_id if ctx.token is not None else None
+
+        def _fake_get_http_client(
+            requested_state_id: str,
+            *,
+            token_id: str | None = None,
+        ) -> Any:
+            del requested_state_id, token_id
+            return client
+
+        try:
+            self.__dict__["_get_http_client"] = _fake_get_http_client
+            return self._process_single_with_state(
+                probe_rows[0],
+                state_id,
+                token_id=token_id,
+            )
+        finally:
+            if had_client_override:
+                self.__dict__["_get_http_client"] = original_get_http_client
+            else:
+                self.__dict__.pop("_get_http_client", None)
+            client.close()
 
     def _process_row(
         self,

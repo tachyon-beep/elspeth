@@ -335,6 +335,25 @@ class TestAzureContentSafetyTransform:
         with pytest.raises(NotImplementedError, match="accept"):
             transform.process(row, ctx)
 
+    def test_forward_probe_preserves_baseline(self) -> None:
+        """Invariant probe should validate safe content without dropping fields."""
+        from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
+
+        transform = AzureContentSafety(AzureContentSafety.probe_config())
+
+        assert AzureContentSafety.passes_through_input is True
+
+        base_row = make_pipeline_row({"baseline": "kept"})
+        result = transform.execute_forward_invariant_probe(
+            transform.forward_invariant_probe_rows(base_row),
+            make_context(),
+        )
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["baseline"] == "kept"
+        assert result.row["content_safety_probe_text"] == "safe content"
+
 
 class TestContentSafetyBatchProcessing:
     """Tests for Content Safety with BatchTransformMixin."""
