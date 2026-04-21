@@ -39,6 +39,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.results import ArtifactDescriptor
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.operations import track_operation
 from elspeth.engine.executors.declaration_dispatch import run_boundary_checks
@@ -301,7 +302,7 @@ class SinkExecutor:
                     error_hash=error_hash,
                     context=context,
                 )
-            except Exception as record_failure:
+            except LandscapeRecordError as record_failure:
                 raise AuditIntegrityError(
                     f"Failed to record {type(violation).__name__} FAILED outcome for token "
                     f"{token.token_id!r} during {phase} at sink {sink_name!r}. "

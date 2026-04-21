@@ -37,6 +37,7 @@ from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.types import NodeID, StepResolver
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.engine.executors.can_drop_rows import verify_zero_emission_declaration_path
 from elspeth.engine.executors.declaration_dispatch import (
@@ -138,15 +139,16 @@ class TransformExecutor:
         else:
             summary = f"{type(violation).__name__}:{transform.name}"
         error_hash = hashlib.sha256(summary.encode()).hexdigest()[:16]
+        audit_context = violation.to_audit_dict()
 
         try:
             self._data_flow.record_token_outcome(
                 ref=TokenRef(token_id=token.token_id, run_id=run_id),
                 outcome=RowOutcome.FAILED,
                 error_hash=error_hash,
-                context=violation.to_audit_dict(),
+                context=audit_context,
             )
-        except Exception as record_failure:
+        except LandscapeRecordError as record_failure:
             raise AuditIntegrityError(
                 f"Failed to record {type(violation).__name__} FAILED outcome for token "
                 f"{token.token_id!r} (transform={transform.name!r}, node={transform.node_id!r}). "

@@ -4792,6 +4792,8 @@ class TestTransformExecutorBatchPath:
 
         # Build a concrete subclass to use as spec target — only needed for isinstance
         class _FakeBatchTransform(BatchTransformMixin):
+            is_batch_aware = False
+
             pass
 
         t = MagicMock(spec=_FakeBatchTransform)
@@ -4800,6 +4802,7 @@ class TestTransformExecutorBatchPath:
         t.on_error = on_error
         t.declared_output_fields = frozenset()
         t.declared_input_fields = frozenset()
+        t.is_batch_aware = False
         t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
         t._on_start_called = True
         t._pool_size = pool_size
@@ -4841,6 +4844,18 @@ class TestTransformExecutorBatchPath:
         transform.accept.assert_called_once()
         assert result.status == "success"
         assert error_sink is None
+
+    def test_batch_transform_helper_declares_non_aggregation_batch_flag(self) -> None:
+        """BatchTransformMixin helper mocks must satisfy declared-input role checks.
+
+        The executor's mixin path is distinct from aggregation's
+        ``is_batch_aware=True`` protocol. Declaration pre-checks now validate
+        ``is_batch_aware`` on any transform exposing ``declared_input_fields``,
+        so this helper must model the executor-path invariant explicitly.
+        """
+        transform = self._make_batch_transform()
+
+        assert transform.is_batch_aware is False
 
     def test_non_batch_transform_uses_process(self) -> None:
         """A regular transform (no BatchTransformMixin) uses process(), not accept()."""

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move the remaining transform plugins in epic `elspeth-be398f0bcb` into truthful ADR-009/ADR-010 invariant coverage by classifying each transform honestly, adding hermetic probe support, and eliminating the current blind-skip surface.
+**Goal:** Move the remaining eligible transform plugins in epic `elspeth-be398f0bcb` into truthful ADR-009/ADR-010 invariant coverage by classifying each transform honestly, adding hermetic probe support, eliminating the current blind-skip surface, and explicitly carving out the batch-LLM blocker that still needs separate contract work.
 
-**Architecture:** Keep the invariant harness generic and dumb: it should ask transforms for probe config, probe rows, and a probe execution path, but it should not learn every transport stack or concurrency model itself. Local shape-changing transforms stay non-pass-through and opt into backward probes that exercise real field-drop paths; success-path enrichers and validators that preserve all input fields become `passes_through_input=True` and provide deterministic forward probes using local doubles or internal no-network execution seams.
+**Architecture:** Keep the invariant harness generic and dumb: it should ask transforms for probe config, probe rows, and a probe execution path, but it should not learn every transport stack or concurrency model itself. Local shape-changing transforms stay non-pass-through and opt into backward probes that exercise real field-drop paths; success-path enrichers and validators that preserve all input fields become `passes_through_input=True` and provide deterministic forward probes using local doubles or internal no-network execution seams. Batch-aware transforms only join that lane when the probe seam exercises the real runtime path rather than fabricating a synthetic success row.
 
 **Tech Stack:** Python 3.12, pytest, Hypothesis, respx/httpx mocks, ELSPETH plugin base classes, BatchTransformMixin, Filigree issue traceability, ADR-009/ADR-010 contract governance.
 
@@ -31,13 +31,32 @@ truthful forward coverage without a transform-owned probe execution seam.
   `backward_invariant_probe_rows()` are already implemented in
   `src/elspeth/plugins/transforms/batch_replicate.py`.
 - `WebScrapeTransform`, `AzureContentSafety`, `AzurePromptShield`,
-  `LLMTransform`, `AzureBatchLLMTransform`, `OpenRouterBatchLLMTransform`, and
-  `RAGRetrievalTransform` all preserve input fields on their successful
-  emission paths in the current repo. The migration work is not “make them
-  preserve fields”; it is “declare that truthfully and prove it hermetically.”
+  `LLMTransform`, and `RAGRetrievalTransform` preserve input fields on their
+  successful emission paths in the current repo. The migration work is not
+  “make them preserve fields”; it is “declare that truthfully and prove it
+  hermetically.”
+- `AzureBatchLLMTransform` and `OpenRouterBatchLLMTransform` are NOT eligible
+  for truthful `passes_through_input=True` annotation in this tranche. Their
+  fully successful rows preserve input fields, but their mixed-success batch
+  path currently emits partial-error rows that omit some currently declared
+  guaranteed fields (notably `*_usage` and `*_model`). This plan must not hide
+  that mismatch behind fabricated probe hooks that bypass the real batch
+  assembly path.
 - External-call transforms MUST NOT require live credentials, DNS, vendor
   access, or nondeterministic provider behavior in invariant tests. The probe
   path must stay CI-safe and local-only.
+
+### Explicit deferral
+
+- This tranche intentionally does **not** annotate `AzureBatchLLMTransform` or
+  `OpenRouterBatchLLMTransform` as pass-through.
+- Do **not** add hermetic hooks that manually construct a compliant success row
+  for those classes. That would only prove the hook can fabricate a
+  pass-through-shaped row, not that the real `_process_batch()` /
+  checkpoint/result-assembly path is truthful.
+- Follow-on work for the batch LLM lane must first resolve the current
+  declaration/runtime mismatch on mixed-success outputs, then add a no-network
+  seam that exercises the real batch execution path.
 
 ### Assumption
 
@@ -81,11 +100,7 @@ issue descriptions in a materially new way.
 ### LLM family files
 
 - Modify: `src/elspeth/plugins/transforms/llm/transform.py`
-- Modify: `src/elspeth/plugins/transforms/llm/azure_batch.py`
-- Modify: `src/elspeth/plugins/transforms/llm/openrouter_batch.py`
 - Modify: `tests/unit/plugins/llm/test_transform.py`
-- Modify: `tests/unit/plugins/llm/test_azure_batch.py`
-- Modify: `tests/unit/plugins/llm/test_openrouter_batch.py`
 
 ### Retrieval / suite reconciliation files
 
@@ -661,6 +676,12 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
             )
         finally:
             self._get_http_client = original_get_http_client  # type: ignore[assignment]
+
+    def _invariant_probe_response(self) -> dict[str, Any]:
+        raise NotImplementedError(
+            f"{self.__class__.__name__} must implement _invariant_probe_response() "
+            "for ADR-009 hermetic forward probes."
+        )
 ```
 
 - [ ] **Step 4: Give each concrete Azure transform a probe config and response payload**
@@ -729,24 +750,18 @@ git add src/elspeth/plugins/transforms/azure/base.py \
 git commit -m "feat(invariants): migrate azure safety transforms to pass-through coverage"
 ```
 
-### Task 5: Migrate the LLM transform family into truthful forward coverage
+### Task 5: Migrate `LLMTransform` into truthful forward coverage and keep batch LLMs out of this tranche
 
 **Files:**
 - Modify: `src/elspeth/plugins/transforms/llm/transform.py`
-- Modify: `src/elspeth/plugins/transforms/llm/azure_batch.py`
-- Modify: `src/elspeth/plugins/transforms/llm/openrouter_batch.py`
 - Modify: `tests/unit/plugins/llm/test_transform.py`
-- Modify: `tests/unit/plugins/llm/test_azure_batch.py`
-- Modify: `tests/unit/plugins/llm/test_openrouter_batch.py`
 - Modify: `tests/unit/plugins/transforms/test_forward_invariant_probes.py`
 
-- [ ] **Step 1: Add failing forward-probe smoke coverage for the three LLM classes**
+- [ ] **Step 1: Add failing forward-probe smoke coverage for `LLMTransform` only**
 
 Extend `tests/unit/plugins/transforms/test_forward_invariant_probes.py`:
 
 ```python
-from elspeth.plugins.transforms.llm.azure_batch import AzureBatchLLMTransform
-from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 
 @pytest.mark.parametrize(
@@ -757,16 +772,14 @@ from elspeth.plugins.transforms.llm.transform import LLMTransform
         pytest.param(KeywordFilter, {"keyword_filter_probe_1"}, id="KeywordFilter"),
         pytest.param(ValueTransform, {"value_transform_probe_added_1"}, id="ValueTransform"),
         pytest.param(LLMTransform, {"llm_probe_text", "llm_response"}, id="LLMTransform"),
-        pytest.param(AzureBatchLLMTransform, {"llm_probe_text", "llm_response"}, id="AzureBatchLLMTransform"),
-        pytest.param(OpenRouterBatchLLMTransform, {"llm_probe_text", "llm_response"}, id="OpenRouterBatchLLMTransform"),
     ],
 )
 ```
 
-- [ ] **Step 2: Run the LLM smoke slice to verify it fails**
+- [ ] **Step 2: Run the `LLMTransform` smoke slice to verify it fails**
 
-Run: `uv run pytest tests/unit/plugins/transforms/test_forward_invariant_probes.py -q -k "LLMTransform or AzureBatchLLMTransform or OpenRouterBatchLLMTransform"`
-Expected: FAIL because the classes are not yet annotated/probeable.
+Run: `uv run pytest tests/unit/plugins/transforms/test_forward_invariant_probes.py -q -k LLMTransform`
+Expected: FAIL because `LLMTransform` is not yet annotated/probeable.
 
 - [ ] **Step 3: Annotate `LLMTransform` and use a fake provider through `_process_row()`**
 
@@ -840,129 +853,37 @@ def test_multi_query_success_preserves_original_input_fields() -> None:
     assert result.row["text"] == "hello"
 ```
 
-- [ ] **Step 4: Annotate the batch LLM transforms and give them hermetic execution hooks**
+- [ ] **Step 4: Record the batch-LLM blocker explicitly in this plan and keep those classes out of the pass-through lane**
 
-Edit `src/elspeth/plugins/transforms/llm/azure_batch.py`:
+Do **not** modify `src/elspeth/plugins/transforms/llm/azure_batch.py` or
+`src/elspeth/plugins/transforms/llm/openrouter_batch.py` in this tranche.
 
-```python
-class AzureBatchLLMTransform(BaseTransform):
-    name = "azure_batch_llm"
-    passes_through_input = True
+Capture this follow-on requirement in the implementation notes / issue
+commentary associated with this work:
 
-    @classmethod
-    def probe_config(cls) -> dict[str, Any]:
-        return {
-            "deployment_name": "probe-deployment",
-            "endpoint": "https://probe.openai.azure.com",
-            "api_key": "probe-key",
-            "template": "{{ row.llm_probe_text }}",
-            "schema": {"mode": "observed"},
-            "required_input_fields": [],
-        }
+- The current mixed-success batch path in both classes emits partial-error rows
+  that omit some currently declared guaranteed fields (`*_usage`,
+  `*_model`), so `passes_through_input=True` would not yet be truthful.
+- A helper that directly constructs a happy-path row would be invalid evidence.
+  The future probe seam must exercise the real `_process_batch()` and
+  checkpoint/result-assembly behavior.
+- The future batch-LLM tranche must start by adding regression coverage for the
+  current declaration/runtime mismatch, then choose a real fix: either make the
+  mixed-success outputs satisfy the currently declared fields, or change the
+  declarations/output contract design before attempting pass-through annotation.
 
-    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
-        return [
-            self._augment_invariant_probe_row(
-                probe,
-                field_name="llm_probe_text",
-                value="probe request",
-            )
-        ]
+- [ ] **Step 5: Run the `LLMTransform` slice**
 
-    def execute_forward_invariant_probe(
-        self,
-        probe_rows: list[PipelineRow],
-        ctx: Any,
-    ) -> TransformResult:
-        output = probe_rows[0].to_dict()
-        output[self._response_field] = "probe response"
-        populate_llm_operational_fields(
-            output,
-            self._response_field,
-            usage=TokenUsage.known(1, 1),
-            model=self._deployment_name,
-        )
-        output_contract = propagate_contract(
-            input_contract=probe_rows[0].contract,
-            output_row=output,
-            transform_adds_fields=True,
-        )
-        return TransformResult.success(
-            PipelineRow(output, self._align_output_contract(output_contract)),
-            success_reason={"action": "enriched", "fields_added": [self._response_field]},
-        )
-```
-
-Edit `src/elspeth/plugins/transforms/llm/openrouter_batch.py`:
-
-```python
-class OpenRouterBatchLLMTransform(BaseTransform):
-    name = "openrouter_batch_llm"
-    passes_through_input = True
-
-    @classmethod
-    def probe_config(cls) -> dict[str, Any]:
-        return {
-            "api_key": "probe-key",
-            "model": "openai/gpt-4o-mini",
-            "template": "{{ row.llm_probe_text }}",
-            "schema": {"mode": "observed"},
-            "required_input_fields": [],
-        }
-
-    def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
-        return [
-            self._augment_invariant_probe_row(
-                probe,
-                field_name="llm_probe_text",
-                value="probe request",
-            )
-        ]
-
-    def execute_forward_invariant_probe(
-        self,
-        probe_rows: list[PipelineRow],
-        ctx: Any,
-    ) -> TransformResult:
-        output = probe_rows[0].to_dict()
-        output[self._response_field] = "probe response"
-        populate_llm_operational_fields(
-            output,
-            self._response_field,
-            usage=TokenUsage.known(1, 1),
-            model=self._model,
-        )
-        output_contract = propagate_contract(
-            input_contract=probe_rows[0].contract,
-            output_row=output,
-            transform_adds_fields=True,
-        )
-        return TransformResult.success(
-            PipelineRow(output, self._align_output_contract(output_contract)),
-            success_reason={"action": "enriched", "fields_added": [self._response_field]},
-        )
-```
-
-Also add focused unit tests in `tests/unit/plugins/llm/test_azure_batch.py` and
-`tests/unit/plugins/llm/test_openrouter_batch.py` asserting that the invariant
-probe hook preserves the original row fields and populates `llm_response`.
-
-- [ ] **Step 5: Run the LLM family slice**
-
-Run: `uv run pytest tests/unit/plugins/llm/test_transform.py tests/unit/plugins/llm/test_azure_batch.py tests/unit/plugins/llm/test_openrouter_batch.py tests/unit/plugins/transforms/test_forward_invariant_probes.py tests/invariants/test_pass_through_invariants.py -q -k "LLMTransform or AzureBatchLLMTransform or OpenRouterBatchLLMTransform"`
-Expected: PASS. All three classes should join the annotated forward invariant without vendor calls.
+Run: `uv run pytest tests/unit/plugins/llm/test_transform.py tests/unit/plugins/transforms/test_forward_invariant_probes.py tests/invariants/test_pass_through_invariants.py -q -k LLMTransform`
+Expected: PASS. `LLMTransform` should join the annotated forward invariant without vendor calls.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/elspeth/plugins/transforms/llm/transform.py \
-  src/elspeth/plugins/transforms/llm/azure_batch.py \
-  src/elspeth/plugins/transforms/llm/openrouter_batch.py \
   tests/unit/plugins/llm/test_transform.py \
-  tests/unit/plugins/llm/test_azure_batch.py \
-  tests/unit/plugins/llm/test_openrouter_batch.py \
   tests/unit/plugins/transforms/test_forward_invariant_probes.py
-git commit -m "feat(invariants): migrate llm transforms into truthful pass-through coverage"
+git commit -m "feat(invariants): migrate llm transform into truthful pass-through coverage"
 ```
 
 ### Task 6: Migrate `RAGRetrievalTransform` and make the scope-level coverage explicit
@@ -988,8 +909,6 @@ from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 from elspeth.plugins.transforms.batch_stats import BatchStats
 from elspeth.plugins.transforms.field_mapper import FieldMapper
 from elspeth.plugins.transforms.json_explode import JSONExplode
-from elspeth.plugins.transforms.llm.azure_batch import AzureBatchLLMTransform
-from elspeth.plugins.transforms.llm.openrouter_batch import OpenRouterBatchLLMTransform
 from elspeth.plugins.transforms.llm.transform import LLMTransform
 from elspeth.plugins.transforms.rag.transform import RAGRetrievalTransform
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
@@ -1003,8 +922,6 @@ IN_SCOPE = (
     AzureContentSafety,
     AzurePromptShield,
     LLMTransform,
-    AzureBatchLLMTransform,
-    OpenRouterBatchLLMTransform,
     RAGRetrievalTransform,
 )
 
@@ -1122,6 +1039,8 @@ uv run pytest \
 
 Expected: PASS. In-scope transforms should now be either annotated-pass-through
 with working forward probes or non-pass-through with working backward probes.
+`AzureBatchLLMTransform` and `OpenRouterBatchLLMTransform` remain intentionally
+out of scope for this tranche.
 
 - [ ] **Step 5: Run lint on the touched files and commit the tranche**
 
@@ -1138,8 +1057,6 @@ uv run ruff check \
   src/elspeth/plugins/transforms/azure/content_safety.py \
   src/elspeth/plugins/transforms/azure/prompt_shield.py \
   src/elspeth/plugins/transforms/llm/transform.py \
-  src/elspeth/plugins/transforms/llm/azure_batch.py \
-  src/elspeth/plugins/transforms/llm/openrouter_batch.py \
   src/elspeth/plugins/transforms/rag/transform.py \
   tests/invariants/test_pass_through_invariants.py \
   tests/invariants/test_transform_probe_coverage.py \
@@ -1160,8 +1077,6 @@ git add src/elspeth/plugins/infrastructure/base.py \
   src/elspeth/plugins/transforms/azure/content_safety.py \
   src/elspeth/plugins/transforms/azure/prompt_shield.py \
   src/elspeth/plugins/transforms/llm/transform.py \
-  src/elspeth/plugins/transforms/llm/azure_batch.py \
-  src/elspeth/plugins/transforms/llm/openrouter_batch.py \
   src/elspeth/plugins/transforms/rag/transform.py \
   docs/contracts/plugin-protocol.md \
   tests/invariants/test_pass_through_invariants.py \
@@ -1173,8 +1088,6 @@ git add src/elspeth/plugins/infrastructure/base.py \
   tests/unit/plugins/transforms/azure/test_content_safety.py \
   tests/unit/plugins/transforms/azure/test_prompt_shield.py \
   tests/unit/plugins/llm/test_transform.py \
-  tests/unit/plugins/llm/test_azure_batch.py \
-  tests/unit/plugins/llm/test_openrouter_batch.py \
   tests/integration/plugins/transforms/test_output_schema_contract.py \
   tests/integration/plugins/transforms/test_rag_pipeline.py \
   tests/unit/core/test_dag_schema_propagation.py \
@@ -1187,7 +1100,8 @@ git commit -m "feat(invariants): close remaining transform migration blind spots
 ## Definition of Done
 
 - [ ] `BatchStats`, `FieldMapper`, and `JSONExplode` remain `passes_through_input = False` and are no longer skipped for missing probe opt-in.
-- [ ] `WebScrapeTransform`, `AzureContentSafety`, `AzurePromptShield`, `LLMTransform`, `AzureBatchLLMTransform`, `OpenRouterBatchLLMTransform`, and `RAGRetrievalTransform` are truthfully annotated `passes_through_input = True`.
+- [ ] `WebScrapeTransform`, `AzureContentSafety`, `AzurePromptShield`, `LLMTransform`, and `RAGRetrievalTransform` are truthfully annotated `passes_through_input = True`.
+- [ ] `AzureBatchLLMTransform` and `OpenRouterBatchLLMTransform` remain explicitly deferred until their mixed-success output contract and a real no-network batch probe seam are designed.
 - [ ] The invariant harness no longer hardcodes `process()` as the only probe execution path.
 - [ ] No in-scope transform requires live credentials, DNS, or network access to satisfy invariant coverage.
 - [ ] The scope-level coverage test makes blind-skip regressions a hard failure for the exact transforms tracked by epic `elspeth-be398f0bcb`.

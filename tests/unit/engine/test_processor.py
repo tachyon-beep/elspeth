@@ -849,6 +849,49 @@ class TestProcessRowNoTransforms:
         recorded_refs = {call.kwargs["ref"].token_id for call in mock_record_token_outcome.call_args_list}
         assert recorded_refs == {"token-a", "token-b"}
 
+    def test_empty_batch_flush_telemetry_failure_does_not_interrupt_dropped_outcomes(self) -> None:
+        """Zero-row batch flush must still terminalize every buffered token if telemetry fails."""
+        _db, factory = _make_factory()
+        telemetry_manager = Mock()
+        telemetry_manager.handle_event.side_effect = RuntimeError("telemetry down")
+        processor = _make_processor(factory, telemetry_manager=telemetry_manager)
+        transform = _make_mock_transform(node_id="aggregate-1", name="batch-transform")
+        token_a = make_token_info(row_id="row-a", token_id="token-a", data={"value": 1})
+        token_b = make_token_info(row_id="row-b", token_id="token-b", data={"value": 2})
+        token_c = make_token_info(row_id="row-c", token_id="token-c", data={"value": 3})
+        fctx = _FlushContext(
+            node_id=NodeID("aggregate-1"),
+            transform=transform,
+            settings=AggregationSettings(
+                name="agg",
+                plugin="batch-plugin",
+                input="source",
+                on_error="discard",
+                trigger={"count": 3},
+            ),
+            buffered_tokens=(token_a, token_b, token_c),
+            batch_id="batch-1",
+            error_msg="batch flush dropped rows",
+            expand_parent_token=token_a,
+            triggering_token=token_c,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        with patch.object(factory.data_flow, "record_token_outcome") as mock_record_token_outcome:
+            results, child_items = processor._route_empty_emission_results(fctx)
+
+        assert mock_record_token_outcome.call_count == 3
+        recorded_refs = {call.kwargs["ref"].token_id for call in mock_record_token_outcome.call_args_list}
+        assert recorded_refs == {"token-a", "token-b", "token-c"}
+        assert telemetry_manager.handle_event.call_count == 3
+        assert child_items == []
+        assert tuple(result.outcome for result in results) == (
+            RowOutcome.DROPPED_BY_FILTER,
+            RowOutcome.DROPPED_BY_FILTER,
+            RowOutcome.DROPPED_BY_FILTER,
+        )
+
     def test_batch_flush_non_recorder_recording_bug_propagates_unmodified(self) -> None:
         """Only recorder failures become AuditIntegrityError on batch-flush auto-fail."""
         _db, factory = _make_factory()

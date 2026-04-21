@@ -922,7 +922,19 @@ class RowProcessor:
                 ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
                 outcome=RowOutcome.DROPPED_BY_FILTER,
             )
-            self._emit_token_completed(token, RowOutcome.DROPPED_BY_FILTER)
+            try:
+                self._emit_token_completed(token, RowOutcome.DROPPED_BY_FILTER)
+            except Exception as telemetry_failure:
+                logger.exception(
+                    "TokenCompleted telemetry failed after empty batch-flush audit completion; preserving dropped outcomes",
+                    extra={
+                        "run_id": self._run_id,
+                        "token_id": token.token_id,
+                        "transform_node_id": fctx.node_id,
+                        "transform_name": fctx.transform.name,
+                        "telemetry_error_type": type(telemetry_failure).__name__,
+                    },
+                )
             results.append(
                 RowResult(
                     token=token,
