@@ -62,12 +62,17 @@ from elspeth.contracts import (
     TokenInfo,
     TransformResult,
 )
-from elspeth.contracts.aggregation_checkpoint import AggregationCheckpointState
+from elspeth.contracts.aggregation_checkpoint import (
+    AggregationCheckpointState,
+    AggregationNodeCheckpoint,
+    AggregationTokenCheckpoint,
+)
 from elspeth.contracts.data import PluginSchema as _PermissiveSchema
 from elspeth.contracts.declaration_contracts import _attach_contract_name_from_dispatcher
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import (
     BatchStatus,
+    NodeType,
     NodeStateStatus,
     RoutingKind,
     RoutingMode,
@@ -106,6 +111,7 @@ from elspeth.engine.executors import (
 from elspeth.engine.spans import SpanFactory
 from elspeth.testing import make_field, make_row
 from tests.fixtures.factories import make_context
+from tests.fixtures.landscape import make_recorder_with_run, register_test_node
 from tests.unit.engine.conftest import make_test_step_resolver as _make_step_resolver
 
 # =============================================================================
@@ -175,9 +181,44 @@ def _make_factory() -> MagicMock:
     state = Mock(state_id="state_001")
     factory.execution.begin_node_state.return_value = state
     factory.execution.register_artifact.return_value = Mock(artifact_id="art_001")
-    batch = Mock(batch_id="batch_001")
-    factory.execution.create_batch.return_value = batch
     factory.execution.begin_operation.return_value = Mock(operation_id="op_001")
+
+    batch_counter = 0
+    batch_nodes: dict[str, str] = {}
+    batch_members: dict[str, list[Mock]] = {}
+
+    def create_batch_side_effect(*, run_id: str, aggregation_node_id: str) -> Mock:
+        nonlocal batch_counter
+        batch_counter += 1
+        batch_id = f"batch_{batch_counter:03d}"
+        batch = Mock(
+            batch_id=batch_id,
+            aggregation_node_id=str(aggregation_node_id),
+            status=BatchStatus.DRAFT,
+            attempt=0,
+        )
+        batch_nodes[batch_id] = str(aggregation_node_id)
+        batch_members.setdefault(batch_id, [])
+        return batch
+
+    def add_batch_member_side_effect(*, batch_id: str, token_id: str, ordinal: int) -> Mock:
+        member = Mock(batch_id=batch_id, token_id=token_id, ordinal=ordinal)
+        batch_members.setdefault(batch_id, []).append(member)
+        return member
+
+    def get_batch_side_effect(batch_id: str) -> Mock | None:
+        node_id = batch_nodes.get(batch_id)
+        if node_id is None:
+            return None
+        return Mock(batch_id=batch_id, aggregation_node_id=node_id)
+
+    def get_batch_members_side_effect(batch_id: str) -> list[Mock]:
+        return sorted(batch_members.get(batch_id, []), key=lambda member: member.ordinal)
+
+    factory.execution.create_batch.side_effect = create_batch_side_effect
+    factory.execution.add_batch_member.side_effect = add_batch_member_side_effect
+    factory.execution.get_batch.side_effect = get_batch_side_effect
+    factory.execution.get_batch_members.side_effect = get_batch_members_side_effect
     return factory
 
 
@@ -2632,6 +2673,86 @@ class TestAggregationExecutor:
         assert type(restored_rows[0]) is not PipelineRow  # type: ignore[comparison-overlap, unreachable]
         assert restored_rows[0] == {"value": "test"}
 
+    def test_restore_from_checkpoint_rejects_batch_members_beyond_checkpoint(self) -> None:
+        """Resume must fail early when persisted batch membership advanced past the checkpoint.
+
+        Crash window:
+        1. Batch member 0 is checkpointed.
+        2. Batch member 1 is persisted to audit but crash happens before next checkpoint.
+        3. Resume must not restore member_count=1 and continue the existing batch.
+        """
+        setup = make_recorder_with_run()
+        agg_node_id = register_test_node(
+            setup.data_flow,
+            setup.run_id,
+            "agg_1",
+            node_type=NodeType.AGGREGATION,
+            plugin_name="batch_stats",
+        )
+        contract = _make_contract()
+
+        persisted_tokens = []
+        for row_index, value in enumerate(("first", "second")):
+            row = setup.data_flow.create_row(
+                run_id=setup.run_id,
+                source_node_id=setup.source_node_id,
+                row_index=row_index,
+                data={"value": value},
+            )
+            token = setup.data_flow.create_token(row_id=row.row_id)
+            persisted_tokens.append((row, token, value))
+
+        batch = setup.execution.create_batch(
+            run_id=setup.run_id,
+            aggregation_node_id=agg_node_id,
+        )
+        for ordinal, (_row, token, _value) in enumerate(persisted_tokens):
+            setup.execution.add_batch_member(batch.batch_id, token.token_id, ordinal=ordinal)
+
+        stale_checkpoint = AggregationCheckpointState(
+            version=AGGREGATION_CHECKPOINT_VERSION,
+            nodes={
+                agg_node_id: AggregationNodeCheckpoint(
+                    tokens=(
+                        AggregationTokenCheckpoint(
+                            token_id=persisted_tokens[0][1].token_id,
+                            row_id=persisted_tokens[0][0].row_id,
+                            branch_name=None,
+                            fork_group_id=None,
+                            join_group_id=None,
+                            expand_group_id=None,
+                            row_data={"value": persisted_tokens[0][2]},
+                            contract_version=contract.version_hash(),
+                            contract=contract.to_checkpoint_format(),
+                        ),
+                    ),
+                    batch_id=batch.batch_id,
+                    elapsed_age_seconds=0.0,
+                    count_fire_offset=None,
+                    condition_fire_offset=None,
+                )
+            },
+        )
+
+        executor = AggregationExecutor(
+            setup.execution,
+            _make_span_factory(),
+            _make_step_resolver(),
+            run_id=setup.run_id,
+            aggregation_settings={
+                NodeID(agg_node_id): AggregationSettings(
+                    name="test_agg",
+                    plugin="batch_stats",
+                    input="default",
+                    on_error="discard",
+                    trigger=TriggerConfig(count=10),
+                )
+            },
+        )
+
+        with pytest.raises(AuditIntegrityError, match="advanced beyond the latest checkpoint"):
+            executor.restore_from_checkpoint(stale_checkpoint)
+
 
 # =============================================================================
 # TestSinkExecutor
@@ -4061,14 +4182,15 @@ class TestNodeStateGuard:
         with pytest.raises(AuditIntegrityError, match="state table corrupt"), guard:
             raise ValueError("original error, now masked by corruption")
 
-    def test_completion_attempted_prevents_double_write(self) -> None:
+    def test_post_commit_failure_prevents_double_write(self) -> None:
         """Regression: complete() raising after commit must not trigger __exit__ overwrite.
 
         If complete_node_state() commits COMPLETED to the DB but then raises
         (e.g., post-commit validation in the repository), _completed stays False.
-        Without _completion_attempted, __exit__ would overwrite the persisted
+        Without a durable-write marker, __exit__ would overwrite the persisted
         COMPLETED with FAILED — corrupting the audit trail.
         """
+        from elspeth.core.landscape.errors import LandscapePostCommitError
         from elspeth.engine.executors import NodeStateGuard
 
         factory = _make_factory()
@@ -4080,7 +4202,7 @@ class TestNodeStateGuard:
             call_count[0] += 1
             if call_count[0] == 1:
                 # First call: the explicit complete() — simulate post-commit failure
-                raise AuditIntegrityError("post-commit validation failed")
+                raise LandscapePostCommitError("post-commit validation failed")
             # Second call would be __exit__ overwriting — should NOT happen
             original_complete(**kwargs)
 
@@ -4093,14 +4215,83 @@ class TestNodeStateGuard:
             step_index=1,
             input_data={"v": 1},
         )
-        with pytest.raises(AuditIntegrityError, match="post-commit validation"), guard:
+        with pytest.raises(LandscapePostCommitError, match="post-commit validation"), guard:
             guard.complete(NodeStateStatus.COMPLETED, output_data={"v": 1}, duration_ms=0.0)
 
         # Only ONE call to complete_node_state — the explicit one.
-        # __exit__ must NOT attempt a second call because _completion_attempted is True.
+        # __exit__ must NOT attempt a second call because the terminal write is known.
         assert call_count[0] == 1
-        assert guard._completion_attempted is True
+        assert guard._terminal_persisted is True
         assert guard._completed is False  # Never reached — the call raised
+
+    def test_complete_pre_persistence_failure_records_failed(self) -> None:
+        """If complete() fails before persistence, __exit__ must still record FAILED."""
+        import rfc8785
+
+        from elspeth.engine.executors import NodeStateGuard
+
+        setup = make_recorder_with_run(source_node_id="source-0")
+        register_test_node(setup.data_flow, setup.run_id, "transform-1")
+        setup.data_flow.create_row(setup.run_id, setup.source_node_id, 0, {"name": "test"}, row_id="row-1")
+        setup.data_flow.create_token("row-1", token_id="tok-1")
+
+        guard = NodeStateGuard(
+            setup.execution,
+            token_id="tok-1",
+            node_id="transform-1",
+            run_id=setup.run_id,
+            step_index=1,
+            input_data={"name": "test"},
+        )
+
+        with pytest.raises(rfc8785.CanonicalizationError, match="unsupported type"), guard:
+            guard.complete(
+                NodeStateStatus.COMPLETED,
+                output_data={"name": "test"},
+                duration_ms=1.0,
+                success_reason={"action": "processed", "metadata": {"bad": object()}},
+            )
+
+        state = setup.execution.get_node_state(guard.state_id)
+        assert state is not None
+        assert state.status == NodeStateStatus.FAILED
+        assert state.error_json is not None
+        assert "CanonicalizationError" in state.error_json
+
+    def test_non_serializable_audit_evidence_records_failed_then_raises_audit_integrity(self) -> None:
+        """Broken audit evidence must not strand the state OPEN during auto-fail."""
+        from collections.abc import Mapping
+
+        from elspeth.contracts.audit_evidence import AuditEvidenceBase
+        from elspeth.contracts.errors import AuditIntegrityError
+        from elspeth.engine.executors import NodeStateGuard
+
+        class _BrokenEvidence(AuditEvidenceBase, RuntimeError):
+            def to_audit_dict(self) -> Mapping[str, Any]:
+                return {"bad": object()}
+
+        setup = make_recorder_with_run(source_node_id="source-0")
+        register_test_node(setup.data_flow, setup.run_id, "transform-1")
+        setup.data_flow.create_row(setup.run_id, setup.source_node_id, 0, {"name": "test"}, row_id="row-1")
+        setup.data_flow.create_token("row-1", token_id="tok-1")
+
+        guard = NodeStateGuard(
+            setup.execution,
+            token_id="tok-1",
+            node_id="transform-1",
+            run_id=setup.run_id,
+            step_index=1,
+            input_data={"name": "test"},
+        )
+
+        with pytest.raises(AuditIntegrityError, match="audit evidence serialization failed"), guard:
+            raise _BrokenEvidence("boom")
+
+        state = setup.execution.get_node_state(guard.state_id)
+        assert state is not None
+        assert state.status == NodeStateStatus.FAILED
+        assert state.error_json is not None
+        assert "boom" in state.error_json
 
     def test_plugin_contract_violation_populates_execution_error_context(self) -> None:
         """ADR-008: PluginContractViolation.to_audit_dict() → ExecutionError.context."""

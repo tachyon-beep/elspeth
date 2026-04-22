@@ -8,7 +8,9 @@ failures close AFTER accept (connection established, then terminated).
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -16,6 +18,7 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from elspeth.web.auth.models import AuthenticationError
+from elspeth.web.execution.schemas import CompletedData, ProgressData, RunEvent, RunStatusResponse
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -129,3 +132,134 @@ class TestWebSocketIDOR:
             ws.receive_json()
         assert exc_info.value.code == 4004
         assert "not found" in (exc_info.value.reason or "").lower()
+
+
+class TestWebSocketTimeoutRecovery:
+    """Timeout path must probe authoritative status, not send ad-hoc payloads."""
+
+    @staticmethod
+    def _make_authed_app(execution_service: MagicMock) -> FastAPI:
+        from elspeth.web.auth.models import UserIdentity
+
+        auth = MagicMock()
+        auth.authenticate = AsyncMock(return_value=UserIdentity(user_id=_TEST_USER_ID, username="testuser"))
+        broadcaster = _make_broadcaster()
+        return _create_ws_test_app(
+            auth_provider=auth,
+            execution_service=execution_service,
+            broadcaster=broadcaster,
+        )
+
+    def test_timeout_with_still_running_status_does_not_emit_heartbeat_payload(self) -> None:
+        """After an idle timeout, the next payload must still be a real RunEvent."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.verify_run_ownership = AsyncMock(return_value=True)
+        svc.get_status = AsyncMock(
+            side_effect=[
+                RunStatusResponse(
+                    run_id=str(run_id),
+                    status="running",
+                    started_at=datetime.now(tz=UTC),
+                    finished_at=None,
+                    rows_processed=1,
+                    rows_succeeded=1,
+                    rows_failed=0,
+                    rows_routed=0,
+                    rows_quarantined=0,
+                    error=None,
+                    landscape_run_id=None,
+                ),
+                RunStatusResponse(
+                    run_id=str(run_id),
+                    status="running",
+                    started_at=datetime.now(tz=UTC),
+                    finished_at=None,
+                    rows_processed=1,
+                    rows_succeeded=1,
+                    rows_failed=0,
+                    rows_routed=0,
+                    rows_quarantined=0,
+                    error=None,
+                    landscape_run_id=None,
+                ),
+            ]
+        )
+        app = self._make_authed_app(svc)
+        queued_event = RunEvent(
+            run_id=str(run_id),
+            timestamp=datetime.now(tz=UTC),
+            event_type="progress",
+            data=ProgressData(rows_processed=2, rows_failed=0),
+        )
+
+        with patch(
+            "elspeth.web.execution.routes.asyncio.wait_for",
+            new=AsyncMock(side_effect=[TimeoutError(), queued_event, WebSocketDisconnect(code=1000)]),
+        ):
+            with TestClient(app) as client, client.websocket_connect(f"/ws/runs/{run_id}?token=valid") as ws:
+                payload = ws.receive_json()
+
+        assert payload["event_type"] == "progress"
+        assert payload["data"]["rows_processed"] == 2
+        assert "type" not in payload
+
+    def test_timeout_synthesizes_terminal_event_when_status_turned_completed(self) -> None:
+        """Missed terminal broadcasts must be recovered from authoritative status."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.verify_run_ownership = AsyncMock(return_value=True)
+        svc.get_status = AsyncMock(
+            side_effect=[
+                RunStatusResponse(
+                    run_id=str(run_id),
+                    status="running",
+                    started_at=datetime.now(tz=UTC),
+                    finished_at=None,
+                    rows_processed=1,
+                    rows_succeeded=1,
+                    rows_failed=0,
+                    rows_routed=0,
+                    rows_quarantined=0,
+                    error=None,
+                    landscape_run_id=None,
+                ),
+                RunStatusResponse(
+                    run_id=str(run_id),
+                    status="completed",
+                    started_at=datetime.now(tz=UTC),
+                    finished_at=datetime.now(tz=UTC),
+                    rows_processed=1,
+                    rows_succeeded=1,
+                    rows_failed=0,
+                    rows_routed=0,
+                    rows_quarantined=0,
+                    error=None,
+                    landscape_run_id="land-1",
+                ),
+            ]
+        )
+        app = self._make_authed_app(svc)
+        queued_event = RunEvent(
+            run_id=str(run_id),
+            timestamp=datetime.now(tz=UTC),
+            event_type="completed",
+            data=CompletedData(
+                rows_processed=1,
+                rows_succeeded=1,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                landscape_run_id="land-1",
+            ),
+        )
+
+        with patch("elspeth.web.execution.routes.asyncio.wait_for", new=AsyncMock(side_effect=[TimeoutError(), queued_event])):
+            with TestClient(app) as client, client.websocket_connect(f"/ws/runs/{run_id}?token=valid") as ws:
+                payload = ws.receive_json()
+                assert payload["event_type"] == "completed"
+                assert payload["data"]["landscape_run_id"] == "land-1"
+                with pytest.raises(WebSocketDisconnect) as exc_info:
+                    ws.receive_json()
+
+        assert exc_info.value.code == 1000

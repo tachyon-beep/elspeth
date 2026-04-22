@@ -739,11 +739,17 @@ class AggregationExecutor:
                     )
                 )
 
+            persisted_member_count = self._reconcile_checkpoint_batch_members(
+                node_id=node_id,
+                batch_id=node_checkpoint.batch_id,
+                checkpoint_tokens=reconstructed_tokens,
+            )
+
             # Restore buffer state on consolidated node
             node.tokens = reconstructed_tokens
             node.buffers = [t.row_data.to_dict() for t in reconstructed_tokens]
             node.batch_id = node_checkpoint.batch_id
-            node.member_count = len(reconstructed_tokens)
+            node.member_count = persisted_member_count
 
             # Restore trigger evaluator state using dedicated API that preserves fire time ordering
             node.trigger.restore_from_checkpoint(
@@ -760,6 +766,45 @@ class AggregationExecutor:
                 token_count=len(reconstructed_tokens),
                 checkpoint_version=checkpoint_version,
             )
+
+    def _reconcile_checkpoint_batch_members(
+        self,
+        *,
+        node_id: NodeID,
+        batch_id: str,
+        checkpoint_tokens: list[TokenInfo],
+    ) -> int:
+        """Ensure persisted batch membership exactly matches the checkpoint snapshot.
+
+        Crash recovery cannot safely continue an in-progress batch when the
+        audit trail already contains members that are absent from the latest
+        checkpoint. Resuming that batch would reuse persisted ordinals and mix
+        replayed tokens with pre-crash membership.
+        """
+        batch = self._execution.get_batch(batch_id)
+        if batch is None:
+            raise AuditIntegrityError(f"Batch not found in audit trail: {batch_id}")
+
+        if batch.aggregation_node_id != node_id:
+            raise AuditIntegrityError(
+                f"Checkpoint batch {batch_id!r} belongs to aggregation node "
+                f"{batch.aggregation_node_id!r}, but restore is running for node "
+                f"{node_id!r}. Checkpoint state or audit trail is corrupted."
+            )
+
+        persisted_members = self._execution.get_batch_members(batch_id)
+        persisted_token_ids = tuple(member.token_id for member in persisted_members)
+        checkpoint_token_ids = tuple(token.token_id for token in checkpoint_tokens)
+
+        if persisted_token_ids != checkpoint_token_ids:
+            raise AuditIntegrityError(
+                f"Aggregation batch {batch_id!r} for node {node_id!r} advanced beyond the latest checkpoint. "
+                f"Checkpoint tokens={list(checkpoint_token_ids)!r}; "
+                f"persisted batch_members={list(persisted_token_ids)!r}. "
+                "Cannot safely resume this batch in place."
+            )
+
+        return len(persisted_members)
 
     def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.

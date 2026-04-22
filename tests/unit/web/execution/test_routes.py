@@ -334,7 +334,7 @@ class TestWebSocketReconnectTier1Guards:
 
         run_id = uuid4()
         app = self._make_ws_app(
-            RunStatusResponse(
+            RunStatusResponse.model_construct(
                 run_id=str(run_id),
                 status="completed",
                 started_at=datetime.now(tz=UTC),
@@ -342,6 +342,7 @@ class TestWebSocketReconnectTier1Guards:
                 rows_processed=10,
                 rows_succeeded=10,
                 rows_failed=0,
+                rows_routed=0,
                 rows_quarantined=0,
                 error=None,
                 landscape_run_id=None,
@@ -360,14 +361,15 @@ class TestWebSocketReconnectTier1Guards:
 
         run_id = uuid4()
         app = self._make_ws_app(
-            RunStatusResponse(
+            RunStatusResponse.model_construct(
                 run_id=str(run_id),
                 status="failed",
                 started_at=datetime.now(tz=UTC),
                 finished_at=datetime.now(tz=UTC),
                 rows_processed=5,
-                rows_succeeded=5,
-                rows_failed=0,
+                rows_succeeded=0,
+                rows_failed=5,
+                rows_routed=0,
                 rows_quarantined=0,
                 error=None,
                 landscape_run_id=None,
@@ -386,7 +388,7 @@ class TestWebSocketReconnectTier1Guards:
 
         run_id = uuid4()
         app = self._make_ws_app(
-            RunStatusResponse(
+            RunStatusResponse.model_construct(
                 run_id=str(run_id),
                 status="cancelled",
                 started_at=None,
@@ -394,6 +396,7 @@ class TestWebSocketReconnectTier1Guards:
                 rows_processed=0,
                 rows_succeeded=0,
                 rows_failed=0,
+                rows_routed=0,
                 rows_quarantined=0,
                 error=None,
                 landscape_run_id=None,
@@ -430,7 +433,8 @@ class TestWebSocketReconnectTier1Guards:
             rows_processed=100,
             rows_succeeded=50,
             rows_failed=20,
-            rows_quarantined=10,  # 50+20+10 = 80 != 100 — Tier 1 anomaly
+            rows_routed=0,
+            rows_quarantined=10,  # 50+20+0+10 = 80 != 100 — Tier 1 anomaly
             error=None,
             landscape_run_id="lscape-1",
         )
@@ -457,9 +461,10 @@ class TestRunStatusEndpoint:
                 started_at=datetime.now(tz=UTC),
                 finished_at=datetime.now(tz=UTC),
                 rows_processed=10,
-                rows_succeeded=10,
-                rows_failed=0,
-                rows_quarantined=0,
+                rows_succeeded=7,
+                rows_failed=1,
+                rows_routed=1,
+                rows_quarantined=1,
                 error=None,
                 landscape_run_id="lscape-1",
             )
@@ -471,6 +476,20 @@ class TestRunStatusEndpoint:
             body = resp.json()
             assert body["status"] == "completed"
             assert body["rows_processed"] == 10
+            assert body["rows_routed"] == 1
+
+    @pytest.mark.asyncio
+    async def test_status_returns_404_when_run_disappears_after_ownership_check(self) -> None:
+        """TOCTOU: post-verification ValueError must collapse to 404."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(side_effect=ValueError("run disappeared"))
+        app = _create_test_app(execution_service=svc)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/runs/{run_id}")
+            assert resp.status_code == 404
+            assert resp.json() == {"detail": "Run not found"}
 
 
 class TestCancelEndpoint:
@@ -502,6 +521,20 @@ class TestCancelEndpoint:
             body = resp.json()
             assert body["status"] == "cancelled"
 
+    @pytest.mark.asyncio
+    async def test_cancel_returns_404_when_run_disappears_after_cancel(self) -> None:
+        """TOCTOU: second status read after cancel must not leak a 500."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.cancel = AsyncMock()
+        svc.get_status = AsyncMock(side_effect=ValueError("run disappeared"))
+        app = _create_test_app(execution_service=svc)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(f"/api/runs/{run_id}/cancel")
+            assert resp.status_code == 404
+            assert resp.json() == {"detail": "Run not found"}
+
 
 class TestResultsEndpoint:
     """GET /api/runs/{run_id}/results"""
@@ -517,9 +550,10 @@ class TestResultsEndpoint:
                 started_at=datetime.now(tz=UTC),
                 finished_at=datetime.now(tz=UTC),
                 rows_processed=10,
-                rows_succeeded=10,
-                rows_failed=0,
-                rows_quarantined=0,
+                rows_succeeded=7,
+                rows_failed=1,
+                rows_routed=1,
+                rows_quarantined=1,
                 error=None,
                 landscape_run_id="lscape-1",
             )
@@ -530,7 +564,21 @@ class TestResultsEndpoint:
             assert resp.status_code == 200
             body = resp.json()
             assert body["rows_processed"] == 10
+            assert body["rows_routed"] == 1
             assert body["landscape_run_id"] == "lscape-1"
+
+    @pytest.mark.asyncio
+    async def test_results_returns_404_when_run_disappears_after_ownership_check(self) -> None:
+        """TOCTOU: post-verification status reread must preserve 404 contract."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(side_effect=ValueError("run disappeared"))
+        app = _create_test_app(execution_service=svc)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/runs/{run_id}/results")
+            assert resp.status_code == 404
+            assert resp.json() == {"detail": "Run not found"}
 
     @pytest.mark.asyncio
     async def test_results_returns_409_for_running(self) -> None:

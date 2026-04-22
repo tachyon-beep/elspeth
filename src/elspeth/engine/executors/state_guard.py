@@ -25,7 +25,9 @@ from elspeth.contracts.errors import (
     AuditIntegrityError,
     OrchestrationInvariantError,
 )
+from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.errors import LandscapeRecordError
+from elspeth.core.landscape.errors import LandscapePostCommitError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 if TYPE_CHECKING:
@@ -57,7 +59,6 @@ class NodeStateGuard:
     __slots__ = (
         "_attempt",
         "_completed",
-        "_completion_attempted",
         "_enter_time",
         "_execution",
         "_input_data",
@@ -65,6 +66,7 @@ class NodeStateGuard:
         "_run_id",
         "_state",
         "_step_index",
+        "_terminal_persisted",
         "_token_id",
     )
 
@@ -89,7 +91,7 @@ class NodeStateGuard:
         self._enter_time: float = 0.0
         self._state: NodeStateOpen | None = None
         self._completed = False
-        self._completion_attempted = False
+        self._terminal_persisted = False
 
     # -- context manager protocol ------------------------------------------
 
@@ -114,10 +116,10 @@ class NodeStateGuard:
         if self._completed:
             return
 
-        if self._completion_attempted:
-            # complete() was called but the recorder raised after committing.
-            # The DB state is (probably) already terminal — writing FAILED on top
-            # would corrupt the audit trail. Let the original exception propagate.
+        if self._terminal_persisted:
+            # complete() or auto-fail already wrote a terminal state (or the
+            # repository explicitly told us the terminal write happened before
+            # raising). Writing FAILED on top would corrupt the audit trail.
             return
 
         duration_ms = (time.perf_counter() - self._enter_time) * 1000
@@ -137,6 +139,14 @@ class NodeStateGuard:
                     duration_ms=duration_ms,
                     error=error,
                 )
+                self._terminal_persisted = True
+            except LandscapePostCommitError as db_err:
+                self._terminal_persisted = True
+                raise AuditIntegrityError(
+                    f"FAILED state for {self.state_id} was persisted after missing complete(), "
+                    f"but it became unreadable immediately after completion (Tier 1 violation). "
+                    f"Recorder error: {type(db_err).__name__}: {db_err}"
+                ) from db_err
             except LandscapeRecordError as db_err:
                 raise AuditIntegrityError(
                     f"Cannot record FAILED for state {self.state_id} after missing complete() — "
@@ -156,9 +166,7 @@ class NodeStateGuard:
         # explicitly inherit to contribute structured context; see ADR-010
         # §Alternative 3 for the security rationale (accidental-match spoofing
         # was the reason we did not use a structural Protocol here).
-        context: Mapping[str, Any] | None = None
-        if isinstance(exc_val, AuditEvidenceBase):
-            context = exc_val.to_audit_dict()  # type: ignore[unreachable]  # AuditEvidenceBase is not BaseException; mypy can't see multi-inheritance
+        context, evidence_failure = self._extract_audit_evidence_context(exc_val)
 
         exc_error = ExecutionError(
             exception=str(exc_val),
@@ -173,6 +181,15 @@ class NodeStateGuard:
                 duration_ms=duration_ms,
                 error=exc_error,
             )
+            self._terminal_persisted = True
+        except LandscapePostCommitError as db_err:
+            self._terminal_persisted = True
+            raise AuditIntegrityError(
+                f"FAILED state for {self.state_id} was persisted while handling "
+                f"{exc_type.__name__}: {exc_val}, but it became unreadable immediately "
+                f"after completion (Tier 1 violation). Recorder error: "
+                f"{type(db_err).__name__}: {db_err}"
+            ) from db_err
         except LandscapeRecordError as db_err:
             # Audit trail corruption (permanent OPEN state) is MORE critical than
             # the original exception. Raise AuditIntegrityError with both contexts.
@@ -181,6 +198,13 @@ class NodeStateGuard:
                 f"{exc_type.__name__}: {exc_val} — audit trail has permanent OPEN state "
                 f"(Tier 1 violation). DB error: {type(db_err).__name__}: {db_err}"
             ) from db_err
+
+        if evidence_failure is not None:
+            raise AuditIntegrityError(
+                f"Recorded FAILED for state {self.state_id} while handling "
+                f"{exc_type.__name__}: {exc_val}, but audit evidence serialization failed "
+                f"and structured context was dropped to preserve terminality."
+            ) from evidence_failure
 
     # -- public API --------------------------------------------------------
 
@@ -213,19 +237,41 @@ class NodeStateGuard:
     ) -> None:
         """Complete the node state.  Guard will not intervene after this.
 
-        Sets ``_completion_attempted`` BEFORE the recorder call so that if
-        ``complete_node_state()`` commits but then raises (post-commit
-        validation), ``__exit__`` will not overwrite the already-persisted
-        terminal state with FAILED.
+        ``__exit__`` only stands down once terminal persistence is known.
+        Pre-persistence failures must still flow through the auto-fail path,
+        but post-commit materialization failures must not trigger a second
+        terminal write on top of an already-persisted state.
         """
-        self._completion_attempted = True
-        self._execution.complete_node_state(  # type: ignore[call-overload,misc]  # generic NodeStateStatus vs Literal overloads
-            state_id=self.state_id,
-            status=status,
-            output_data=output_data,
-            duration_ms=duration_ms,
-            error=error,
-            success_reason=success_reason,
-            context_after=context_after,
-        )
+        try:
+            self._execution.complete_node_state(  # type: ignore[call-overload,misc]  # generic NodeStateStatus vs Literal overloads
+                state_id=self.state_id,
+                status=status,
+                output_data=output_data,
+                duration_ms=duration_ms,
+                error=error,
+                success_reason=success_reason,
+                context_after=context_after,
+            )
+        except LandscapePostCommitError:
+            self._terminal_persisted = True
+            raise
+
+        self._terminal_persisted = True
         self._completed = True
+
+    def _extract_audit_evidence_context(
+        self,
+        exc_val: BaseException | None,
+    ) -> tuple[Mapping[str, Any] | None, BaseException | None]:
+        """Extract structured exception context without letting it strand the state OPEN."""
+        if not isinstance(exc_val, AuditEvidenceBase):
+            return None, None
+
+        try:
+            context = exc_val.to_audit_dict()  # type: ignore[unreachable]  # AuditEvidenceBase is not BaseException; mypy can't see multi-inheritance
+            if not isinstance(context, Mapping):
+                raise TypeError(f"Audit evidence must be a mapping, got {type(context).__name__}")
+            canonical_json(context)
+            return context, None
+        except Exception as exc:
+            return None, exc

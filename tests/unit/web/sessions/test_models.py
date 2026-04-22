@@ -88,6 +88,7 @@ class TestTableCreation:
             "rows_processed",
             "rows_succeeded",
             "rows_failed",
+            "rows_routed",
             "rows_quarantined",
             "error",
             "landscape_run_id",

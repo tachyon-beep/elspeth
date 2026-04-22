@@ -207,9 +207,9 @@ class ExecutionServiceImpl:
         in a ThreadPoolExecutor worker thread. This helper schedules the
         coroutine on the main event loop and blocks until it completes.
 
-        R6 fix: 30-second timeout prevents deadlock during shutdown — if the
-        event loop is blocked in executor.shutdown(wait=True), this will raise
-        TimeoutError instead of hanging forever.
+        R6 fix: 30-second timeout prevents indefinite hangs if the event loop
+        cannot run the scheduled coroutine during shutdown or another
+        infrastructure stall.
         """
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=30.0)
@@ -239,17 +239,20 @@ class ExecutionServiceImpl:
         """
         self._session_locks.pop(session_id, None)
 
-    def shutdown(self) -> None:
-        """Shut down the thread pool. Called during app shutdown.
+    async def shutdown(self) -> None:
+        """Shut down the thread pool without blocking the event loop.
 
         Sets all active shutdown events first so running pipelines can
-        terminate gracefully before blocking on executor.shutdown(wait=True).
+        terminate gracefully, then drains the executor in a helper thread.
+        Worker shutdown paths still use _call_async() to persist terminal
+        state on the main event loop, so blocking the loop here can strand
+        those final updates.
         """
         with self._shutdown_events_lock:
             events = list(self._shutdown_events.values())
         for event in events:
             event.set()
-        self._executor.shutdown(wait=True)
+        await asyncio.to_thread(self._executor.shutdown, wait=True)
 
     async def execute(self, session_id: UUID, state_id: UUID | None = None, *, user_id: str | None = None) -> UUID:
         """Start a background pipeline run.
@@ -469,6 +472,7 @@ class ExecutionServiceImpl:
             rows_processed=run.rows_processed,
             rows_succeeded=run.rows_succeeded,
             rows_failed=run.rows_failed,
+            rows_routed=run.rows_routed,
             rows_quarantined=run.rows_quarantined,
             error=run.error,
             landscape_run_id=run.landscape_run_id,
@@ -595,7 +599,7 @@ class ExecutionServiceImpl:
                         run_id=run_id,
                         timestamp=datetime.now(tz=UTC),
                         event_type="cancelled",
-                        data=CancelledData(rows_processed=0, rows_failed=0),
+                        data=CancelledData(rows_processed=0, rows_failed=0, rows_routed=0),
                     ),
                 )
                 return
@@ -616,7 +620,7 @@ class ExecutionServiceImpl:
                             run_id=run_id,
                             timestamp=datetime.now(tz=UTC),
                             event_type="cancelled",
-                            data=CancelledData(rows_processed=0, rows_failed=0),
+                            data=CancelledData(rows_processed=0, rows_failed=0, rows_routed=0),
                         ),
                     )
                     return
@@ -770,15 +774,10 @@ class ExecutionServiceImpl:
             # before we persist status, causing a completed run to be
             # misclassified as cancelled.
 
-            # Finalize blobs BEFORE any external surface sees the terminal
-            # state. A finalize failure is logged but must not trigger a
-            # second terminal event (elspeth-25df1be367).
-            self._finalize_output_blobs(run_id, success=True)
-
-            # Race defence: if orphan cleanup (or another actor) set DB
-            # status to "cancelled" while the pipeline was running, this
-            # transition raises ValueError. The DB state is authoritative —
-            # emit a single "cancelled" terminal, not "completed".
+            # Persist the terminal run status before success-finalizing
+            # output blobs. If the DB transition loses a race to an
+            # external cancellation, we must never expose ready outputs
+            # for a cancelled run.
             try:
                 self._call_async(
                     self._session_service.update_run_status(
@@ -788,6 +787,7 @@ class ExecutionServiceImpl:
                         rows_processed=result.rows_processed,
                         rows_succeeded=result.rows_succeeded,
                         rows_failed=result.rows_failed,
+                        rows_routed=result.rows_routed,
                         rows_quarantined=result.rows_quarantined,
                     )
                 )
@@ -811,11 +811,18 @@ class ExecutionServiceImpl:
                             data=CancelledData(
                                 rows_processed=result.rows_processed,
                                 rows_failed=result.rows_failed,
+                                rows_routed=result.rows_routed,
                             ),
                         ),
                     )
                     return
                 raise
+
+            # Finalize blobs after the authoritative completion transition
+            # succeeds, but before broadcasting the completed terminal event.
+            # Finalization failures are logged in _finalize_output_blobs()
+            # and must not trigger a second terminal event.
+            self._finalize_output_blobs(run_id, success=True)
 
             self._broadcaster.broadcast(
                 run_id,
@@ -827,6 +834,7 @@ class ExecutionServiceImpl:
                         rows_processed=result.rows_processed,
                         rows_succeeded=result.rows_succeeded,
                         rows_failed=result.rows_failed,
+                        rows_routed=result.rows_routed,
                         rows_quarantined=result.rows_quarantined,
                         landscape_run_id=result.run_id,
                     ),
@@ -844,6 +852,7 @@ class ExecutionServiceImpl:
                     rows_processed=gse.rows_processed,
                     rows_succeeded=gse.rows_succeeded,
                     rows_failed=gse.rows_failed,
+                    rows_routed=gse.rows_routed,
                     rows_quarantined=gse.rows_quarantined,
                 )
             )
@@ -856,6 +865,7 @@ class ExecutionServiceImpl:
                     data=CancelledData(
                         rows_processed=gse.rows_processed,
                         rows_failed=gse.rows_failed,
+                        rows_routed=gse.rows_routed,
                     ),
                 ),
             )

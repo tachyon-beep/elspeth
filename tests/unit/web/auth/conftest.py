@@ -23,21 +23,29 @@ def rsa_keypair() -> tuple[RSAPrivateKey, RSAPublicKey]:
     return private_key, public_key
 
 
-@pytest.fixture
-def jwks_response(rsa_keypair):
+def build_rsa_jwk(public_key: RSAPublicKey, *, alg: str | None = "RS256") -> dict[str, object]:
     """Build a JWKS response dict from the test RSA public key."""
-    _, public_key = rsa_keypair
     # Use PyJWT's RSAAlgorithm to export the public key as a JWK dict
     jwk_json = pyjwt.algorithms.RSAAlgorithm.to_jwk(public_key)
     key_dict = json.loads(jwk_json)
     key_dict["kid"] = "test-key-1"
     key_dict["use"] = "sig"
-    key_dict["alg"] = "RS256"
+    if alg is None:
+        key_dict.pop("alg", None)
+    else:
+        key_dict["alg"] = alg
     return {"keys": [key_dict]}
 
 
-def make_rs256_token(private_key, claims: dict[str, object]) -> str:
-    """Sign a JWT with an RSA private key (RS256, kid=test-key-1).
+@pytest.fixture
+def jwks_response(rsa_keypair):
+    """Build a JWKS response dict from the test RSA public key."""
+    _, public_key = rsa_keypair
+    return build_rsa_jwk(public_key)
+
+
+def make_rsa_token(private_key, claims: dict[str, object], *, algorithm: str = "RS256") -> str:
+    """Sign a JWT with an RSA private key using the requested algorithm.
 
     Not a fixture — a plain helper function imported explicitly by
     test modules that need it.
@@ -50,6 +58,11 @@ def make_rs256_token(private_key, claims: dict[str, object]) -> str:
     return pyjwt.encode(
         claims,
         priv_pem.decode(),
-        algorithm="RS256",
+        algorithm=algorithm,
         headers={"kid": "test-key-1"},
     )
+
+
+def make_rs256_token(private_key, claims: dict[str, object]) -> str:
+    """Backward-compatible helper for the common RS256 case."""
+    return make_rsa_token(private_key, claims, algorithm="RS256")

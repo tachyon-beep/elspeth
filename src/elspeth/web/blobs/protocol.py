@@ -248,6 +248,27 @@ class BlobIntegrityError(BlobError):
         _guard_frozen_attr(self, name, value)
 
 
+class BlobContentMissingError(BlobError):
+    """Raised when a ready blob row points at an absent backing file.
+
+    Distinct from BlobNotFoundError: the metadata row exists and claims
+    the blob is ``ready``, but the bytes we committed are gone.  This is
+    a Tier 1 integrity failure and the web layer should return 500.
+    """
+
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"blob_id", "storage_path"})
+
+    def __init__(self, blob_id: str, *, storage_path: str) -> None:
+        super().__init__(
+            f"Blob {blob_id} content missing: ready metadata points at absent backing file {storage_path}"
+        )
+        self.blob_id = blob_id
+        self.storage_path = storage_path
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _guard_frozen_attr(self, name, value)
+
+
 @dataclass(frozen=True, slots=True)
 class BlobFinalizationError:
     """Record of a per-blob finalization failure.
@@ -351,6 +372,7 @@ class BlobServiceProtocol(Protocol):
 
         Raises BlobNotFoundError if the blob doesn't exist.
         Raises BlobStateError if the blob is not in ``ready`` status.
+        Raises BlobContentMissingError if ready metadata exists but the backing file is absent.
         Raises BlobIntegrityError if the content hash doesn't match.
         """
         ...
@@ -361,7 +383,11 @@ class BlobServiceProtocol(Protocol):
         run_id: UUID,
         direction: BlobRunLinkDirection,
     ) -> None:
-        """Record a blob-to-run linkage (input or output)."""
+        """Record a blob-to-run linkage (input or output).
+
+        Raises RuntimeError if direction is outside the declared Literal
+        set or if blob and run belong to different sessions.
+        """
         ...
 
     async def get_blob_run_links(

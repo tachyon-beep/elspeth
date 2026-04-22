@@ -475,6 +475,28 @@ class TestDownloadLifecycleGuard:
         assert resp.status_code == 500, f"Expected 500 for tampered blob, got {resp.status_code}"
         assert "integrity" in resp.json()["detail"].lower()
 
+    def test_download_ready_blob_with_missing_backing_file_returns_500(self, tmp_path) -> None:
+        """Ready blob metadata with a missing file must surface as integrity failure."""
+        from pathlib import Path
+
+        app, _, blob_service = _make_app(tmp_path)
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        blob = _upload_blob(client, session_id, content=b"original-content")
+        blob_id = blob["id"]
+
+        from elspeth.web.sessions.models import blobs_table
+
+        with blob_service._engine.connect() as conn:
+            row = conn.execute(blobs_table.select().where(blobs_table.c.id == blob_id)).first()
+        assert row is not None, f"blob {blob_id} vanished between upload and unlink"
+        Path(row.storage_path).unlink()
+
+        resp = client.get(f"/api/sessions/{session_id}/blobs/{blob_id}/content")
+        assert resp.status_code == 500, f"Expected 500 for missing backing file, got {resp.status_code}"
+        assert "integrity" in resp.json()["detail"].lower()
+
 
 # ---------------------------------------------------------------------------
 # Filename validation at the HTTP boundary (elspeth-12e778e606, elspeth-3b189ef8a5)

@@ -135,6 +135,7 @@ runs_table = Table(
     Column("rows_processed", Integer, nullable=False, default=0),
     Column("rows_succeeded", Integer, nullable=False, default=0),
     Column("rows_failed", Integer, nullable=False, default=0),
+    Column("rows_routed", Integer, nullable=False, default=0),
     Column("rows_quarantined", Integer, nullable=False, default=0),
     Column("error", Text, nullable=True),
     Column("landscape_run_id", String, nullable=True),

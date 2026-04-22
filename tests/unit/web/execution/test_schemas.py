@@ -270,7 +270,7 @@ class TestRunEventJsonRoundTrip:
 
 
 class TestCompletedDataDecomposition:
-    """Enforce rows_processed == rows_succeeded + rows_failed + rows_quarantined."""
+    """Enforce rows_processed == succeeded + failed + routed + quarantined."""
 
     def test_consistent_counts_accepted(self) -> None:
         data = CompletedData(
@@ -288,6 +288,7 @@ class TestCompletedDataDecomposition:
                 rows_processed=100,
                 rows_succeeded=95,
                 rows_failed=5,
+                rows_routed=0,
                 rows_quarantined=3,  # 95 + 5 + 3 = 103 != 100
                 landscape_run_id="lscape-1",
             )
@@ -301,6 +302,17 @@ class TestCompletedDataDecomposition:
             landscape_run_id="lscape-empty",
         )
         assert data.rows_processed == 0
+
+    def test_routed_rows_participate_in_decomposition(self) -> None:
+        data = CompletedData(
+            rows_processed=100,
+            rows_succeeded=90,
+            rows_failed=3,
+            rows_routed=5,
+            rows_quarantined=2,
+            landscape_run_id="lscape-1",
+        )
+        assert data.rows_routed == 5
 
 
 class TestRowCountConstraints:
@@ -680,6 +692,7 @@ class TestRunStatusDecomposition:
                 rows_processed=100,
                 rows_succeeded=95,
                 rows_failed=5,
+                rows_routed=0,
                 rows_quarantined=3,  # 95 + 5 + 3 = 103 != 100
                 error=None,
                 landscape_run_id="lscape-1",
@@ -710,6 +723,7 @@ class TestRunStatusDecomposition:
                 rows_processed=50,
                 rows_succeeded=30,
                 rows_failed=10,
+                rows_routed=0,
                 rows_quarantined=5,  # 30 + 10 + 5 = 45 != 50
                 error=None,
                 landscape_run_id=None,
@@ -724,11 +738,80 @@ class TestRunStatusDecomposition:
             rows_processed=100,
             rows_succeeded=95,
             rows_failed=3,
+            rows_routed=0,
             rows_quarantined=2,
             error=None,
             landscape_run_id="lscape-1",
         )
         assert resp.rows_processed == 100
+
+    def test_completed_accepts_routed_rows_in_terminal_counts(self) -> None:
+        resp = RunStatusResponse(
+            run_id="r1",
+            status="completed",
+            started_at=datetime.now(tz=UTC),
+            finished_at=datetime.now(tz=UTC),
+            rows_processed=100,
+            rows_succeeded=90,
+            rows_failed=3,
+            rows_routed=5,
+            rows_quarantined=2,
+            error=None,
+            landscape_run_id="lscape-1",
+        )
+        assert resp.rows_routed == 5
+
+
+class TestRunStatusTerminalInvariants:
+    """Terminal run statuses must carry the fields the rest of the web layer assumes."""
+
+    def test_completed_requires_landscape_run_id(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="landscape_run_id"):
+            RunStatusResponse(
+                run_id="r1",
+                status="completed",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=1,
+                rows_succeeded=1,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+
+    def test_failed_requires_error(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="error"):
+            RunStatusResponse(
+                run_id="r1",
+                status="failed",
+                started_at=datetime.now(tz=UTC),
+                finished_at=datetime.now(tz=UTC),
+                rows_processed=1,
+                rows_succeeded=0,
+                rows_failed=1,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+
+    def test_terminal_status_requires_finished_at(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="finished_at"):
+            RunStatusResponse(
+                run_id="r1",
+                status="cancelled",
+                started_at=datetime.now(tz=UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
 
 
 class TestRunResultsDecomposition:
@@ -745,6 +828,7 @@ class TestRunResultsDecomposition:
             rows_processed=100,
             rows_succeeded=95,
             rows_failed=3,
+            rows_routed=0,
             rows_quarantined=2,
             landscape_run_id="lscape-1",
             error=None,
@@ -759,6 +843,7 @@ class TestRunResultsDecomposition:
                 rows_processed=100,
                 rows_succeeded=50,
                 rows_failed=20,
+                rows_routed=0,
                 rows_quarantined=10,  # 50 + 20 + 10 = 80 != 100
                 landscape_run_id="lscape-1",
                 error=None,
@@ -773,9 +858,56 @@ class TestRunResultsDecomposition:
                 rows_processed=10,
                 rows_succeeded=1,
                 rows_failed=0,
+                rows_routed=0,
                 rows_quarantined=0,  # 1 != 10
                 landscape_run_id=None,
                 error="kaboom",
+            )
+
+    def test_consistent_counts_accept_routed_rows(self) -> None:
+        resp = RunResultsResponse(
+            run_id="r1",
+            status="completed",
+            rows_processed=100,
+            rows_succeeded=90,
+            rows_failed=3,
+            rows_routed=5,
+            rows_quarantined=2,
+            landscape_run_id="lscape-1",
+            error=None,
+        )
+        assert resp.rows_routed == 5
+
+
+class TestRunResultsTerminalInvariants:
+    """RunResultsResponse must enforce terminal-state semantics."""
+
+    def test_completed_requires_landscape_run_id(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="landscape_run_id"):
+            RunResultsResponse(
+                run_id="r1",
+                status="completed",
+                rows_processed=1,
+                rows_succeeded=1,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                landscape_run_id=None,
+                error=None,
+            )
+
+    def test_failed_requires_error(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="error"):
+            RunResultsResponse(
+                run_id="r1",
+                status="failed",
+                rows_processed=1,
+                rows_succeeded=0,
+                rows_failed=1,
+                rows_routed=0,
+                rows_quarantined=0,
+                landscape_run_id=None,
+                error=None,
             )
 
 

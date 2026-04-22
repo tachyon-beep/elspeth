@@ -386,7 +386,7 @@ class TestOneActiveRunEnforcement:
         run = await service.create_run(session.id, state.id)
         # Transition through legal path: pending -> running -> completed
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-complete-1")
         # New run should succeed
         run2 = await service.create_run(session.id, state.id)
         assert run2.status == "pending"
@@ -401,7 +401,7 @@ class TestOneActiveRunEnforcement:
         run = await service.create_run(session.id, state.id)
         # Transition through legal path: pending -> running -> failed
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "failed")
+        await service.update_run_status(run.id, "failed", error="boom")
         run2 = await service.create_run(session.id, state.id)
         assert run2.status == "pending"
 
@@ -598,7 +598,7 @@ class TestGetActiveRun:
         )
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-active-none")
         active = await service.get_active_run(session.id)
         assert active is None
 
@@ -639,17 +639,43 @@ class TestUpdateRunStatusExpanded:
             "completed",
             landscape_run_id="lscp-abc-123",
             rows_processed=100,
+            rows_routed=4,
             rows_failed=3,
         )
         fetched = await service.get_run(run.id)
         assert fetched.landscape_run_id == "lscp-abc-123"
         assert fetched.rows_processed == 100
+        assert fetched.rows_routed == 4
         assert fetched.rows_failed == 3
 
     @pytest.mark.asyncio
     async def test_update_not_found_raises(self, service) -> None:
         with pytest.raises(ValueError, match="not found"):
             await service.update_run_status(uuid.uuid4(), "completed")
+
+    @pytest.mark.asyncio
+    async def test_completed_requires_landscape_run_id(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        with pytest.raises(ValueError, match="landscape_run_id"):
+            await service.update_run_status(run.id, "completed")
+
+    @pytest.mark.asyncio
+    async def test_failed_requires_error(self, service) -> None:
+        session = await service.create_session("alice", "Pipeline", "local")
+        state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session.id, state.id)
+        await service.update_run_status(run.id, "running")
+        with pytest.raises(ValueError, match="requires error"):
+            await service.update_run_status(run.id, "failed")
 
 
 class TestRunTransitionEnforcement:
@@ -692,7 +718,7 @@ class TestRunTransitionEnforcement:
         )
         run = await service.create_run(session.id, state.id)
         with pytest.raises(ValueError, match=r"Illegal.*transition"):
-            await service.update_run_status(run.id, "completed")
+            await service.update_run_status(run.id, "completed", landscape_run_id="lscp-illegal")
 
     @pytest.mark.asyncio
     async def test_illegal_transition_completed_to_running_raises(
@@ -706,7 +732,7 @@ class TestRunTransitionEnforcement:
         )
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-finished")
         with pytest.raises(ValueError, match=r"Illegal.*transition"):
             await service.update_run_status(run.id, "running")
 
@@ -818,7 +844,7 @@ class TestCancelOrphanedRuns:
         )
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-orphan-1")
         cancelled = await service.cancel_orphaned_runs(
             session.id,
             max_age_seconds=0,
@@ -863,7 +889,7 @@ class TestCancelOrphanedRuns:
         )
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-orphan-2")
         cancelled = await service.cancel_orphaned_runs(session.id, max_age_seconds=0)
         assert len(cancelled) == 0
 
@@ -914,7 +940,7 @@ class TestCancelAllOrphanedRuns:
         )
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-global-1")
 
         cancelled = await service.cancel_all_orphaned_runs()
         assert cancelled == 0
@@ -1075,7 +1101,7 @@ class TestCancelledTerminalTransitions:
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "cancelled")
         with pytest.raises(ValueError, match=r"Illegal.*transition"):
-            await service.update_run_status(run.id, "completed")
+            await service.update_run_status(run.id, "completed", landscape_run_id="lscp-cancelled")
 
     @pytest.mark.asyncio
     async def test_illegal_transition_cancelled_to_failed_raises(self, service) -> None:
@@ -1087,7 +1113,7 @@ class TestCancelledTerminalTransitions:
         run = await service.create_run(session.id, state.id)
         await service.update_run_status(run.id, "cancelled")
         with pytest.raises(ValueError, match=r"Illegal.*transition"):
-            await service.update_run_status(run.id, "failed")
+            await service.update_run_status(run.id, "failed", error="boom")
 
 
 class TestArchiveSessionWithActiveRun:

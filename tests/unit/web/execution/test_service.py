@@ -159,6 +159,7 @@ class TestExecutionFlow:
             rows_processed=50,
             rows_succeeded=48,
             rows_failed=2,
+            rows_routed=0,
             rows_quarantined=0,
             error=None,
             landscape_run_id=None,
@@ -166,6 +167,7 @@ class TestExecutionFlow:
         status = await service.get_status(run_id)
         assert status.status == "running"
         assert status.rows_processed == 50
+        assert status.rows_routed == 0
 
 
 # ── B2: shutdown_event Always Passed ───────────────────────────────────
@@ -211,6 +213,7 @@ class TestB2ShutdownEvent:
         mock_result.rows_processed = 10
         mock_result.rows_succeeded = 10
         mock_result.rows_failed = 0
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_orch.run.return_value = mock_result
 
@@ -269,6 +272,7 @@ class TestB3Construction:
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
+            rows_routed=0,
             rows_quarantined=0,
         )
 
@@ -499,6 +503,7 @@ class TestCancelMechanism:
             run_id="test-run-001",
             rows_succeeded=48,
             rows_failed=2,
+            rows_routed=0,
             rows_quarantined=0,
         )
 
@@ -556,6 +561,7 @@ class TestCancelMechanism:
             run_id="test-run-gse",
             rows_succeeded=48,
             rows_failed=2,
+            rows_routed=0,
             rows_quarantined=0,
         )
 
@@ -573,6 +579,7 @@ class TestCancelMechanism:
         assert gse_call.kwargs["rows_processed"] == 50
         assert gse_call.kwargs["rows_succeeded"] == 48
         assert gse_call.kwargs["rows_failed"] == 2
+        assert gse_call.kwargs["rows_routed"] == 0
         assert gse_call.kwargs["rows_quarantined"] == 0
 
     @patch("elspeth.web.execution.service.Orchestrator")
@@ -610,6 +617,7 @@ class TestCancelMechanism:
         mock_result.rows_processed = 50
         mock_result.rows_succeeded = 48
         mock_result.rows_failed = 2
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_result.run_id = "landscape-late-cancel"
         mock_orch.run.return_value = mock_result
@@ -909,6 +917,7 @@ class TestCompletionPathExternalCancellation:
         mock_result.rows_processed = 100
         mock_result.rows_succeeded = 95
         mock_result.rows_failed = 5
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_result.run_id = "landscape-run-123"
         mock_orch.run.return_value = mock_result
@@ -968,6 +977,7 @@ class TestCompletionPathExternalCancellation:
         mock_result.rows_processed = 100
         mock_result.rows_succeeded = 95
         mock_result.rows_failed = 5
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_result.run_id = "landscape-run-789"
         mock_orch.run.return_value = mock_result
@@ -1006,6 +1016,67 @@ class TestCompletionPathExternalCancellation:
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
+    def test_external_cancel_finalizes_output_blobs_as_error(
+        self,
+        mock_payload: MagicMock,
+        mock_landscape: MagicMock,
+        mock_load: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_graph_cls: MagicMock,
+        mock_orch_cls: MagicMock,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Cancelled runs must not leave output blobs finalized as ready."""
+        from elspeth.web.blobs.protocol import BlobFinalizationResult
+
+        mock_bundle = MagicMock()
+        mock_bundle.aggregations = {}
+        mock_instantiate.return_value = mock_bundle
+        mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_load.return_value = MagicMock()
+        mock_orch = MagicMock()
+        mock_orch_cls.return_value = mock_orch
+        mock_result = MagicMock()
+        mock_result.rows_processed = 7
+        mock_result.rows_succeeded = 7
+        mock_result.rows_failed = 0
+        mock_result.rows_routed = 0
+        mock_result.rows_quarantined = 0
+        mock_result.run_id = "landscape-run-blob-cancel"
+        mock_orch.run.return_value = mock_result
+
+        blob_state = {"status": "pending", "calls": []}
+
+        async def finalize_run_output_blobs(run_id: UUID, success: bool) -> BlobFinalizationResult:
+            del run_id
+            cast(list[bool], blob_state["calls"]).append(success)
+            if blob_state["status"] == "pending":
+                blob_state["status"] = "ready" if success else "error"
+            return BlobFinalizationResult(finalized=[], errors=[])
+
+        blob_service = MagicMock()
+        blob_service.finalize_run_output_blobs = AsyncMock(side_effect=finalize_run_output_blobs)
+        cast(Any, service)._blob_service = blob_service
+
+        async def status_side_effect(*args: Any, **kwargs: Any) -> None:
+            if kwargs.get("status") == "completed":
+                raise ValueError("Illegal run transition: 'cancelled' → 'completed'. Allowed: []")
+
+        mock_session_service.update_run_status = AsyncMock(side_effect=status_side_effect)
+        mock_session_service.get_run.return_value = MagicMock(status="cancelled")
+
+        service._run_pipeline(str(uuid4()), "source:\n  plugin: csv", threading.Event())
+
+        assert blob_state["calls"] == [False]
+        assert blob_state["status"] == "error"
+
+    @patch("elspeth.web.execution.service.Orchestrator")
+    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.service.LandscapeDB")
+    @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_completion_guard_reraises_for_non_cancelled_status(
         self,
         mock_payload: MagicMock,
@@ -1029,6 +1100,7 @@ class TestCompletionPathExternalCancellation:
         mock_result.rows_processed = 10
         mock_result.rows_succeeded = 10
         mock_result.rows_failed = 0
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_result.run_id = "landscape-run-456"
         mock_orch.run.return_value = mock_result
@@ -1411,6 +1483,68 @@ class TestB8AsyncBridging:
         coro.close()
 
 
+class TestAsyncShutdown:
+    """Shutdown must keep the event loop available for worker cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_shutdown_keeps_loop_available_for_worker_cleanup(
+        self,
+        mock_settings: MagicMock,
+        mock_session_service: MagicMock,
+    ) -> None:
+        """Regression: draining the executor must not strand worker _call_async calls."""
+        loop = asyncio.get_running_loop()
+        svc = ExecutionServiceImpl(
+            loop=loop,
+            broadcaster=ProgressBroadcaster(loop),
+            settings=mock_settings,
+            session_service=mock_session_service,
+            yaml_generator=MagicMock(),
+        )
+
+        run_id = str(uuid4())
+        shutdown_event = threading.Event()
+        with svc._shutdown_events_lock:
+            svc._shutdown_events[run_id] = shutdown_event
+
+        cleanup_applied = asyncio.Event()
+
+        async def update_run_status(*args: Any, **kwargs: Any) -> None:
+            cleanup_applied.set()
+
+        mock_session_service.update_run_status = AsyncMock(side_effect=update_run_status)
+
+        def short_call_async(coro: Coroutine[Any, Any, Any]) -> Any:
+            future = asyncio.run_coroutine_threadsafe(coro, loop)
+            try:
+                return future.result(timeout=0.05)
+            except concurrent.futures.TimeoutError:
+                future.cancel()
+                raise
+
+        cast(Any, svc)._call_async = short_call_async
+
+        worker_done = threading.Event()
+        worker_errors: list[str] = []
+
+        def worker() -> None:
+            shutdown_event.wait()
+            try:
+                svc._call_async(mock_session_service.update_run_status(uuid4(), status="cancelled"))
+            except BaseException as exc:
+                worker_errors.append(type(exc).__name__)
+            finally:
+                worker_done.set()
+
+        svc._executor.submit(worker)
+
+        await svc.shutdown()
+
+        assert worker_done.is_set()
+        assert worker_errors == []
+        assert cleanup_applied.is_set()
+
+
 # ── W15: Running Status Failure Path ─────────────────────────────────
 
 
@@ -1788,6 +1922,7 @@ class TestEdgeCompatibility:
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
+            rows_routed=0,
             rows_quarantined=0,
         )
 
@@ -1991,6 +2126,7 @@ class TestTerminalOrderingInvariant:
         mock_result.rows_processed = 10
         mock_result.rows_succeeded = 9
         mock_result.rows_failed = 1
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_orch.run.return_value = mock_result
 
@@ -2056,6 +2192,7 @@ class TestTerminalOrderingInvariant:
         mock_result.rows_processed = 5
         mock_result.rows_succeeded = 5
         mock_result.rows_failed = 0
+        mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_orch.run.return_value = mock_result
 

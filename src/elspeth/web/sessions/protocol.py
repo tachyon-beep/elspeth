@@ -183,6 +183,7 @@ class RunRecord:
     rows_processed: int
     rows_succeeded: int
     rows_failed: int
+    rows_routed: int
     rows_quarantined: int
     error: str | None
     landscape_run_id: str | None
@@ -191,6 +192,12 @@ class RunRecord:
     def __post_init__(self) -> None:
         if self.status not in SESSION_RUN_STATUS_VALUES:
             raise AuditIntegrityError(f"Tier 1: runs.status is {self.status!r}, expected one of {sorted(SESSION_RUN_STATUS_VALUES)}")
+        if self.status in SESSION_TERMINAL_RUN_STATUS_VALUES and self.finished_at is None:
+            raise AuditIntegrityError(f"Tier 1: terminal runs.finished_at is NULL for status={self.status!r}")
+        if self.status == "completed" and not self.landscape_run_id:
+            raise AuditIntegrityError("Tier 1: completed run is missing landscape_run_id")
+        if self.status == "failed" and not self.error:
+            raise AuditIntegrityError("Tier 1: failed run is missing error")
 
 
 class InvalidForkTargetError(Exception):
@@ -338,6 +345,7 @@ class SessionServiceProtocol(Protocol):
         rows_processed: int | None = None,
         rows_succeeded: int | None = None,
         rows_failed: int | None = None,
+        rows_routed: int | None = None,
         rows_quarantined: int | None = None,
     ) -> None:
         """Update a run's status and metadata.

@@ -19,6 +19,7 @@ import pytest
 
 from elspeth.web.blobs.protocol import (
     BlobActiveRunError,
+    BlobContentMissingError,
     BlobError,
     BlobIntegrityError,
     BlobNotFoundError,
@@ -118,6 +119,19 @@ class TestBlobIntegrityErrorFreezeContract:
             BlobIntegrityError("blob-1", "a" * 64, "b" * 64)  # type: ignore[misc]
 
 
+class TestBlobContentMissingErrorFreezeContract:
+    def test_declared_attrs_frozen_after_construction(self) -> None:
+        exc = BlobContentMissingError("blob-1", storage_path="/tmp/blob.csv")
+        with pytest.raises(AttributeError, match="frozen after construction"):
+            exc.blob_id = "other"  # type: ignore[misc]
+        with pytest.raises(AttributeError, match="frozen after construction"):
+            exc.storage_path = "/tmp/other.csv"  # type: ignore[misc]
+
+    def test_storage_path_arg_keyword_only(self) -> None:
+        with pytest.raises(TypeError):
+            BlobContentMissingError("blob-1", "/tmp/blob.csv")  # type: ignore[misc]
+
+
 class TestBlobExceptionFamilyInvariants:
     """Family-level invariants that must hold across every subclass."""
 
@@ -127,6 +141,7 @@ class TestBlobExceptionFamilyInvariants:
         BlobQuotaExceededError,
         BlobStateError,
         BlobIntegrityError,
+        BlobContentMissingError,
     )
 
     def test_every_family_member_inherits_blob_error(self) -> None:

@@ -92,9 +92,10 @@ def _validate_row_decomposition(
     rows_processed: int,
     rows_succeeded: int,
     rows_failed: int,
+    rows_routed: int,
     rows_quarantined: int,
 ) -> None:
-    """Enforce rows_processed == rows_succeeded + rows_failed + rows_quarantined.
+    """Enforce rows_processed == succeeded + failed + routed + quarantined.
 
     Shared by CompletedData, RunResultsResponse, and (conditionally on
     terminal status) RunStatusResponse.  A mismatch is a Tier 1 anomaly —
@@ -102,13 +103,30 @@ def _validate_row_decomposition(
     on terminal states.  Crash at construction rather than propagating
     wrong numbers to the frontend and audit trail.
     """
-    expected = rows_succeeded + rows_failed + rows_quarantined
+    expected = rows_succeeded + rows_failed + rows_routed + rows_quarantined
     if rows_processed != expected:
         raise ValueError(
             f"Row count decomposition mismatch: rows_processed={rows_processed} "
             f"!= rows_succeeded({rows_succeeded}) + rows_failed({rows_failed}) "
-            f"+ rows_quarantined({rows_quarantined}) = {expected}"
+            f"+ rows_routed({rows_routed}) + rows_quarantined({rows_quarantined}) = {expected}"
         )
+
+
+def _require_terminal_run_fields(
+    status: str,
+    *,
+    finished_at: datetime | None = None,
+    finished_at_required: bool = False,
+    error: str | None = None,
+    landscape_run_id: str | None = None,
+) -> None:
+    """Enforce status-specific terminal invariants for Tier 1 run data."""
+    if finished_at_required and status in RUN_STATUS_TERMINAL_VALUES and finished_at is None:
+        raise ValueError(f"status={status!r} requires finished_at")
+    if status == "completed" and not landscape_run_id:
+        raise ValueError("status='completed' requires landscape_run_id")
+    if status == "failed" and not error:
+        raise ValueError("status='failed' requires error")
 
 
 class CompletedData(_StrictResponse):
@@ -117,6 +135,7 @@ class CompletedData(_StrictResponse):
     rows_processed: int = Field(ge=0)
     rows_succeeded: int = Field(ge=0)
     rows_failed: int = Field(ge=0)
+    rows_routed: int = Field(default=0, ge=0)
     rows_quarantined: int = Field(ge=0)
     landscape_run_id: str = Field(min_length=1)
 
@@ -126,6 +145,7 @@ class CompletedData(_StrictResponse):
             self.rows_processed,
             self.rows_succeeded,
             self.rows_failed,
+            self.rows_routed,
             self.rows_quarantined,
         )
         return self
@@ -136,6 +156,7 @@ class CancelledData(_StrictResponse):
 
     rows_processed: int = Field(ge=0)
     rows_failed: int = Field(ge=0)
+    rows_routed: int = Field(default=0, ge=0)
 
 
 class FailedData(_StrictResponse):
@@ -238,6 +259,7 @@ class RunStatusResponse(_StrictResponse):
     rows_processed: int = Field(ge=0)
     rows_succeeded: int = Field(ge=0)
     rows_failed: int = Field(ge=0)
+    rows_routed: int = Field(default=0, ge=0)
     rows_quarantined: int = Field(ge=0)
     error: str | None
     landscape_run_id: str | None
@@ -257,7 +279,15 @@ class RunStatusResponse(_StrictResponse):
                 self.rows_processed,
                 self.rows_succeeded,
                 self.rows_failed,
+                self.rows_routed,
                 self.rows_quarantined,
+            )
+            _require_terminal_run_fields(
+                self.status,
+                finished_at=self.finished_at,
+                finished_at_required=True,
+                error=self.error,
+                landscape_run_id=self.landscape_run_id,
             )
         return self
 
@@ -270,6 +300,7 @@ class RunResultsResponse(_StrictResponse):
     rows_processed: int = Field(ge=0)
     rows_succeeded: int = Field(ge=0)
     rows_failed: int = Field(ge=0)
+    rows_routed: int = Field(default=0, ge=0)
     rows_quarantined: int = Field(ge=0)
     landscape_run_id: str | None
     error: str | None
@@ -280,7 +311,13 @@ class RunResultsResponse(_StrictResponse):
             self.rows_processed,
             self.rows_succeeded,
             self.rows_failed,
+            self.rows_routed,
             self.rows_quarantined,
+        )
+        _require_terminal_run_fields(
+            self.status,
+            error=self.error,
+            landscape_run_id=self.landscape_run_id,
         )
         return self
 

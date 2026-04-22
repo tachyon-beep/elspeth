@@ -245,8 +245,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with contextlib.suppress(asyncio.CancelledError):
         await orphan_task
 
-    # Shutdown execution service thread pool
-    execution_service.shutdown()
+    # Shutdown execution service thread pool without blocking the loop:
+    # worker cleanup still schedules terminal-state writes back onto it.
+    await execution_service.shutdown()
 
 
 # Fields that accept JSON-encoded collection values from environment variables.

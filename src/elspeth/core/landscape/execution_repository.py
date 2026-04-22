@@ -46,7 +46,7 @@ from elspeth.core.canonical import canonical_json, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
-from elspeth.core.landscape.errors import LandscapeRecordError
+from elspeth.core.landscape.errors import LandscapePostCommitError, LandscapeRecordError
 from elspeth.core.landscape.model_loaders import (
     ArtifactLoader,
     BatchLoader,
@@ -343,10 +343,10 @@ class ExecutionRepository:
         try:
             result = self._node_state_loader.load(row)
         except AuditIntegrityError as exc:
-            raise LandscapeRecordError(f"NodeState {state_id} became unreadable immediately after completion: {exc}") from exc
+            raise LandscapePostCommitError(f"NodeState {state_id} became unreadable immediately after completion: {exc}") from exc
         # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
         if isinstance(result, NodeStateOpen):
-            raise LandscapeRecordError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
+            raise LandscapePostCommitError(f"NodeState {state_id} should be terminal after completion but has status OPEN")
         return result
 
     def get_node_state(self, state_id: str) -> NodeState | None:

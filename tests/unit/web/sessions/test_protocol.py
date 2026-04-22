@@ -134,6 +134,7 @@ class TestRunRecord:
             rows_processed=0,
             rows_succeeded=0,
             rows_failed=0,
+            rows_routed=0,
             rows_quarantined=0,
             error=None,
             landscape_run_id=None,
@@ -160,6 +161,64 @@ class TestRunRecord:
                 rows_processed=0,
                 rows_succeeded=0,
                 rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+                pipeline_yaml=None,
+            )
+
+    def test_completed_requires_landscape_run_id(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="landscape_run_id"):
+            RunRecord(
+                id=uuid4(),
+                session_id=uuid4(),
+                state_id=uuid4(),
+                status="completed",
+                started_at=datetime.now(UTC),
+                finished_at=datetime.now(UTC),
+                rows_processed=1,
+                rows_succeeded=1,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+                pipeline_yaml=None,
+            )
+
+    def test_failed_requires_error(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="missing error"):
+            RunRecord(
+                id=uuid4(),
+                session_id=uuid4(),
+                state_id=uuid4(),
+                status="failed",
+                started_at=datetime.now(UTC),
+                finished_at=datetime.now(UTC),
+                rows_processed=1,
+                rows_succeeded=0,
+                rows_failed=1,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+                pipeline_yaml=None,
+            )
+
+    def test_terminal_status_requires_finished_at(self) -> None:
+        with pytest.raises(AuditIntegrityError, match="finished_at"):
+            RunRecord(
+                id=uuid4(),
+                session_id=uuid4(),
+                state_id=uuid4(),
+                status="cancelled",
+                started_at=datetime.now(UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_routed=0,
                 rows_quarantined=0,
                 error=None,
                 landscape_run_id=None,

@@ -13,6 +13,7 @@ from typing import Any, TypeVar
 from uuid import UUID, uuid4
 
 from sqlalchemy import Engine, func, select
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts.errors import AuditIntegrityError
@@ -25,6 +26,7 @@ from elspeth.web.blobs.protocol import (
     AllowedMimeType,
     BlobActiveRunError,
     BlobCreator,
+    BlobContentMissingError,
     BlobFinalizationError,
     BlobFinalizationResult,
     BlobIntegrityError,
@@ -112,6 +114,35 @@ def _source_references_blob(
     # set_source without blob_ref — the execution service only creates
     # blob_run_links when blob_ref is present)
     return any(options.get(key) == storage_path for key in ("path", "file"))
+
+
+def _assert_blob_run_same_session(
+    conn: Connection,
+    *,
+    blob_id: str,
+    run_id: str,
+    caller: str,
+) -> None:
+    """Offensive guard: blob and run must belong to the same session.
+
+    ``link_blob_to_run()`` is an internal write boundary. A cross-session
+    linkage is a caller bug, not user input, so crash with RuntimeError
+    before persisting contradictory ownership into ``blob_run_links``.
+    """
+    blob_session_id = conn.execute(select(blobs_table.c.session_id).where(blobs_table.c.id == blob_id)).scalar()
+    if blob_session_id is None:
+        raise RuntimeError(f"{caller}: blob_id={blob_id!r} does not exist")
+
+    run_session_id = conn.execute(select(runs_table.c.session_id).where(runs_table.c.id == run_id)).scalar()
+    if run_session_id is None:
+        raise RuntimeError(f"{caller}: run_id={run_id!r} does not exist")
+
+    if blob_session_id != run_session_id:
+        raise RuntimeError(
+            f"{caller}: blob_id={blob_id!r} belongs to session "
+            f"{blob_session_id!r}, run_id={run_id!r} belongs to session "
+            f"{run_session_id!r} — cross-session reference is a contract violation"
+        )
 
 
 class BlobServiceImpl:
@@ -480,10 +511,11 @@ class BlobServiceImpl:
            Pending blobs have no finalized content; error blobs
            represent failed runs whose output is not trustworthy.
 
-        2. **Integrity verification**: recomputes SHA-256 from the
-           file on disk and compares it to the stored ``content_hash``.
-           A mismatch indicates filesystem corruption, tampering, or
-           a write-path bug — all Tier 1 anomalies.
+        2. **Integrity verification**: a ready blob must still have a
+           backing file on disk, and its bytes must match the stored
+           ``content_hash``. Missing bytes or hash mismatch indicate
+           filesystem corruption, silent data loss, tampering, or a
+           write-path bug — all Tier 1 anomalies.
         """
         blob_id_str = str(blob_id)
 
@@ -502,7 +534,7 @@ class BlobServiceImpl:
 
                 storage = Path(row.storage_path)
                 if not storage.exists():
-                    raise BlobNotFoundError(blob_id_str)
+                    raise BlobContentMissingError(blob_id_str, storage_path=row.storage_path)
 
                 data = storage.read_bytes()
 
@@ -535,6 +567,12 @@ class BlobServiceImpl:
 
         def _sync() -> None:
             with self._engine.begin() as conn:
+                _assert_blob_run_same_session(
+                    conn,
+                    blob_id=str(blob_id),
+                    run_id=str(run_id),
+                    caller="BlobServiceImpl.link_blob_to_run",
+                )
                 conn.execute(
                     blob_run_links_table.insert().values(
                         blob_id=str(blob_id),

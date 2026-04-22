@@ -12,7 +12,7 @@ import pytest
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.oidc import OIDCAuthProvider
-from tests.unit.web.auth.conftest import make_rs256_token
+from tests.unit.web.auth.conftest import build_rsa_jwk, make_rsa_token, make_rs256_token
 
 ISSUER = "https://login.example.com"
 AUDIENCE = "my-app-client-id"
@@ -393,6 +393,25 @@ class TestOIDCGetUserInfo:
             profile = await provider.get_user_info(token)
         assert profile.username == "user-123"
 
+    @pytest.mark.asyncio
+    async def test_non_string_optional_profile_claims_are_dropped(
+        self,
+        rsa_keypair,
+        mock_httpx_discovery,
+    ) -> None:
+        """Cosmetic IdP metadata must not crash profile construction when it has the wrong type."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims({"name": 42, "email": 123}))
+
+        with mock_httpx_discovery:
+            profile = await provider.get_user_info(token)
+
+        assert profile.user_id == "user-123"
+        assert profile.username == "alice"
+        assert profile.display_name == "alice"
+        assert profile.email is None
+
 
 class TestOIDCJWKSFailures:
     """Tests for JWKS discovery network failures."""
@@ -646,6 +665,65 @@ class TestOIDCJWKSShapeValidation:
             pytest.raises(AuthenticationError, match="missing 'keys' list"),
         ):
             await provider.authenticate("some-token")
+
+    @pytest.mark.asyncio
+    async def test_jwks_inner_key_attribute_error_raises_and_does_not_cache(
+        self,
+        rsa_keypair,
+    ) -> None:
+        """Malformed inner key entries must be rejected before the cache is updated."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with (
+            self._patch_responses({"jwks_uri": f"{ISSUER}/keys"}, {"keys": [42]}),
+            pytest.raises(AuthenticationError, match="unusable key entries"),
+        ):
+            await provider.authenticate(token)
+
+        assert provider._validator._jwks is None
+
+    @pytest.mark.asyncio
+    async def test_jwks_empty_inner_key_raises_and_does_not_cache(
+        self,
+        rsa_keypair,
+    ) -> None:
+        """Object-shaped but unusable JWKs must not poison the cache."""
+        private_key, _ = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rs256_token(private_key, _valid_claims())
+
+        with (
+            self._patch_responses({"jwks_uri": f"{ISSUER}/keys"}, {"keys": [{}]}),
+            pytest.raises(AuthenticationError, match="unusable key entries"),
+        ):
+            await provider.authenticate(token)
+
+        assert provider._validator._jwks is None
+
+
+class TestOIDCAlgorithmSelection:
+    """Tests for algorithm selection when the JWK omits `alg`."""
+
+    @pytest.mark.asyncio
+    async def test_alg_less_rsa_jwks_accepts_ps256_token(
+        self,
+        rsa_keypair,
+    ) -> None:
+        """The token header algorithm, not PyJWT's RSA fallback, should drive verification."""
+        private_key, public_key = rsa_keypair
+        provider = OIDCAuthProvider(issuer=ISSUER, audience=AUDIENCE)
+        token = make_rsa_token(private_key, _valid_claims(), algorithm="PS256")
+
+        with TestOIDCJWKSShapeValidation._patch_responses(
+            {"jwks_uri": f"{ISSUER}/keys"},
+            build_rsa_jwk(public_key, alg=None),
+        ):
+            identity = await provider.authenticate(token)
+
+        assert identity.user_id == "user-123"
+        assert identity.username == "alice"
 
 
 class TestOIDCStaleCacheBackoff:

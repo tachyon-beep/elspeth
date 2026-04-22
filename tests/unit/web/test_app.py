@@ -387,6 +387,23 @@ class TestOidcDiscoveryStartup:
                 pass
 
 
+class TestLifespanShutdown:
+    """Shutdown must await the execution-service drain path."""
+
+    @pytest.mark.asyncio
+    async def test_lifespan_awaits_execution_service_shutdown(self, tmp_path) -> None:
+        app = create_app(_settings(tmp_path))
+        fake_execution_service = MagicMock()
+        fake_execution_service.get_live_run_ids.return_value = frozenset()
+        fake_execution_service.shutdown = AsyncMock()
+
+        with patch("elspeth.web.app.ExecutionServiceImpl", return_value=fake_execution_service):
+            async with lifespan(app):
+                pass
+
+        fake_execution_service.shutdown.assert_awaited_once()
+
+
 class TestSettingsFromEnv:
     """Tests for _settings_from_env() environment variable parsing."""
 

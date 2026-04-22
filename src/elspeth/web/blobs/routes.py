@@ -20,6 +20,7 @@ from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     AllowedMimeType,
     BlobActiveRunError,
+    BlobContentMissingError,
     BlobIntegrityError,
     BlobNotFoundError,
     BlobQuotaExceededError,
@@ -267,7 +268,7 @@ def create_blobs_router() -> APIRouter:
                 status_code=409,
                 detail="Blob is not in a downloadable state",
             ) from None
-        except BlobIntegrityError:
+        except (BlobIntegrityError, BlobContentMissingError):
             raise HTTPException(
                 status_code=500,
                 detail="Blob content integrity verification failed",

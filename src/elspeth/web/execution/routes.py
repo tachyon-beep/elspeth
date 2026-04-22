@@ -97,6 +97,72 @@ async def _verify_run_ownership(run_id: UUID, user: UserIdentity, request: Reque
         raise HTTPException(status_code=404, detail="Run not found")
 
 
+def _run_not_found_http() -> HTTPException:
+    """Canonical IDOR-safe not-found response for run-scoped routes."""
+    return HTTPException(status_code=404, detail="Run not found")
+
+
+def _build_terminal_run_event(current: RunStatusResponse) -> RunEvent:
+    """Synthesize a terminal RunEvent from authoritative run status.
+
+    ``current`` comes from our session database and is therefore Tier 1.
+    Impossible terminal states must raise rather than degrade into
+    partial client-visible payloads.
+    """
+    if current.status == "completed":
+        if current.landscape_run_id is None:
+            raise RuntimeError(
+                f"Completed run {current.run_id} has no landscape_run_id — Tier 1 anomaly (audit trail incomplete)"
+            )
+        try:
+            payload: CompletedData | FailedData | CancelledData = CompletedData(
+                rows_processed=current.rows_processed,
+                rows_succeeded=current.rows_succeeded,
+                rows_failed=current.rows_failed,
+                rows_routed=current.rows_routed,
+                rows_quarantined=current.rows_quarantined,
+                landscape_run_id=current.landscape_run_id,
+            )
+        except pydantic.ValidationError as exc:
+            raise RuntimeError(
+                f"Completed run {current.run_id} failed CompletedData validation "
+                f"— Tier 1 anomaly (audit trail inconsistent): {exc}"
+            ) from exc
+    elif current.status == "failed":
+        if current.error is None:
+            raise RuntimeError(
+                f"Failed run {current.run_id} has no error message — Tier 1 anomaly (error column NULL on terminal failure)"
+            )
+        payload = FailedData(
+            detail=current.error,
+            node_id=None,
+        )
+    elif current.status == "cancelled":
+        payload = CancelledData(
+            rows_processed=current.rows_processed,
+            rows_failed=current.rows_failed,
+            rows_routed=current.rows_routed,
+        )
+    else:
+        raise RuntimeError(f"_build_terminal_run_event called for non-terminal status {current.status!r}")
+
+    timestamp = current.finished_at or current.started_at
+    if timestamp is None:
+        raise RuntimeError(
+            f"Terminal run {current.run_id} has no timestamps — Tier 1 anomaly (both finished_at and started_at are NULL)"
+        )
+    event_type = cast(
+        Literal["progress", "error", "completed", "cancelled", "failed"],
+        current.status,
+    )
+    return RunEvent(
+        run_id=current.run_id,
+        timestamp=timestamp,
+        event_type=event_type,
+        data=payload,
+    )
+
+
 # ── Router ─────────────────────────────────────────────────────────────
 
 
@@ -186,7 +252,10 @@ def create_execution_router() -> APIRouter:
     ) -> RunStatusResponse:
         """Return current run status."""
         await _verify_run_ownership(run_id, user, request)
-        return await service.get_status(run_id)
+        try:
+            return await service.get_status(run_id)
+        except ValueError:
+            raise _run_not_found_http() from None
 
     @router.post("/api/runs/{run_id}/cancel")
     async def cancel_run(
@@ -197,8 +266,11 @@ def create_execution_router() -> APIRouter:
     ) -> dict[str, str]:
         """Cancel a run. Idempotent on terminal runs."""
         await _verify_run_ownership(run_id, user, request)
-        await service.cancel(run_id)
-        status = await service.get_status(run_id)
+        try:
+            await service.cancel(run_id)
+            status = await service.get_status(run_id)
+        except ValueError:
+            raise _run_not_found_http() from None
         return {"status": status.status}
 
     @router.get(
@@ -213,7 +285,10 @@ def create_execution_router() -> APIRouter:
     ) -> RunResultsResponse:
         """Return final run results. 409 if run is not terminal."""
         await _verify_run_ownership(run_id, user, request)
-        status = await service.get_status(run_id)
+        try:
+            status = await service.get_status(run_id)
+        except ValueError:
+            raise _run_not_found_http() from None
         if status.status in RUN_STATUS_NON_TERMINAL_VALUES:
             raise HTTPException(
                 status_code=409,
@@ -230,6 +305,7 @@ def create_execution_router() -> APIRouter:
             rows_processed=status.rows_processed,
             rows_succeeded=status.rows_succeeded,
             rows_failed=status.rows_failed,
+            rows_routed=status.rows_routed,
             rows_quarantined=status.rows_quarantined,
             landscape_run_id=status.landscape_run_id,
             error=status.error,
@@ -290,62 +366,7 @@ def create_execution_router() -> APIRouter:
                 await websocket.close(code=4004, reason="Run not found")
                 return
             if current.status in ("completed", "failed", "cancelled"):
-                if current.status == "completed":
-                    if current.landscape_run_id is None:
-                        raise RuntimeError(
-                            f"Completed run {current.run_id} has no landscape_run_id — Tier 1 anomaly (audit trail incomplete)"
-                        )
-                    # CompletedData enforces rows_processed decomposition via
-                    # model_validator.  The DB values are Tier 1 — a mismatch
-                    # is a system-integrity failure, not user input.  Wrap
-                    # pydantic.ValidationError in a RuntimeError with the same
-                    # "Tier 1 anomaly" framing as the explicit checks above so
-                    # the seeding path fails with a single, recognisable
-                    # exception shape regardless of which invariant tripped.
-                    try:
-                        payload: CompletedData | FailedData | CancelledData = CompletedData(
-                            rows_processed=current.rows_processed,
-                            rows_succeeded=current.rows_succeeded,
-                            rows_failed=current.rows_failed,
-                            rows_quarantined=current.rows_quarantined,
-                            landscape_run_id=current.landscape_run_id,
-                        )
-                    except pydantic.ValidationError as exc:
-                        raise RuntimeError(
-                            f"Completed run {current.run_id} failed CompletedData validation "
-                            f"— Tier 1 anomaly (audit trail inconsistent): {exc}"
-                        ) from exc
-                elif current.status == "failed":
-                    if current.error is None:
-                        raise RuntimeError(
-                            f"Failed run {current.run_id} has no error message — Tier 1 anomaly (error column NULL on terminal failure)"
-                        )
-                    payload = FailedData(
-                        detail=current.error,
-                        node_id=None,
-                    )
-                else:
-                    payload = CancelledData(
-                        rows_processed=current.rows_processed,
-                        rows_failed=current.rows_failed,
-                    )
-                timestamp = current.finished_at or current.started_at
-                if timestamp is None:
-                    raise RuntimeError(
-                        f"Terminal run {current.run_id} has no timestamps — Tier 1 anomaly (both finished_at and started_at are NULL)"
-                    )
-                # Terminal run status maps directly to event_type for seeding.
-                # mypy can't narrow through the if/elif/else chain above.
-                event_type = cast(
-                    Literal["progress", "error", "completed", "cancelled", "failed"],
-                    current.status,
-                )
-                event = RunEvent(
-                    run_id=current.run_id,
-                    timestamp=timestamp,
-                    event_type=event_type,
-                    data=payload,
-                )
+                event = _build_terminal_run_event(current)
                 await websocket.send_json(event.model_dump(mode="json"))
                 await websocket.close(code=1000)
                 return
@@ -353,11 +374,19 @@ def create_execution_router() -> APIRouter:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=60.0)
                 except TimeoutError:
-                    # Heartbeat timeout — pipeline may have crashed without terminal event.
+                    # Idle timeout — a terminal broadcast may have been missed.
+                    # Re-check authoritative run status instead of sending an
+                    # ad-hoc payload outside the RunEvent contract.
                     try:
-                        await websocket.send_json({"type": "heartbeat"})
-                    except (WebSocketDisconnect, ConnectionError, OSError):
-                        break  # Client disconnected
+                        current = await service.get_status(UUID(run_id))
+                    except ValueError:
+                        await websocket.close(code=4004, reason="Run not found")
+                        break
+                    if current.status in ("completed", "failed", "cancelled"):
+                        terminal_event = _build_terminal_run_event(current)
+                        await websocket.send_json(terminal_event.model_dump(mode="json"))
+                        await websocket.close(code=1000)
+                        break
                     continue
                 await websocket.send_json(event.model_dump(mode="json"))
                 # "error" events are non-terminal (per-row exceptions).

@@ -17,6 +17,7 @@ import structlog
 from jwt.exceptions import PyJWTError
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
+from elspeth.web.validation import has_visible_content
 
 slog = structlog.get_logger()
 
@@ -79,6 +80,38 @@ class JWKSTokenValidator:
         if not isinstance(keys, list):
             raise AuthenticationError("JWKS document missing 'keys' list")
         return jwks
+
+    @staticmethod
+    def _parse_jwk_set(jwks: dict[str, Any]) -> jwt.PyJWKSet:
+        """Fully validate JWK usability before decode/caching decisions."""
+        try:
+            return jwt.PyJWKSet.from_dict(jwks)
+        except (PyJWTError, AttributeError, TypeError, ValueError) as exc:
+            raise AuthenticationError(f"JWKS document contains unusable key entries: {type(exc).__name__}") from exc
+
+    @staticmethod
+    def _get_token_algorithm(header: dict[str, Any]) -> str:
+        """Return the token header algorithm as a validated non-empty string."""
+        alg = header.get("alg")
+        if not isinstance(alg, str) or not alg.strip():
+            raise AuthenticationError("Token header missing non-empty string 'alg'")
+        return alg
+
+    @staticmethod
+    def _get_jwk_algorithm(jwks: dict[str, Any], *, kid: str | None) -> str | None:
+        """Return the matched JWK's advertised algorithm, if it has one."""
+        for raw_key in jwks["keys"]:
+            if not isinstance(raw_key, dict):
+                continue
+            if raw_key.get("kid") != kid:
+                continue
+            alg = raw_key.get("alg")
+            if alg is None:
+                return None
+            if not isinstance(alg, str) or not alg.strip():
+                raise AuthenticationError(f"JWKS key for kid={kid!r} has invalid non-empty string 'alg' value")
+            return alg
+        return None
 
     async def ensure_jwks(self) -> dict[str, Any]:
         """Fetch and cache JWKS keys from the OIDC discovery endpoint.
@@ -160,6 +193,7 @@ class JWKSTokenValidator:
                     # Shape-validate BEFORE assigning to cache: a wrong-shaped
                     # response must not poison self._jwks.
                     validated = self._validate_jwks_document(jwks_resp.json())
+                    self._parse_jwk_set(validated)
                     self._jwks = validated
                     self._next_refresh_at = now + self._jwks_cache_ttl_seconds
             except AuthenticationError:
@@ -284,9 +318,10 @@ class JWKSTokenValidator:
         ``kid`` header to the correct JWK entry.
         """
         try:
-            jwk_set = jwt.PyJWKSet.from_dict(jwks)
             header = jwt.get_unverified_header(token)
+            token_alg = self._get_token_algorithm(header)
             kid = header.get("kid")
+            jwk_set = self._parse_jwk_set(jwks)
             matched_jwk = None
             for key in jwk_set.keys:
                 if key.key_id == kid:
@@ -294,14 +329,15 @@ class JWKSTokenValidator:
                     break
             if matched_jwk is None:
                 raise AuthenticationError(f"No matching key found in JWKS for kid={kid!r}")
-            # Derive algorithm from the JWK rather than hardcoding RS256.
-            # PyJWT's PyJWK.algorithm_name reads the JWK's "alg" field, or
-            # infers from "kty" when absent (e.g., kty=RSA → RS256,
-            # kty=EC → ES256). This supports providers using ES256, PS256, etc.
+            jwk_alg = self._get_jwk_algorithm(jwks, kid=kid)
+            if jwk_alg is not None and jwk_alg != token_alg:
+                raise AuthenticationError(
+                    f"Token header alg {token_alg!r} does not match JWKS alg {jwk_alg!r} for kid={kid!r}"
+                )
             payload: dict[str, Any] = jwt.decode(
                 token,
                 matched_jwk.key,
-                algorithms=[matched_jwk.algorithm_name],
+                algorithms=[token_alg],
                 audience=self._audience,
                 issuer=self._issuer,
             )
@@ -348,6 +384,16 @@ class OIDCAuthProvider:
             username=payload.get("preferred_username") or sub,
         )
 
+    @staticmethod
+    def _optional_profile_claim(payload: dict[str, Any], claim_name: str) -> str | None:
+        """Return optional cosmetic claims as visible strings or None."""
+        value = payload.get(claim_name)
+        if value is None or not isinstance(value, str):
+            return None
+        if not has_visible_content(value):
+            return None
+        return value
+
     async def get_user_info(self, token: str) -> UserProfile:
         """Decode the OIDC token and extract profile claims."""
         jwks = await self._validator.ensure_jwks()
@@ -370,12 +416,16 @@ class OIDCAuthProvider:
                 f"Unexpected type for 'groups' claim: {type(raw_groups).__name__} (expected list) — check IdP token configuration"
             )
 
+        display_name = self._optional_profile_claim(payload, "name")
+        if display_name is None:
+            display_name = self._optional_profile_claim(payload, "preferred_username")
+
         return UserProfile(
             user_id=sub,
             # preferred_username is optional — fall back to sub if absent,
             # null, or empty. IdPs may send null for this optional claim.
             username=payload.get("preferred_username") or sub,
-            display_name=payload.get("name") or payload.get("preferred_username"),
-            email=payload.get("email"),
+            display_name=display_name,
+            email=self._optional_profile_claim(payload, "email"),
             groups=tuple(groups),
         )

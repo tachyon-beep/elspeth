@@ -1600,6 +1600,25 @@ class TestReadBlobContentLifecycleGuard:
             await blob_service.read_blob_content(record.id)
 
     @pytest.mark.asyncio
+    async def test_rejects_ready_blob_with_missing_backing_file(self, blob_service, session_id) -> None:
+        """Ready metadata without backing bytes is an integrity failure, not 404."""
+        from pathlib import Path as _Path
+
+        from elspeth.web.blobs.protocol import BlobContentMissingError
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="missing.csv",
+            content=b"original-content",
+            mime_type="text/csv",
+            created_by="user",
+        )
+        _Path(record.storage_path).unlink()
+
+        with pytest.raises(BlobContentMissingError, match="backing file"):
+            await blob_service.read_blob_content(record.id)
+
+    @pytest.mark.asyncio
     async def test_rejects_pending_blob_without_file(self, blob_service, session_id) -> None:
         """Pending blob with no file must raise BlobStateError, not BlobNotFoundError.
 
@@ -2088,6 +2107,41 @@ class TestLinkBlobToRunDirectionGuard:
         links = await blob_service.get_blob_run_links(blob.id)
         directions = sorted(link.direction for link in links)
         assert directions == ["input", "output"]
+
+
+class TestLinkBlobToRunSessionGuard:
+    """link_blob_to_run must reject cross-session references at the write boundary."""
+
+    @pytest.mark.asyncio
+    async def test_rejects_cross_session_link(self, blob_service, session_id, db_engine) -> None:
+        """Blob and run from different sessions must not be linkable."""
+        session_b = UUID(str(uuid4()))
+        now = datetime.now(UTC)
+        with db_engine.begin() as conn:
+            conn.execute(
+                sessions_table.insert().values(
+                    id=str(session_b),
+                    user_id="test-user-b",
+                    auth_provider_type="local",
+                    title="Session B",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+        foreign_run_id = TestLinkBlobToRunDirectionGuard._make_run(db_engine, session_b)
+        blob = await blob_service.create_blob(
+            session_id=session_id,
+            filename="input.csv",
+            content=b"a,b,c\n1,2,3\n",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        with pytest.raises(RuntimeError, match="cross-session reference"):
+            await blob_service.link_blob_to_run(blob.id, foreign_run_id, "input")
+
+        assert await blob_service.get_blob_run_links(blob.id) == []
 
 
 # ---------------------------------------------------------------------------

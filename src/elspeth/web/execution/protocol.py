@@ -99,3 +99,7 @@ class ExecutionService(Protocol):
     async def verify_run_ownership(self, user: UserIdentity, run_id: str) -> bool:
         """Verify that a run belongs to the authenticated user's session."""
         ...
+
+    async def shutdown(self) -> None:
+        """Drain executor-owned runs without blocking the event loop."""
+        ...
