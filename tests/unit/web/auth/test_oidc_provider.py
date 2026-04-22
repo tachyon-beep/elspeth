@@ -12,7 +12,7 @@ import pytest
 
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.oidc import OIDCAuthProvider
-from tests.unit.web.auth.conftest import build_rsa_jwk, make_rsa_token, make_rs256_token
+from tests.unit.web.auth.conftest import build_rsa_jwk, make_rs256_token, make_rsa_token
 
 ISSUER = "https://login.example.com"
 AUDIENCE = "my-app-client-id"

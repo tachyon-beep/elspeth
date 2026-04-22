@@ -259,9 +259,7 @@ class BlobContentMissingError(BlobError):
     _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"blob_id", "storage_path"})
 
     def __init__(self, blob_id: str, *, storage_path: str) -> None:
-        super().__init__(
-            f"Blob {blob_id} content missing: ready metadata points at absent backing file {storage_path}"
-        )
+        super().__init__(f"Blob {blob_id} content missing: ready metadata points at absent backing file {storage_path}")
         self.blob_id = blob_id
         self.storage_path = storage_path
 

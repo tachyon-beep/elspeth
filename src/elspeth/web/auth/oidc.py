@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import jwt
@@ -331,9 +331,7 @@ class JWKSTokenValidator:
                 raise AuthenticationError(f"No matching key found in JWKS for kid={kid!r}")
             jwk_alg = self._get_jwk_algorithm(jwks, kid=kid)
             if jwk_alg is not None and jwk_alg != token_alg:
-                raise AuthenticationError(
-                    f"Token header alg {token_alg!r} does not match JWKS alg {jwk_alg!r} for kid={kid!r}"
-                )
+                raise AuthenticationError(f"Token header alg {token_alg!r} does not match JWKS alg {jwk_alg!r} for kid={kid!r}")
             payload: dict[str, Any] = jwt.decode(
                 token,
                 matched_jwk.key,
@@ -390,9 +388,10 @@ class OIDCAuthProvider:
         value = payload.get(claim_name)
         if value is None or not isinstance(value, str):
             return None
-        if not has_visible_content(value):
+        claim_value = cast(str, value)
+        if not has_visible_content(claim_value):
             return None
-        return value
+        return claim_value
 
     async def get_user_info(self, token: str) -> UserProfile:
         """Decode the OIDC token and extract profile claims."""

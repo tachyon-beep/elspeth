@@ -111,9 +111,7 @@ def _build_terminal_run_event(current: RunStatusResponse) -> RunEvent:
     """
     if current.status == "completed":
         if current.landscape_run_id is None:
-            raise RuntimeError(
-                f"Completed run {current.run_id} has no landscape_run_id — Tier 1 anomaly (audit trail incomplete)"
-            )
+            raise RuntimeError(f"Completed run {current.run_id} has no landscape_run_id — Tier 1 anomaly (audit trail incomplete)")
         try:
             payload: CompletedData | FailedData | CancelledData = CompletedData(
                 rows_processed=current.rows_processed,
@@ -125,14 +123,11 @@ def _build_terminal_run_event(current: RunStatusResponse) -> RunEvent:
             )
         except pydantic.ValidationError as exc:
             raise RuntimeError(
-                f"Completed run {current.run_id} failed CompletedData validation "
-                f"— Tier 1 anomaly (audit trail inconsistent): {exc}"
+                f"Completed run {current.run_id} failed CompletedData validation — Tier 1 anomaly (audit trail inconsistent): {exc}"
             ) from exc
     elif current.status == "failed":
         if current.error is None:
-            raise RuntimeError(
-                f"Failed run {current.run_id} has no error message — Tier 1 anomaly (error column NULL on terminal failure)"
-            )
+            raise RuntimeError(f"Failed run {current.run_id} has no error message — Tier 1 anomaly (error column NULL on terminal failure)")
         payload = FailedData(
             detail=current.error,
             node_id=None,
@@ -148,9 +143,7 @@ def _build_terminal_run_event(current: RunStatusResponse) -> RunEvent:
 
     timestamp = current.finished_at or current.started_at
     if timestamp is None:
-        raise RuntimeError(
-            f"Terminal run {current.run_id} has no timestamps — Tier 1 anomaly (both finished_at and started_at are NULL)"
-        )
+        raise RuntimeError(f"Terminal run {current.run_id} has no timestamps — Tier 1 anomaly (both finished_at and started_at are NULL)")
     event_type = cast(
         Literal["progress", "error", "completed", "cancelled", "failed"],
         current.status,

@@ -26,8 +26,7 @@ from elspeth.contracts.errors import (
     OrchestrationInvariantError,
 )
 from elspeth.core.canonical import canonical_json
-from elspeth.core.landscape.errors import LandscapeRecordError
-from elspeth.core.landscape.errors import LandscapePostCommitError
+from elspeth.core.landscape.errors import LandscapePostCommitError, LandscapeRecordError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 
 if TYPE_CHECKING:
@@ -261,14 +260,14 @@ class NodeStateGuard:
 
     def _extract_audit_evidence_context(
         self,
-        exc_val: BaseException | None,
+        exc_val: object | None,
     ) -> tuple[Mapping[str, Any] | None, BaseException | None]:
         """Extract structured exception context without letting it strand the state OPEN."""
         if not isinstance(exc_val, AuditEvidenceBase):
             return None, None
 
         try:
-            context = exc_val.to_audit_dict()  # type: ignore[unreachable]  # AuditEvidenceBase is not BaseException; mypy can't see multi-inheritance
+            context = exc_val.to_audit_dict()
             if not isinstance(context, Mapping):
                 raise TypeError(f"Audit evidence must be a mapping, got {type(context).__name__}")
             canonical_json(context)

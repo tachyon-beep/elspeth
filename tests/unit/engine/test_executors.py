@@ -72,8 +72,8 @@ from elspeth.contracts.declaration_contracts import _attach_contract_name_from_d
 from elspeth.contracts.diversion import SinkWriteResult
 from elspeth.contracts.enums import (
     BatchStatus,
-    NodeType,
     NodeStateStatus,
+    NodeType,
     RoutingKind,
     RoutingMode,
     RowOutcome,
@@ -4260,7 +4260,6 @@ class TestNodeStateGuard:
 
     def test_non_serializable_audit_evidence_records_failed_then_raises_audit_integrity(self) -> None:
         """Broken audit evidence must not strand the state OPEN during auto-fail."""
-        from collections.abc import Mapping
 
         from elspeth.contracts.audit_evidence import AuditEvidenceBase
         from elspeth.contracts.errors import AuditIntegrityError

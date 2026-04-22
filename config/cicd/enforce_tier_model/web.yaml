@@ -73,17 +73,17 @@ allow_hits:
   reason: Tier 3 boundary — JSON schema field 'default' is optional
   safety: Returns None; ConfigFieldSummary.default accepts None
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=bb52dabba9866ec6
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=4e5b492b394b415e
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=7889a4ddc822160d
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:ensure_jwks:fp=18d2f5a697343b25
   owner: web-auth
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status() and except block
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=70b4dcac26ccb394
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=593e0af0074215d6
   owner: web-auth
   reason: Tier 3 boundary — JWT header kid field is optional per RFC 7515
   safety: Missing kid falls through to AuthenticationError path (no matching key); no silent acceptance
@@ -94,70 +94,95 @@ allow_hits:
 # shaped IdP response surfaces as HTTP 401 rather than escaping as HTTP 500
 # (bug elspeth-c98e8e7047). The cache is only written AFTER validation, so
 # a malformed response cannot poison self._jwks for the TTL window.
-- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=826933292145d488
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=7b72be83fb8bf0f7
   owner: web-auth
   reason: Tier 3 boundary — OIDC discovery JSON top-level shape (dict vs. list/string) must be validated before indexing
   safety: Non-dict raises AuthenticationError with got-type in message; no silent coercion; converts to HTTP 401
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_discovery_document:fp=586bfbffd6625a77
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_discovery_document:fp=393627c554a657f9
   owner: web-auth
   reason: Tier 3 boundary — discovery dict.get('jwks_uri') lets us validate type before use rather than letting KeyError mask malformed JSON
   safety: Missing or non-string raises AuthenticationError; validated string is returned to caller; no caching before validation
   expires: null
-- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=c8f61e0a7e0c46b8
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=050deebdeb8bfc07
   owner: web-auth
   reason: Tier 3 boundary — jwks_uri must be a non-empty string; IdPs have been observed returning integers/nulls for this field
   safety: Non-string or empty raises AuthenticationError with a specific message; no silent fallback
   expires: null
-- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=0850896bdc605c33
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=0814d66955701c3e
   owner: web-auth
   reason: Tier 3 boundary — JWKS JSON top-level shape must be dict before passing to PyJWKSet.from_dict (which raises AttributeError on non-dict)
   safety: Non-dict raises AuthenticationError before self._jwks is assigned; malformed responses cannot poison the cache
   expires: null
-- key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_jwks_document:fp=f275f0d2d6ad1c46
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_jwks_document:fp=000e385cef7d8d09
   owner: web-auth
   reason: Tier 3 boundary — jwks.get('keys') permits shape-checking the value type before handing off to PyJWKSet
   safety: Non-list raises AuthenticationError; validation happens before cache assignment
   expires: null
-- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=1aa9e3980886af84
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=6f55b6f9dc56c36b
   owner: web-auth
   reason: Tier 3 boundary — 'keys' field must be a list per RFC 7517; IdPs have been observed returning objects or nulls
   safety: Non-list raises AuthenticationError; cache not written until shape is verified
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=56d6ede6a5a01482
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_get_token_algorithm:fp=e6da8061e94c304e
+  owner: web-auth
+  reason: Tier 3 boundary — JWT header alg is external token metadata and may be absent before decode
+  safety: Missing alg raises AuthenticationError before jwt.decode selects an algorithm
+  expires: null
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_get_token_algorithm:fp=c3d5bff62157490f
+  owner: web-auth
+  reason: Tier 3 boundary — JWT header alg must be a non-empty string before decode
+  safety: Non-string or blank alg raises AuthenticationError; no silent fallback to another algorithm
+  expires: null
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_get_jwk_algorithm:fp=de17cc341f202e2e
+  owner: web-auth
+  reason: Tier 3 boundary — individual JWKS entries may be non-object values even when the top-level keys list is valid
+  safety: Non-dict entries are skipped during kid matching; malformed entries do not crash the auth path
+  expires: null
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_get_jwk_algorithm:fp=f344522ba920a705
+  owner: web-auth
+  reason: Tier 3 boundary — JWK kid is optional metadata and must be compared defensively against the token header kid
+  safety: Missing or non-matching kid continues the search; final no-match raises AuthenticationError
+  expires: null
+- key: web/auth/oidc.py:R1:JWKSTokenValidator:_get_jwk_algorithm:fp=57935b9d084d5f3c
+  owner: web-auth
+  reason: Tier 3 boundary — JWK alg is optional metadata and is only enforced when the matched key advertises one
+  safety: None preserves honest absence; non-empty mismatches raise AuthenticationError before decode
+  expires: null
+- key: web/auth/oidc.py:R5:JWKSTokenValidator:_get_jwk_algorithm:fp=cddeaf8b7fd695dd
+  owner: web-auth
+  reason: Tier 3 boundary — matched JWK alg must be a non-empty string if present
+  safety: Invalid alg raises AuthenticationError; malformed IdP metadata is rejected rather than silently ignored
+  expires: null
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=3e6bc7ed5a4ac005
   owner: web-auth
   reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
   safety: Default is payload['sub'] which is required; absence of optional claim is expected
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=24fb0246e990256e
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:_optional_profile_claim:fp=9c36a06f27aea4c1
+  owner: web-auth
+  reason: Tier 3 boundary — optional OIDC profile claims are looked up generically and may be absent from the external token payload
+  safety: Missing claims return None so callers preserve honest absence instead of fabricating display data
+  expires: null
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:_optional_profile_claim:fp=cf33f9c8429e9850
+  owner: web-auth
+  reason: Tier 3 boundary — optional cosmetic claims must be visible strings before surfacing in the UI
+  safety: Non-string or blank values return None; malformed IdP data is dropped rather than exposed
+  expires: null
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e15cc5f5ab6b3e2d
   owner: web-auth
   reason: Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups
   safety: None returns empty groups; non-list raises AuthenticationError; no silent discard
   expires: null
-- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=d2ad336dcf552e41
+- key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=79d0cdd7f4d823e0
   owner: web-auth
   reason: Tier 3 boundary — groups claim type is not guaranteed by external IdP
   safety: Non-list raises AuthenticationError with type info for debugging
   expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=9647be9ddf3bba1e
+- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=13fe88b1bd7c9f1e
   owner: web-auth
   reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
   safety: Default is payload['sub'] which is required
-  expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=15578810c280421f
-  owner: web-auth
-  reason: Tier 3 boundary — name claim is optional, falls back to preferred_username
-  safety: Falls back to preferred_username or 'Unknown'; never to opaque sub UUID
-  expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=ac9682cd438a4599
-  owner: web-auth
-  reason: Tier 3 boundary — preferred_username fallback in display_name chain
-  safety: Falls back to None (honest absence) when IdP provides neither name nor preferred_username
-  expires: null
-- key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=ae969490ec4ac6b7
-  owner: web-auth
-  reason: Tier 3 boundary — email claim is optional in OIDC tokens
-  safety: Default None; UserProfile.email accepts None; absence is honest representation
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=268368c0e155cc41
   owner: web-auth
@@ -493,7 +518,7 @@ allow_hits:
 # blob_id and target session_id, mirroring the convention used by
 # finalize_run_output_blobs (fp=42178d47e9e1c5e0 below).  This is
 # not a silent swallow — operators see both causes in the traceback.
-- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=cd7218304350da2a
+- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=4e8fb496cbcf7ab5
   owner: web-blobs
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan blob_id and target session_id; storage file unlinked best-effort; primary copy exception remains the headline
@@ -578,7 +603,7 @@ allow_hits:
   reason: Progress broadcasting via call_soon_threadsafe raises RuntimeError when event loop is closed during shutdown
   safety: Only RuntimeError caught (narrowed from bare Exception); logged with canonical exc_class; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=8aae581a3a04bfbd
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=5586f6db239eafa9
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
@@ -613,12 +638,12 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=d078191a11890c8c
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=468a7c38d57f4118
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=31fd193a4df3eec4
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=066b1b12f53af075
   owner: web-blobs
   reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
   safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
@@ -628,52 +653,52 @@ allow_hits:
 # with no audit trail; this replacement records the secondary failure as a
 # separate RecoveryFailed[<type>] entry in BlobFinalizationResult.errors so
 # the audit record carries both the primary cause and the recovery outcome.
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=b015b10f708e02b4
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=a8520234e0210e9e
   owner: web-blobs
   reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE — DB/IO faults expected; programmer bugs still propagate
   safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not a silent swallow
   expires: null
-- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=13aa3e7ac0923778
+- key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=d7ca6cb71e1ee3a9
   owner: web-execution
   reason: False positive — asyncio.Queue.get() is an async queue method, not dict.get()
   safety: No dict access involved
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=0d81f0d2dbdfc586
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=f7e2a4f8664c8088
   owner: web-execution
   reason: Heartbeat timeout is an expected idle path, not an error swallow
   safety: Sends heartbeat to keep connection alive
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=6da970ea0987c5bd
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=4a1dc0ddf55e561b
   owner: web-execution
   reason: Narrowed heartbeat disconnect catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Breaks out of loop; falls through to unsubscribe
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=2f00f7aeff9e1d6c
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=afb0965a65a47db5
   owner: web-execution
   reason: WebSocketDisconnect is the expected disconnect control-flow path
   safety: Falls through to unsubscribe cleanup
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=eb9cdc42934f01f6
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=ad7af3c806f9c377
   owner: web-execution
   reason: Narrowed outer handler to (ConnectionError, OSError) — programming errors now propagate
   safety: Logged with slog.error; clean 1011 close sent to client
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=d390b72dd9dc0467
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=c7fb92efabdd99a3
   owner: web-execution
   reason: Narrowed close catch to (WebSocketDisconnect, ConnectionError, OSError)
   safety: Logged; already in error path
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=ebab59b0b20119e0
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=a6979ed81edd5015
   owner: web-execution
   reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to except AuthenticationError only
   safety: Only auth failures close with 4001; infrastructure errors propagate to outer handler
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=c94c4a1dfdaf8cb5
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=d5d7d1a0997eb6a6
   owner: web-execution
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
   safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
   expires: null
-- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=321168570c1ec8c2
+- key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=cb41044a423fae27
   owner: web-execution
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
@@ -837,17 +862,17 @@ allow_hits:
 # survive ``python -O`` execution (asserts are stripped under -O,
 # silently removing Tier-1 audit integrity checks).  Guarded code
 # semantics are unchanged — still crash-loud on anomaly.
-- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=945cbfb0d8a32720
+- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=2fe6cd34f78082ff
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
   safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=3433715149d9f25a
+- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=a2743a0ee6136046
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
   safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=3668dadeaca7b9ec
+- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=b49d66dbd3c7d6cd
   owner: web-blobs
   reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
   safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
@@ -904,27 +929,27 @@ allow_hits:
 # were converted to ``if not isinstance(...): raise AuditIntegrityError``
 # so they survive ``python -O`` execution.  Dict-navigation semantics
 # unchanged.
-- key: web/blobs/service.py:R5:_source_references_blob:fp=a4b8a69c4778e803
+- key: web/blobs/service.py:R5:_source_references_blob:fp=4d36218f080a8c27
   owner: web-blobs
   reason: Tier 1 read guard — composition_states.source JSON must be dict when non-None; raises AuditIntegrityError on DB corruption
   safety: Explicit raise fires immediately on type mismatch; not a silent recovery; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=c564ff3540aefd09
+- key: web/blobs/service.py:R1:_source_references_blob:fp=f0f84925d830641c
   owner: web-blobs
   reason: JSON column navigation — source.options is optional (file-path sources omit it)
   safety: Returns False (no match) when absent; Tier 1 raise on wrong type if present
   expires: null
-- key: web/blobs/service.py:R5:_source_references_blob:fp=7c8ae7d8d2e35abe
+- key: web/blobs/service.py:R5:_source_references_blob:fp=1c6db8c2e1b02409
   owner: web-blobs
   reason: Tier 1 read guard — source.options must be dict when non-None; raises AuditIntegrityError on DB corruption
   safety: Explicit raise fires immediately on type mismatch; not a silent recovery; survives ``python -O``
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=49a5af52e3369116
+- key: web/blobs/service.py:R1:_source_references_blob:fp=c13b50d74ef3162f
   owner: web-blobs
   reason: JSON column navigation — blob_ref is optional (only present for blob-backed sources)
   safety: Returns False (no match) when absent; correct for file-path sources
   expires: null
-- key: web/blobs/service.py:R1:_source_references_blob:fp=0b190c02bbe2ce38
+- key: web/blobs/service.py:R1:_source_references_blob:fp=92334695308af494
   owner: web-blobs
   reason: JSON column navigation — path/file keys are optional in source options
   safety: Returns False (no match) when absent; correct for sources without path
@@ -941,32 +966,32 @@ allow_hits:
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
   safety: Continues to next delimiter; returns None for uncertain content; no data loss
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=980e098630642f37
+- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=18e5e2ff7767f927
   owner: web-execution
   reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp, rejects int (Unix epoch)
   safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False) coercion scope
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=a2876e79ca2e5da7
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=f188d1541f351fa4
   owner: web-execution
   reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip path; non-dict values handled by Pydantic
   safety: Structural dispatch for deserialization, not error suppression
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=fc5e2ae61fdb7856
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=b9bc3b949a507bde
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=2b649babdd83f8f3
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=118cc4bdd8ed7f3b
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=4b8e4b786359a8b6
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=cc9c723009d5e352
   owner: web-execution
   reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip resolution
   safety: Non-dict data falls through to Pydantic union matching
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=31d7c3585f80c9d1
+- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=0dea9b2a1e01b6fc
   owner: web-execution
   reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator

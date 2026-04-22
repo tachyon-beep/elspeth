@@ -193,12 +193,15 @@ class TestWebSocketTimeoutRecovery:
             data=ProgressData(rows_processed=2, rows_failed=0),
         )
 
-        with patch(
-            "elspeth.web.execution.routes.asyncio.wait_for",
-            new=AsyncMock(side_effect=[TimeoutError(), queued_event, WebSocketDisconnect(code=1000)]),
+        with (
+            patch(
+                "elspeth.web.execution.routes.asyncio.wait_for",
+                new=AsyncMock(side_effect=[TimeoutError(), queued_event, WebSocketDisconnect(code=1000)]),
+            ),
+            TestClient(app) as client,
+            client.websocket_connect(f"/ws/runs/{run_id}?token=valid") as ws,
         ):
-            with TestClient(app) as client, client.websocket_connect(f"/ws/runs/{run_id}?token=valid") as ws:
-                payload = ws.receive_json()
+            payload = ws.receive_json()
 
         assert payload["event_type"] == "progress"
         assert payload["data"]["rows_processed"] == 2
@@ -254,12 +257,18 @@ class TestWebSocketTimeoutRecovery:
             ),
         )
 
-        with patch("elspeth.web.execution.routes.asyncio.wait_for", new=AsyncMock(side_effect=[TimeoutError(), queued_event])):
-            with TestClient(app) as client, client.websocket_connect(f"/ws/runs/{run_id}?token=valid") as ws:
-                payload = ws.receive_json()
-                assert payload["event_type"] == "completed"
-                assert payload["data"]["landscape_run_id"] == "land-1"
-                with pytest.raises(WebSocketDisconnect) as exc_info:
-                    ws.receive_json()
+        with (
+            patch(
+                "elspeth.web.execution.routes.asyncio.wait_for",
+                new=AsyncMock(side_effect=[TimeoutError(), queued_event]),
+            ),
+            TestClient(app) as client,
+            client.websocket_connect(f"/ws/runs/{run_id}?token=valid") as ws,
+        ):
+            payload = ws.receive_json()
+            assert payload["event_type"] == "completed"
+            assert payload["data"]["landscape_run_id"] == "land-1"
+            with pytest.raises(WebSocketDisconnect) as exc_info:
+                ws.receive_json()
 
         assert exc_info.value.code == 1000

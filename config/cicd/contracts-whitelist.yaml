@@ -503,10 +503,14 @@ allowed_dict_patterns:
   - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.ensure_jwks:return"
   - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:jwks"
   - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator.decode_token:return"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator._parse_jwk_set:jwks"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator._get_token_algorithm:header"
+  - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator._get_jwk_algorithm:jwks"
   # Shape validator returns the same external JWKS dict after top-level type
   # checks; PyJWKSet.from_dict consumes the raw IdP structure so the return
   # type must stay dict[str, Any].
   - "src/elspeth/web/auth/oidc.py:JWKSTokenValidator._validate_jwks_document:return"
+  - "src/elspeth/web/auth/oidc.py:OIDCAuthProvider._optional_profile_claim:payload"
   - "src/elspeth/web/auth/entra.py:EntraAuthProvider._validate_tenant:payload"
   - "src/elspeth/web/auth/entra.py:EntraAuthProvider._extract_groups:payload"
 

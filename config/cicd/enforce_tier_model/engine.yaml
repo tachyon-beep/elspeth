@@ -246,10 +246,20 @@ allow_hits:
   reason: First-seen original name fallback - not all fields have explicit mapping in fallback dict
   safety: Falls back to normalized_name when original name unknown
   expires: '2026-05-12'
-- key: engine/executors/state_guard.py:R5:NodeStateGuard:__exit__:fp=63487623de5ce8df
+- key: engine/executors/state_guard.py:R5:NodeStateGuard:_extract_audit_evidence_context:fp=86d1554e15f3f1f6
   owner: architecture
   reason: 'ADR-010 Decision 1 nominal isinstance check -- discriminates AuditEvidenceBase subclasses so NodeStateGuard can populate ExecutionError.context from to_audit_dict(). Nominal inheritance (not structural Protocol) is deliberate: see ADR-010 Alternative 3 for the accidental-match spoofing rationale. The exception always propagates; only structured audit context is conditionally added.'
-  safety: 'The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug; broken to_audit_dict() surfaces via the existing (TypeError, AttributeError, KeyError, NameError) re-raise path.'
+  safety: 'The isinstance predicate only controls whether context is captured; the exception always propagates and the state is always completed as FAILED. Missing context is a degradation (less audit detail), not a correctness bug.'
+  expires: null
+- key: engine/executors/state_guard.py:R5:NodeStateGuard:_extract_audit_evidence_context:fp=81df711769fff87f
+  owner: architecture
+  reason: Audit evidence is contractually required to serialize to a mapping before canonical_json() can validate it for ExecutionError.context.
+  safety: Non-mapping evidence raises TypeError, which is converted into evidence_failure and re-raised as AuditIntegrityError only after the FAILED state is durably persisted.
+  expires: null
+- key: engine/executors/state_guard.py:R4:NodeStateGuard:_extract_audit_evidence_context:fp=d9eb19b04d13628e
+  owner: architecture
+  reason: Broad catch is deliberate so broken audit-evidence serialization cannot strand node_states OPEN while auto-fail is recording terminal failure.
+  safety: Caught exceptions are not swallowed; they are returned as evidence_failure and re-raised as AuditIntegrityError after terminal FAILED persistence completes.
   expires: null
 - key: engine/executors/declaration_dispatch.py:R6:_dispatch:fp=15d9ff75661bacf0
   owner: architecture
