@@ -146,6 +146,61 @@ class TestForkSession:
         assert copied_state.nodes is None
 
     @pytest.mark.asyncio
+    async def test_fork_raises_audit_integrity_error_for_cross_session_fork_message_state(
+        self,
+        service,
+        engine,
+    ) -> None:
+        """Corrupted cross-session message provenance must fail loudly.
+
+        fork_session() reads composition_state_id indirectly from a message in the
+        source session, so it must use the session-scoped guard rather than the
+        raw get_state() helper.
+        """
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        session_a = await service.create_session("alice", "Session A", "local")
+        session_b = await service.create_session("alice", "Session B", "local")
+
+        state_in_a = await service.save_composition_state(
+            session_a.id,
+            CompositionStateData(
+                source={"plugin": "csv", "options": {"path": "a.csv"}},
+                is_valid=True,
+            ),
+        )
+        fork_msg = await service.add_message(session_b.id, "user", "Fork me")
+
+        raw = engine.raw_connection()
+        try:
+            cursor = raw.cursor()
+            try:
+                cursor.execute("PRAGMA foreign_keys=OFF")
+                cursor.execute(
+                    "UPDATE chat_messages SET composition_state_id = ? WHERE id = ?",
+                    (str(state_in_a.id), str(fork_msg.id)),
+                )
+                raw.commit()
+                cursor.execute("PRAGMA foreign_keys=ON")
+                raw.commit()
+            finally:
+                cursor.close()
+        finally:
+            raw.close()
+
+        with pytest.raises(AuditIntegrityError, match="Tier 1 audit anomaly"):
+            await service.fork_session(
+                source_session_id=session_b.id,
+                fork_message_id=fork_msg.id,
+                new_message_content="Fork me differently",
+                user_id="alice",
+                auth_provider_type="local",
+            )
+
+        sessions = await service.list_sessions("alice", "local")
+        assert len(sessions) == 2
+
+    @pytest.mark.asyncio
     async def test_fork_preserves_original_session(self, service) -> None:
         """Original session is unchanged after fork."""
         session = await service.create_session("alice", "Original", "local")
@@ -430,6 +485,70 @@ class TestForkEndpoint:
         # Verify content matches
         content = await blob_service.read_blob_content(new_blobs[0].id)
         assert content == b"a,b,c\n1,2,3"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("source_key", ["path", "file"])
+    async def test_fork_rewrites_blob_backed_source_paths_to_copied_blob(
+        self,
+        tmp_path,
+        source_key: str,
+    ) -> None:
+        """Forked composition state must point at the copied blob, not the source session.
+
+        The blob subsystem accepts both ``path`` and ``file`` as blob-backed
+        source references, so fork rewriting must remap both shapes.
+        """
+        app, service, blob_service = _make_fork_app(tmp_path)
+        client = TestClient(app)
+
+        session = await service.create_session("alice", "Original", "local")
+        original_blob = await blob_service.create_blob(
+            session.id,
+            "data.csv",
+            b"a,b,c\n1,2,3",
+            "text/csv",
+        )
+        source_state = await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "options": {
+                        source_key: original_blob.storage_path,
+                    },
+                },
+                is_valid=True,
+            ),
+        )
+        msg = await service.add_message(
+            session.id,
+            "user",
+            "Process this",
+            composition_state_id=source_state.id,
+        )
+
+        response = client.post(
+            f"/api/sessions/{session.id}/fork",
+            json={
+                "from_message_id": str(msg.id),
+                "new_message_content": "Process that instead",
+            },
+        )
+
+        assert response.status_code == 201
+        new_session_id = uuid.UUID(response.json()["session"]["id"])
+
+        copied_blobs = await blob_service.list_blobs(new_session_id)
+        assert len(copied_blobs) == 1
+        copied_blob = copied_blobs[0]
+
+        copied_state = await service.get_current_state(new_session_id)
+        assert copied_state is not None
+        assert copied_state.source is not None
+        options = copied_state.source["options"]
+        assert options["blob_ref"] == str(copied_blob.id)
+        assert options[source_key] == copied_blob.storage_path
+        assert options[source_key] != original_blob.storage_path
 
     @pytest.mark.asyncio
     async def test_fork_preserves_original_messages_status_check(self, tmp_path) -> None:

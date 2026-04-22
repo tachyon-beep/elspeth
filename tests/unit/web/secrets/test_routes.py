@@ -9,6 +9,8 @@ Security boundaries tested:
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from fastapi import FastAPI, Request
 from sqlalchemy.pool import StaticPool
@@ -314,6 +316,29 @@ class TestValidateSecret:
         resp = client.post("/api/secrets/CHECK/validate")
         body = resp.json()
         assert "value" not in body, "SECURITY: value must never appear in validate response"
+
+    def test_validate_delete_race_returns_available_false(self) -> None:
+        """A delete race must degrade to absence instead of surfacing a 500."""
+        app = _make_app(user_id="u1")
+        client = TestClient(app, raise_server_exceptions=False)
+
+        create = client.post("/api/secrets", json={"name": "RACE", "value": "secret"})
+        assert create.status_code == 201
+
+        service = app.state.secret_service
+        user_store = service._user_store
+        original_probe = user_store.has_secret_record
+
+        def has_record_then_delete(*args: object, **kwargs: object) -> bool:
+            result = original_probe(*args, **kwargs)  # type: ignore[arg-type]
+            user_store.delete_secret("RACE", user_id="u1", auth_provider_type="local")
+            return result
+
+        with patch.object(user_store, "has_secret_record", side_effect=has_record_then_delete):
+            response = client.post("/api/secrets/RACE/validate")
+
+        assert response.status_code == 200
+        assert response.json() == {"name": "RACE", "available": False}
 
 
 # ---------------------------------------------------------------------------

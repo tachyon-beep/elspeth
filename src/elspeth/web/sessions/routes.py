@@ -6,6 +6,7 @@ Session-scoped endpoints verify ownership before any business logic.
 
 from __future__ import annotations
 
+import asyncio
 from uuid import UUID
 
 import structlog
@@ -53,6 +54,44 @@ from elspeth.web.sessions.schemas import (
 )
 
 slog = structlog.get_logger()
+
+
+class _SessionComposeLockRegistry:
+    """Per-session compose/recompose locks.
+
+    Lazily creates asyncio.Lock instances under a running event loop so the
+    registry can live on app.state without needing sync-time initialization in
+    create_app().
+    """
+
+    def __init__(self) -> None:
+        self._session_locks: dict[str, asyncio.Lock] = {}
+        self._locks_lock: asyncio.Lock | None = None
+
+    def _ensure_locks_lock(self) -> asyncio.Lock:
+        if self._locks_lock is None:
+            self._locks_lock = asyncio.Lock()
+        return self._locks_lock
+
+    async def get_lock(self, session_id: str) -> asyncio.Lock:
+        async with self._ensure_locks_lock():
+            if session_id not in self._session_locks:
+                self._session_locks[session_id] = asyncio.Lock()
+            return self._session_locks[session_id]
+
+    async def cleanup_session_lock(self, session_id: str) -> None:
+        async with self._ensure_locks_lock():
+            if session_id in self._session_locks:
+                self._session_locks.pop(session_id)
+
+
+def _get_session_compose_lock_registry(request: Request) -> _SessionComposeLockRegistry:
+    """Return the app-scoped compose lock registry, creating it on first use."""
+    registry = getattr(request.app.state, "session_compose_lock_registry", None)
+    if registry is None:
+        registry = _SessionComposeLockRegistry()
+        request.app.state.session_compose_lock_registry = registry
+    return registry
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -437,9 +476,11 @@ def create_session_router() -> APIRouter:
         finally:
             # Clean up ephemeral per-session state regardless of archive outcome.
             # If archive fails, the session still exists and a retry will re-enter
-            # this path. The lock cleanup is idempotent (pop with default).
+            # this path. The lock cleanup is idempotent.
             execution_service = request.app.state.execution_service
             execution_service.cleanup_session_lock(str(session.id))
+            compose_lock_registry = _get_session_compose_lock_registry(request)
+            await compose_lock_registry.cleanup_session_lock(str(session.id))
 
     @router.post(
         "/{session_id}/messages",
@@ -468,190 +509,207 @@ def create_session_router() -> APIRouter:
 
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
-
-        # 1. Load or create CompositionState — needed before user message
-        #    for pre-send provenance (AD-7: user msg records what user saw).
-        state_record = await service.get_current_state(session.id)
-        if state_record is None:
-            state = CompositionState(
-                source=None,
-                nodes=(),
-                edges=(),
-                outputs=(),
-                metadata=PipelineMetadata(),
-                version=1,
-            )
-            pre_send_state_id: UUID | None = None
-        else:
-            state = _state_from_record(state_record)
-            # If client provided a state_id, verify it belongs to this session.
-            # Use client-asserted state for provenance (AD-2) — it reflects
-            # what the user was looking at, which may differ from current if
-            # another tab mutated state.
-            if body.state_id is not None:
-                client_state_id = body.state_id
-                # Two 404 paths below return byte-identical bodies by
-                # design. The commit that introduced this validation
-                # called the RuntimeError/ValueError mapping
-                # "load-bearing ... to avoid leaking other sessions'
-                # state existence" — but distinguishable 404 *details*
-                # would leak exactly that (an attacker could observe
-                # "State not found" vs "State not found for this
-                # session" and conclude the UUID exists in some OTHER
-                # user's session, which is the IDOR information leak
-                # the check exists to prevent). Keep both details
-                # identical; if a future refactor needs diagnostic
-                # precision, route it through structured audit/
-                # telemetry (server-side only), not through the HTTP
-                # response body.
-                try:
-                    client_state = await service.get_state(client_state_id)
-                except ValueError:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="State not found",
-                    ) from None
-                if client_state.session_id != session.id:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="State not found",
-                    )
-                pre_send_state_id = client_state_id
+        compose_lock = await _get_session_compose_lock_registry(request).get_lock(str(session.id))
+        async with compose_lock:
+            # 1. Load or create CompositionState — needed before user message
+            #    for pre-send provenance (AD-7: user msg records what user saw).
+            state_record = await service.get_current_state(session.id)
+            if state_record is None:
+                state = CompositionState(
+                    source=None,
+                    nodes=(),
+                    edges=(),
+                    outputs=(),
+                    metadata=PipelineMetadata(),
+                    version=1,
+                )
+                pre_send_state_id: UUID | None = None
             else:
-                pre_send_state_id = state_record.id
+                state = _state_from_record(state_record)
+                # If client provided a state_id, verify it belongs to this session.
+                # Use client-asserted state for provenance (AD-2) — it reflects
+                # what the user was looking at, which may differ from current if
+                # another tab mutated state.
+                if body.state_id is not None:
+                    client_state_id = body.state_id
+                    # Two 404 paths below return byte-identical bodies by
+                    # design. The commit that introduced this validation
+                    # called the RuntimeError/ValueError mapping
+                    # "load-bearing ... to avoid leaking other sessions'
+                    # state existence" — but distinguishable 404 *details*
+                    # would leak exactly that (an attacker could observe
+                    # "State not found" vs "State not found for this
+                    # session" and conclude the UUID exists in some OTHER
+                    # user's session, which is the IDOR information leak
+                    # the check exists to prevent). Keep both details
+                    # identical; if a future refactor needs diagnostic
+                    # precision, route it through structured audit/
+                    # telemetry (server-side only), not through the HTTP
+                    # response body.
+                    try:
+                        client_state = await service.get_state(client_state_id)
+                    except ValueError:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="State not found",
+                        ) from None
+                    if client_state.session_id != session.id:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="State not found",
+                        )
+                    pre_send_state_id = client_state_id
+                else:
+                    pre_send_state_id = state_record.id
 
-        # 2. Persist user message with pre-send provenance
-        await service.add_message(
-            session.id,
-            "user",
-            body.content,
-            composition_state_id=pre_send_state_id,
-        )
-
-        # 3. Pre-fetch chat history as plain dicts (seam contract B)
-        # Pass limit=None to fetch the full conversation — the default
-        # limit=100 would silently drop recent context once a session
-        # exceeds 100 turns, causing the LLM to lose conversation state.
-        # Exclude the just-persisted user message — the composer receives
-        # it separately via body.content and appends it in _build_messages.
-        records = await service.get_messages(session.id, limit=None)
-        chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
-
-        # 4. Run the LLM composition loop
-        composer: ComposerService = request.app.state.composer_service
-        try:
-            result = await composer.compose(body.content, chat_messages, state, session_id=str(session_id), user_id=str(user.user_id))
-        except ComposerConvergenceError as exc:
-            response_body = await _handle_convergence_error(exc, service, session.id, "convergence")
-            raise HTTPException(status_code=422, detail=response_body) from exc
-        except LiteLLMAuthError as exc:
-            # ``str(exc)`` on LiteLLM exceptions can embed the provider
-            # name, model ID, request payload fragments, and — on
-            # certain provider code paths — the upstream HTTP response
-            # body, which has been observed to echo the Authorization
-            # header.  Redact the HTTP ``detail`` field to the class
-            # name only; route the full exception to structured
-            # server-side logging via ``slog.error`` with session
-            # correlation.  Mirrors the ``partial_state_save_error``
-            # contract on the SQLAlchemy 422 path in
-            # ``_handle_convergence_error`` above.
-            # exc_info deliberately omitted for the same reason
-            # SQLAlchemy ``exc_info`` is dropped in the canonical
-            # narrow-catch sites: ``__cause__`` chains on these
-            # exception classes can carry upstream provider detail
-            # that must not be retained in structured logs either.
-            slog.error(
-                "compose_llm_auth_error",
-                session_id=str(session_id),
-                exc_class=type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
-            ) from exc
-        except LiteLLMAPIError as exc:
-            # Same redaction rationale as the auth-error block above.
-            # ``LiteLLMAPIError`` message shape varies by provider (OpenAI,
-            # Azure OpenAI, Anthropic, Bedrock) and can include
-            # rate-limit window details, account/tenant identifiers,
-            # and upstream request IDs that are operator-only material.
-            slog.error(
-                "compose_llm_unavailable",
-                session_id=str(session_id),
-                exc_class=type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
-            ) from exc
-        except ComposerPluginCrashError as crash:
-            # Plugin-crash path: _compose_loop wraps any non-ToolArgumentError
-            # escape from execute_tool into ComposerPluginCrashError carrying
-            # partial_state — the accumulated mutations from earlier successful
-            # tool calls within the same request. _handle_plugin_crash persists
-            # that state into composition_states symmetrically with the
-            # convergence-error path, so recompose does not lose those
-            # mutations. The HTTP response body is fully redacted; the cause
-            # chain is preserved via `from crash.original_exc` for the ASGI /
-            # server-level error machinery only.
-            #
-            # MUST be caught BEFORE the generic `except ComposerServiceError`
-            # below — ComposerPluginCrashError inherits from
-            # ComposerServiceError (so it isn't caught by a later bare
-            # Exception or mistakenly promoted by the route's convergence
-            # handler), and Python evaluates except clauses top-to-bottom.
-            # Inverting this order routes plugin crashes into the 502
-            # composer_error branch, re-introducing the silent-laundering
-            # behaviour this plan exists to eliminate.
-            response_body = await _handle_plugin_crash(
-                crash,
-                service,
+            # 2. Persist user message with pre-send provenance.
+            # Keep the inserted row so the subsequent snapshot can prove
+            # it is composing against the transcript that actually ends
+            # at this request's user turn.
+            user_msg = await service.add_message(
                 session.id,
-                str(user.user_id),
-                "compose",
+                "user",
+                body.content,
+                composition_state_id=pre_send_state_id,
             )
-            raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
-        except ComposerServiceError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={"error_type": "composer_error", "detail": str(exc)},
-            ) from exc
 
-        # 5. Save state if version changed — post-compose provenance
-        state_response: CompositionStateResponse | None = None
-        post_compose_state_id: UUID | None = pre_send_state_id
-        if result.state.version != state.version:
-            state_d = result.state.to_dict()
-            validation = result.state.validate()
-            state_data = CompositionStateData(
-                source=state_d["source"],
-                nodes=state_d["nodes"],
-                edges=state_d["edges"],
-                outputs=state_d["outputs"],
-                metadata_=state_d["metadata"],
-                is_valid=validation.is_valid,
-                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
-            )
-            new_state_record = await service.save_composition_state(
+            # 3. Pre-fetch chat history as plain dicts (seam contract B)
+            # Pass limit=None to fetch the full conversation — the default
+            # limit=100 would silently drop recent context once a session
+            # exceeds 100 turns, causing the LLM to lose conversation state.
+            # Exclude the just-persisted user message — the composer receives
+            # it separately via body.content and appends it in _build_messages.
+            records = await service.get_messages(session.id, limit=None)
+            if not records or records[-1].id != user_msg.id:
+                raise AuditIntegrityError(
+                    "Tier 1 audit anomaly: send_message transcript snapshot "
+                    f"for session {session.id} does not end at inserted user "
+                    f"message {user_msg.id}. Refusing to compose against "
+                    "interleaved session history."
+                )
+            chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
+
+            # 4. Run the LLM composition loop
+            composer: ComposerService = request.app.state.composer_service
+            try:
+                result = await composer.compose(
+                    body.content,
+                    chat_messages,
+                    state,
+                    session_id=str(session_id),
+                    user_id=str(user.user_id),
+                )
+            except ComposerConvergenceError as exc:
+                response_body = await _handle_convergence_error(exc, service, session.id, "convergence")
+                raise HTTPException(status_code=422, detail=response_body) from exc
+            except LiteLLMAuthError as exc:
+                # ``str(exc)`` on LiteLLM exceptions can embed the provider
+                # name, model ID, request payload fragments, and — on
+                # certain provider code paths — the upstream HTTP response
+                # body, which has been observed to echo the Authorization
+                # header.  Redact the HTTP ``detail`` field to the class
+                # name only; route the full exception to structured
+                # server-side logging via ``slog.error`` with session
+                # correlation.  Mirrors the ``partial_state_save_error``
+                # contract on the SQLAlchemy 422 path in
+                # ``_handle_convergence_error`` above.
+                # exc_info deliberately omitted for the same reason
+                # SQLAlchemy ``exc_info`` is dropped in the canonical
+                # narrow-catch sites: ``__cause__`` chains on these
+                # exception classes can carry upstream provider detail
+                # that must not be retained in structured logs either.
+                slog.error(
+                    "compose_llm_auth_error",
+                    session_id=str(session_id),
+                    exc_class=type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
+                ) from exc
+            except LiteLLMAPIError as exc:
+                # Same redaction rationale as the auth-error block above.
+                # ``LiteLLMAPIError`` message shape varies by provider (OpenAI,
+                # Azure OpenAI, Anthropic, Bedrock) and can include
+                # rate-limit window details, account/tenant identifiers,
+                # and upstream request IDs that are operator-only material.
+                slog.error(
+                    "compose_llm_unavailable",
+                    session_id=str(session_id),
+                    exc_class=type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
+                ) from exc
+            except ComposerPluginCrashError as crash:
+                # Plugin-crash path: _compose_loop wraps any non-ToolArgumentError
+                # escape from execute_tool into ComposerPluginCrashError carrying
+                # partial_state — the accumulated mutations from earlier successful
+                # tool calls within the same request. _handle_plugin_crash persists
+                # that state into composition_states symmetrically with the
+                # convergence-error path, so recompose does not lose those
+                # mutations. The HTTP response body is fully redacted; the cause
+                # chain is preserved via `from crash.original_exc` for the ASGI /
+                # server-level error machinery only.
+                #
+                # MUST be caught BEFORE the generic `except ComposerServiceError`
+                # below — ComposerPluginCrashError inherits from
+                # ComposerServiceError (so it isn't caught by a later bare
+                # Exception or mistakenly promoted by the route's convergence
+                # handler), and Python evaluates except clauses top-to-bottom.
+                # Inverting this order routes plugin crashes into the 502
+                # composer_error branch, re-introducing the silent-laundering
+                # behaviour this plan exists to eliminate.
+                response_body = await _handle_plugin_crash(
+                    crash,
+                    service,
+                    session.id,
+                    str(user.user_id),
+                    "compose",
+                )
+                raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
+            except ComposerServiceError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error_type": "composer_error", "detail": str(exc)},
+                ) from exc
+
+            # 5. Save state if version changed — post-compose provenance
+            state_response: CompositionStateResponse | None = None
+            post_compose_state_id: UUID | None = pre_send_state_id
+            if result.state.version != state.version:
+                state_d = result.state.to_dict()
+                validation = result.state.validate()
+                state_data = CompositionStateData(
+                    source=state_d["source"],
+                    nodes=state_d["nodes"],
+                    edges=state_d["edges"],
+                    outputs=state_d["outputs"],
+                    metadata_=state_d["metadata"],
+                    is_valid=validation.is_valid,
+                    validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+                )
+                new_state_record = await service.save_composition_state(
+                    session.id,
+                    state_data,
+                )
+                state_response = _state_response(new_state_record, live_validation=validation)
+                post_compose_state_id = new_state_record.id
+
+            # 6. Persist assistant message with post-compose provenance
+            assistant_msg = await service.add_message(
                 session.id,
-                state_data,
+                "assistant",
+                result.message,
+                composition_state_id=post_compose_state_id,
             )
-            state_response = _state_response(new_state_record, live_validation=validation)
-            post_compose_state_id = new_state_record.id
 
-        # 6. Persist assistant message with post-compose provenance
-        assistant_msg = await service.add_message(
-            session.id,
-            "assistant",
-            result.message,
-            composition_state_id=post_compose_state_id,
-        )
-
-        # 7. Return response
-        return MessageWithStateResponse(
-            message=_message_response(assistant_msg),
-            state=state_response,
-        )
+            # 7. Return response
+            return MessageWithStateResponse(
+                message=_message_response(assistant_msg),
+                state=state_response,
+            )
 
     @router.post(
         "/{session_id}/recompose",
@@ -673,128 +731,135 @@ def create_session_router() -> APIRouter:
         await rate_limiter.check(user.user_id)
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
+        compose_lock = await _get_session_compose_lock_registry(request).get_lock(str(session.id))
+        async with compose_lock:
+            # Load current state
+            state_record = await service.get_current_state(session.id)
+            if state_record is None:
+                state = CompositionState(
+                    source=None,
+                    nodes=(),
+                    edges=(),
+                    outputs=(),
+                    metadata=PipelineMetadata(),
+                    version=1,
+                )
+                pre_send_state_id: UUID | None = None
+            else:
+                state = _state_from_record(state_record)
+                pre_send_state_id = state_record.id
 
-        # Load current state
-        state_record = await service.get_current_state(session.id)
-        if state_record is None:
-            state = CompositionState(
-                source=None,
-                nodes=(),
-                edges=(),
-                outputs=(),
-                metadata=PipelineMetadata(),
-                version=1,
-            )
-            pre_send_state_id: UUID | None = None
-        else:
-            state = _state_from_record(state_record)
-            pre_send_state_id = state_record.id
+            # Fetch full chat history — the last message must be the user turn
+            # that failed.  Reject if it's not, since blindly dropping
+            # records[-1] would corrupt the conversation transcript.
+            records = await service.get_messages(session.id, limit=None)
+            if not records:
+                raise HTTPException(status_code=400, detail="No messages to recompose from")
+            if records[-1].role != "user":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Cannot recompose: the last message is not a user message. "
+                    "Recompose is only valid when the most recent message is the "
+                    "user turn whose composition failed.",
+                )
 
-        # Fetch full chat history — the last message must be the user turn
-        # that failed.  Reject if it's not, since blindly dropping
-        # records[-1] would corrupt the conversation transcript.
-        records = await service.get_messages(session.id, limit=None)
-        if not records:
-            raise HTTPException(status_code=400, detail="No messages to recompose from")
-        if records[-1].role != "user":
-            raise HTTPException(
-                status_code=409,
-                detail="Cannot recompose: the last message is not a user message. "
-                "Recompose is only valid when the most recent message is the "
-                "user turn whose composition failed.",
-            )
+            last_user_content = records[-1].content
+            # Exclude the last user message — the composer receives it
+            # separately via the message arg and appends it in _build_messages.
+            chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
 
-        last_user_content = records[-1].content
-        # Exclude the last user message — the composer receives it
-        # separately via the message arg and appends it in _build_messages.
-        chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
+            # Run the LLM composition loop
+            composer: ComposerService = request.app.state.composer_service
+            try:
+                result = await composer.compose(
+                    last_user_content,
+                    chat_messages,
+                    state,
+                    session_id=str(session_id),
+                    user_id=str(user.user_id),
+                )
+            except ComposerConvergenceError as exc:
+                response_body = await _handle_convergence_error(exc, service, session.id, "recompose_convergence")
+                raise HTTPException(status_code=422, detail=response_body) from exc
+            except LiteLLMAuthError as exc:
+                # Recompose mirror of the redaction contract in send_message
+                # (see block comment there for full rationale).  The two
+                # paths MUST carry byte-identical response shapes and
+                # redaction granularity — any future divergence becomes a
+                # selective leak surface (attacker picks whichever endpoint
+                # still echoes str(exc)).
+                slog.error(
+                    "recompose_llm_auth_error",
+                    session_id=str(session_id),
+                    exc_class=type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
+                ) from exc
+            except LiteLLMAPIError as exc:
+                slog.error(
+                    "recompose_llm_unavailable",
+                    session_id=str(session_id),
+                    exc_class=type(exc).__name__,
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
+                ) from exc
+            except ComposerPluginCrashError as crash:
+                # Plugin-crash path: mirror /messages handler. See the send_message
+                # block comment for full rationale on why the response body is
+                # redacted but partial_state is still persisted, AND for why this
+                # catch MUST precede `except ComposerServiceError` below.
+                response_body = await _handle_plugin_crash(
+                    crash,
+                    service,
+                    session.id,
+                    str(user.user_id),
+                    "recompose",
+                )
+                raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
+            except ComposerServiceError as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail={"error_type": "composer_error", "detail": str(exc)},
+                ) from exc
 
-        # Run the LLM composition loop
-        composer: ComposerService = request.app.state.composer_service
-        try:
-            result = await composer.compose(last_user_content, chat_messages, state, session_id=str(session_id), user_id=str(user.user_id))
-        except ComposerConvergenceError as exc:
-            response_body = await _handle_convergence_error(exc, service, session.id, "recompose_convergence")
-            raise HTTPException(status_code=422, detail=response_body) from exc
-        except LiteLLMAuthError as exc:
-            # Recompose mirror of the redaction contract in send_message
-            # (see block comment there for full rationale).  The two
-            # paths MUST carry byte-identical response shapes and
-            # redaction granularity — any future divergence becomes a
-            # selective leak surface (attacker picks whichever endpoint
-            # still echoes str(exc)).
-            slog.error(
-                "recompose_llm_auth_error",
-                session_id=str(session_id),
-                exc_class=type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
-            ) from exc
-        except LiteLLMAPIError as exc:
-            slog.error(
-                "recompose_llm_unavailable",
-                session_id=str(session_id),
-                exc_class=type(exc).__name__,
-            )
-            raise HTTPException(
-                status_code=502,
-                detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
-            ) from exc
-        except ComposerPluginCrashError as crash:
-            # Plugin-crash path: mirror /messages handler. See the send_message
-            # block comment for full rationale on why the response body is
-            # redacted but partial_state is still persisted, AND for why this
-            # catch MUST precede `except ComposerServiceError` below.
-            response_body = await _handle_plugin_crash(
-                crash,
-                service,
+            # Save state if version changed
+            state_response: CompositionStateResponse | None = None
+            post_compose_state_id: UUID | None = pre_send_state_id
+            if result.state.version != state.version:
+                state_d = result.state.to_dict()
+                validation = result.state.validate()
+                state_data = CompositionStateData(
+                    source=state_d["source"],
+                    nodes=state_d["nodes"],
+                    edges=state_d["edges"],
+                    outputs=state_d["outputs"],
+                    metadata_=state_d["metadata"],
+                    is_valid=validation.is_valid,
+                    validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+                )
+                new_state_record = await service.save_composition_state(
+                    session.id,
+                    state_data,
+                )
+                state_response = _state_response(new_state_record, live_validation=validation)
+                post_compose_state_id = new_state_record.id
+
+            # Persist assistant message
+            assistant_msg = await service.add_message(
                 session.id,
-                str(user.user_id),
-                "recompose",
+                "assistant",
+                result.message,
+                composition_state_id=post_compose_state_id,
             )
-            raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
-        except ComposerServiceError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail={"error_type": "composer_error", "detail": str(exc)},
-            ) from exc
 
-        # Save state if version changed
-        state_response: CompositionStateResponse | None = None
-        post_compose_state_id: UUID | None = pre_send_state_id
-        if result.state.version != state.version:
-            state_d = result.state.to_dict()
-            validation = result.state.validate()
-            state_data = CompositionStateData(
-                source=state_d["source"],
-                nodes=state_d["nodes"],
-                edges=state_d["edges"],
-                outputs=state_d["outputs"],
-                metadata_=state_d["metadata"],
-                is_valid=validation.is_valid,
-                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+            return MessageWithStateResponse(
+                message=_message_response(assistant_msg),
+                state=state_response,
             )
-            new_state_record = await service.save_composition_state(
-                session.id,
-                state_data,
-            )
-            state_response = _state_response(new_state_record, live_validation=validation)
-            post_compose_state_id = new_state_record.id
-
-        # Persist assistant message
-        assistant_msg = await service.add_message(
-            session.id,
-            "assistant",
-            result.message,
-            composition_state_id=post_compose_state_id,
-        )
-
-        return MessageWithStateResponse(
-            message=_message_response(assistant_msg),
-            state=state_response,
-        )
 
     @router.get(
         "/{session_id}/messages",
@@ -991,18 +1056,37 @@ def create_session_router() -> APIRouter:
         # 413; all other failures re-raise after cleanup.
         blob_service: BlobServiceProtocol = request.app.state.blob_service
         try:
+            source_blobs = await blob_service.list_blobs(session_id)
             # Copy blobs from source session into the forked session.
             # Returns old_id → new_blob mapping for source reference rewriting.
             blob_map = await blob_service.copy_blobs_for_fork(session_id, new_session.id)
+            source_blob_path_map = {blob.storage_path: blob_map[blob.id] for blob in source_blobs if blob.id in blob_map}
 
             # Rewrite source references in the forked state so the fork is
             # self-contained.  Without this, blob_ref and path in the source
             # options still point at the original session's assets.
             if copied_state is not None and copied_state.source is not None and blob_map:
                 source_dict = deep_thaw(copied_state.source) if copied_state.source else None
-                if isinstance(source_dict, dict):
-                    options = source_dict.get("options", {})
+                if not isinstance(source_dict, dict):
+                    raise AuditIntegrityError(
+                        f"Tier 1 audit anomaly: composition_state {copied_state.id} "
+                        f"has source type {type(source_dict).__name__}, expected dict "
+                        f"before fork blob rewrite for session {new_session.id}."
+                    )
+
+                options = source_dict.get("options")
+                if options is None:
                     rewritten = False
+                else:
+                    if not isinstance(options, dict):
+                        raise AuditIntegrityError(
+                            f"Tier 1 audit anomaly: composition_state {copied_state.id} "
+                            f"has source.options type {type(options).__name__}, expected "
+                            f"dict before fork blob rewrite for session {new_session.id}."
+                        )
+
+                    rewritten = False
+                    rewrite_target = None
                     # Remap blob_ref to the new blob's ID.
                     # composition_states.source is Tier 1 ("our data") — the
                     # composer writes blob_ref as the blob's UUID string
@@ -1031,45 +1115,57 @@ def create_session_router() -> APIRouter:
                                 f"Fork aborted to prevent cross-session blob "
                                 f"reference in forked session {new_session.id}."
                             ) from exc
-                        if old_uuid in blob_map:
-                            options["blob_ref"] = str(blob_map[old_uuid].id)
-                            options["path"] = blob_map[old_uuid].storage_path
-                            rewritten = True
+                        rewrite_target = blob_map.get(old_uuid)
 
-                    if rewritten:
-                        source_dict["options"] = options
-                        # Save updated state with remapped source
-                        state_data = CompositionStateData(
-                            source=source_dict,
-                            nodes=deep_thaw(copied_state.nodes),
-                            edges=deep_thaw(copied_state.edges),
-                            outputs=deep_thaw(copied_state.outputs),
-                            metadata_=deep_thaw(copied_state.metadata_),
-                            is_valid=copied_state.is_valid,
-                            validation_errors=list(copied_state.validation_errors) if copied_state.validation_errors else None,
-                        )
-                        copied_state = await service.save_composition_state(
-                            new_session.id,
-                            state_data,
-                        )
+                    if rewrite_target is None:
+                        for path_key in ("path", "file"):
+                            path_value = options.get(path_key)
+                            if isinstance(path_value, str) and path_value in source_blob_path_map:
+                                rewrite_target = source_blob_path_map[path_value]
+                                break
 
-                        # The edited user message (last in list) still references
-                        # the pre-rewrite state.  Re-point it at the replacement
-                        # state so message-state lineage is self-contained.
-                        user_msg = new_messages[-1]
-                        await service.update_message_composition_state(
-                            user_msg.id,
-                            copied_state.id,
-                        )
-                        new_messages[-1] = ChatMessageRecord(
-                            id=user_msg.id,
-                            session_id=user_msg.session_id,
-                            role=user_msg.role,
-                            content=user_msg.content,
-                            tool_calls=user_msg.tool_calls,
-                            created_at=user_msg.created_at,
-                            composition_state_id=copied_state.id,
-                        )
+                    if rewrite_target is not None:
+                        options["blob_ref"] = str(rewrite_target.id)
+                        if "path" in options or "file" not in options:
+                            options["path"] = rewrite_target.storage_path
+                        if "file" in options:
+                            options["file"] = rewrite_target.storage_path
+                        rewritten = True
+
+                if rewritten:
+                    source_dict["options"] = options
+                    # Save updated state with remapped source
+                    state_data = CompositionStateData(
+                        source=source_dict,
+                        nodes=deep_thaw(copied_state.nodes),
+                        edges=deep_thaw(copied_state.edges),
+                        outputs=deep_thaw(copied_state.outputs),
+                        metadata_=deep_thaw(copied_state.metadata_),
+                        is_valid=copied_state.is_valid,
+                        validation_errors=list(copied_state.validation_errors) if copied_state.validation_errors else None,
+                    )
+                    copied_state = await service.save_composition_state(
+                        new_session.id,
+                        state_data,
+                    )
+
+                    # The edited user message (last in list) still references
+                    # the pre-rewrite state.  Re-point it at the replacement
+                    # state so message-state lineage is self-contained.
+                    user_msg = new_messages[-1]
+                    await service.update_message_composition_state(
+                        user_msg.id,
+                        copied_state.id,
+                    )
+                    new_messages[-1] = ChatMessageRecord(
+                        id=user_msg.id,
+                        session_id=user_msg.session_id,
+                        role=user_msg.role,
+                        content=user_msg.content,
+                        tool_calls=user_msg.tool_calls,
+                        created_at=user_msg.created_at,
+                        composition_state_id=copied_state.id,
+                    )
         except BlobQuotaExceededError:
             # Build the HTTPException up-front so cleanup failures can be
             # attached as a note on the object that actually propagates —

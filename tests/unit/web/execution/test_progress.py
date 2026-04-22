@@ -505,25 +505,19 @@ class TestBroadcasterSingleTerminalGuard:
             "Duplicate terminal event must be suppressed — only the first terminal per run should reach call_soon_threadsafe."
         )
 
-    def test_non_terminal_after_terminal_still_delivered(self) -> None:
-        """Progress events should not be suppressed by the terminal guard.
+    def test_non_terminal_after_terminal_is_suppressed(self) -> None:
+        """Once a terminal event is accepted, later events for that run are dropped.
 
-        Under the coalesced-drain design, the second broadcast does not
-        schedule a second ``call_soon_threadsafe`` — it appends to the
-        already-scheduled subscriber's pending deque. The correct test is
-        therefore end-to-end: after both broadcasts, the scheduled drain
-        must deliver the non-terminal event to the subscriber queue. The
-        pre-fix test asserted on ``call_count`` as a proxy and would miss
-        a silent loss of the non-terminal event in the pending deque.
+        This is the defensive boundary for bad producer ordering. If a
+        later progress event is still accepted, it can evict an already
+        queued terminal under backpressure and leave the WebSocket client
+        hanging forever.
         """
         loop = MagicMock(spec=asyncio.AbstractEventLoop)
         broadcaster = ProgressBroadcaster(loop)
         queue = broadcaster.subscribe("run-1")
+        queue._maxsize = 1
 
-        # Terminal first — this is the unusual (buggy-producer) case the
-        # broadcaster must still defend against.  In a well-behaved run
-        # producers emit non-terminals before the terminal, but the
-        # broadcaster's guarantees cannot depend on producer ordering.
         completed = _make_event(run_id="run-1", event_type="completed")
         progress = _make_event(run_id="run-1", event_type="progress")
 
@@ -547,18 +541,15 @@ class TestBroadcasterSingleTerminalGuard:
         while _drive(loop) > 0:
             pass
 
-        # Both events delivered — terminal first, then the progress that
-        # was accepted because the terminal guard only suppresses
-        # subsequent *terminals*, not post-terminal progress.
         delivered = []
         while not queue.empty():
             delivered.append(queue.get_nowait())
-        assert [e.event_type for e in delivered] == ["completed", "progress"], (
-            "Non-terminal events after a terminal must reach the subscriber queue; the terminal guard only blocks duplicate terminals."
+        assert [e.event_type for e in delivered] == ["completed"], (
+            "Post-terminal events must be suppressed so a queued terminal cannot be evicted under backpressure."
         )
 
-    def test_cleanup_run_preserves_terminal_tracking(self) -> None:
-        """cleanup_run must preserve terminal tracking to suppress duplicate finals."""
+    def test_cleanup_run_discards_terminal_tracking(self) -> None:
+        """cleanup_run must remove terminal tracking for completed runs."""
         loop = MagicMock(spec=asyncio.AbstractEventLoop)
         broadcaster = ProgressBroadcaster(loop)
         broadcaster.subscribe("run-1")
@@ -569,7 +560,9 @@ class TestBroadcasterSingleTerminalGuard:
         assert "run-1" in broadcaster._terminalized, "Terminal tracking state must be present after terminal broadcast."
 
         broadcaster.cleanup_run("run-1")
-        assert "run-1" in broadcaster._terminalized, "cleanup_run must preserve terminal tracking state after subscribers are removed."
+        assert "run-1" not in broadcaster._terminalized, (
+            "cleanup_run must discard terminal tracking after subscribers are removed so the set does not grow for process lifetime."
+        )
 
     def test_different_runs_have_independent_terminal_tracking(self) -> None:
         """Terminal guard must be per-run, not global."""

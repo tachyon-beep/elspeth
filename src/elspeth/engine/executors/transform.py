@@ -504,6 +504,15 @@ class TransformExecutor:
                     )
                     raise
 
+                for idx, emitted_row in enumerate(emitted_rows):
+                    try:
+                        transform.output_schema.model_validate(emitted_row.to_dict())
+                    except ValidationError as e:
+                        raise PluginContractViolation(
+                            f"Transform '{transform.name}' output validation failed for emitted row {idx}: {e}. "
+                            "This indicates a transform schema bug."
+                        ) from e
+
             # Populate audit fields
             # Wrap stable_hash calls to convert canonicalization errors to PluginContractViolation.
             # stable_hash calls canonical_json which rejects NaN, Infinity, non-serializable types.

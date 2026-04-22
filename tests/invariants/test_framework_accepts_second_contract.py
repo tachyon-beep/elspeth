@@ -112,8 +112,13 @@ def test_declared_output_fields_violation_is_audit_evidence() -> None:
         token_id="tk",
         payload={
             "declared": ["new_a", "new_b"],
-            "runtime_observed": ["new_a"],
-            "missing": ["new_b"],
+            "violations": [
+                {
+                    "emitted_index": 0,
+                    "runtime_observed": ["new_a"],
+                    "missing": ["new_b"],
+                }
+            ],
         },
         message="declared output fields missing at runtime",
     )
@@ -125,7 +130,7 @@ def test_declared_output_fields_violation_is_audit_evidence() -> None:
 
     assert audit["exception_type"] == "DeclaredOutputFieldsViolation"
     assert audit["contract_name"] == "declared_output_fields"
-    assert audit["payload"]["missing"] == ["new_b"]
+    assert audit["payload"]["violations"][0]["missing"] == ["new_b"]
 
 
 def test_negative_example_for_real_production_adopter_fires() -> None:

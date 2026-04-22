@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import json
 import os
 import sys
@@ -16,7 +17,8 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from sqlalchemy.exc import SQLAlchemyError
+from pydantic import BaseModel, ValidationError, field_validator
+from sqlalchemy.exc import OperationalError, SQLAlchemyError
 
 from elspeth.contracts.secrets import (
     FingerprintKeyMissingError,
@@ -31,7 +33,7 @@ from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.catalog.routes import catalog_router
 from elspeth.web.composer import yaml_generator as yaml_generator_module
 from elspeth.web.composer.service import ComposerServiceImpl
-from elspeth.web.config import WebSettings
+from elspeth.web.config import _LOCAL_HOSTS, WebSettings
 from elspeth.web.dependencies import create_catalog_service
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.routes import create_execution_router
@@ -47,6 +49,36 @@ from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.service import SessionServiceImpl
+
+_RETRYABLE_STORAGE_ERRNOS: frozenset[int] = frozenset(
+    {
+        errno.ENOSPC,
+        errno.EROFS,
+        errno.EIO,
+    }
+)
+
+
+class _AuthorizationEndpointDiscoveryDocument(BaseModel):
+    """Minimal OIDC discovery shape required by the web app."""
+
+    authorization_endpoint: str
+
+    @field_validator("authorization_endpoint")
+    @classmethod
+    def _validate_authorization_endpoint(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("authorization_endpoint must not be blank")
+        return value
+
+
+def _validate_authorization_endpoint_discovery_document(discovery: object) -> str:
+    """Validate the discovery document shape and return authorization_endpoint."""
+    try:
+        document = _AuthorizationEndpointDiscoveryDocument.model_validate(discovery)
+    except ValidationError as exc:
+        raise ValueError("OIDC discovery document must provide a non-empty string 'authorization_endpoint'") from exc
+    return document.authorization_endpoint
 
 
 def _parse_worker_count(raw_value: str, *, signal_name: str) -> int:
@@ -169,9 +201,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
                     resp = await client.get(discovery_url)
                     resp.raise_for_status()
-                    doc = resp.json()
-                    app.state.oidc_authorization_endpoint = doc["authorization_endpoint"]
-            except (httpx.HTTPError, KeyError, ValueError) as exc:
+                    app.state.oidc_authorization_endpoint = _validate_authorization_endpoint_discovery_document(resp.json())
+            except (httpx.HTTPError, ValueError) as exc:
                 raise SystemExit(
                     f"FATAL: OIDC discovery failed for issuer {issuer!r}: {exc}. "
                     f"Either fix the issuer URL or set oidc_authorization_endpoint explicitly."
@@ -337,7 +368,12 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.state.oidc_authorization_endpoint = None  # Set by lifespan for OIDC/Entra
 
     # W16/S3: Secret key production guard -- hard crash
-    if settings.secret_key == "change-me-in-production" and "pytest" not in sys.modules and os.environ.get("ELSPETH_ENV") != "test":
+    if (
+        settings.secret_key == "change-me-in-production"
+        and settings.host not in _LOCAL_HOSTS
+        and "pytest" not in sys.modules
+        and os.environ.get("ELSPETH_ENV") != "test"
+    ):
         raise SystemExit(
             "FATAL: WebSettings.secret_key is set to the default value. "
             "Set a secure secret_key before starting the web server. "
@@ -515,10 +551,10 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
             },
         )
 
-    @app.exception_handler(SQLAlchemyError)
+    @app.exception_handler(OperationalError)
     async def handle_database_unavailable(
         request: Request,
-        exc: SQLAlchemyError,
+        exc: OperationalError,
     ) -> JSONResponse:
         request_id = _request_id(request)
         _handler_slog.error(
@@ -542,13 +578,15 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         request: Request,
         exc: OSError,
     ) -> JSONResponse:
-        """Catches OS-level failures (disk full, permission denied, EBADF).
+        """Translate retryable storage-backend failures to a redacted 503.
 
-        SQLite can raise ``OSError`` before SQLAlchemy wraps it — e.g., a
-        full data volume surfaces as ``errno 28`` from the native
-        sqlite3 module.  Without this handler such an escape produces
-        an opaque 500 indistinguishable from an application crash.
+        Only backend availability failures become ``storage_unavailable``.
+        Programmer/configuration bugs such as missing-path errors are
+        re-raised so they surface as 500s instead of misleading retryable
+        outage responses.
         """
+        if exc.errno not in _RETRYABLE_STORAGE_ERRNOS:
+            raise exc
         request_id = _request_id(request)
         _handler_slog.error(
             "http_storage_unavailable",

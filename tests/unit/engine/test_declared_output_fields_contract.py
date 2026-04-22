@@ -123,8 +123,9 @@ def test_post_emission_check_raises_on_missing_declared_output_field() -> None:
     with pytest.raises(DeclaredOutputFieldsViolation) as exc_info:
         contract.post_emission_check(inputs, outputs)
 
-    assert tuple(exc_info.value.payload["missing"]) == ("new_b",)
-    assert tuple(exc_info.value.payload["runtime_observed"]) == ("new_a", "source")
+    assert tuple(exc_info.value.payload["declared"]) == ("new_a", "new_b")
+    assert tuple(exc_info.value.payload["violations"][0]["missing"]) == ("new_b",)
+    assert tuple(exc_info.value.payload["violations"][0]["runtime_observed"]) == ("new_a", "source")
 
 
 def test_batch_flush_check_raises_on_missing_declared_output_field() -> None:
@@ -145,7 +146,56 @@ def test_batch_flush_check_raises_on_missing_declared_output_field() -> None:
     with pytest.raises(DeclaredOutputFieldsViolation) as exc_info:
         contract.batch_flush_check(inputs, outputs)
 
-    assert tuple(exc_info.value.payload["missing"]) == ("new_b",)
+    assert tuple(exc_info.value.payload["violations"][0]["missing"]) == ("new_b",)
+
+
+def test_post_emission_check_records_all_failing_emitted_rows() -> None:
+    contract = DeclaredOutputFieldsContract()
+    inputs = PostEmissionInputs(
+        plugin=_plugin(),
+        node_id="n-1",
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        input_row=_row(("source",)),
+        static_contract=frozenset({"new_a", "new_b"}),
+        effective_input_fields=frozenset({"source"}),
+    )
+    outputs = PostEmissionOutputs(emitted_rows=(_row(("source", "new_a")), _row(("source", "new_b"))))
+
+    with pytest.raises(DeclaredOutputFieldsViolation) as exc_info:
+        contract.post_emission_check(inputs, outputs)
+
+    violations = exc_info.value.payload["violations"]
+    assert tuple(entry["emitted_index"] for entry in violations) == (0, 1)
+    assert tuple(tuple(entry["runtime_observed"]) for entry in violations) == (
+        ("new_a", "source"),
+        ("new_b", "source"),
+    )
+    assert tuple(tuple(entry["missing"]) for entry in violations) == (("new_b",), ("new_a",))
+
+
+def test_batch_flush_check_records_all_failing_emitted_rows() -> None:
+    contract = DeclaredOutputFieldsContract()
+    token_row = _row(("source",))
+    inputs = BatchFlushInputs(
+        plugin=_plugin(),
+        node_id="n-1",
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        buffered_tokens=(token_row,),
+        static_contract=frozenset({"new_a", "new_b"}),
+        effective_input_fields=frozenset({"source"}),
+    )
+    outputs = BatchFlushOutputs(emitted_rows=(_row(("source", "new_a")), _row(("source", "new_b"))))
+
+    with pytest.raises(DeclaredOutputFieldsViolation) as exc_info:
+        contract.batch_flush_check(inputs, outputs)
+
+    violations = exc_info.value.payload["violations"]
+    assert tuple(entry["emitted_index"] for entry in violations) == (0, 1)
+    assert tuple(tuple(entry["missing"]) for entry in violations) == (("new_b",), ("new_a",))
 
 
 def test_empty_emission_is_noop() -> None:
@@ -217,7 +267,7 @@ def test_dispatcher_aggregates_with_pass_through(_isolated_registry) -> None:
 
     declared_child = next(child for child in aggregate.violations if isinstance(child, DeclaredOutputFieldsViolation))
     assert declared_child.contract_name == "declared_output_fields"
-    assert tuple(declared_child.payload["missing"]) == ("new_b",)
+    assert tuple(declared_child.payload["violations"][0]["missing"]) == ("new_b",)
 
     pass_through_child = next(child for child in aggregate.violations if type(child).__name__ == "PassThroughContractViolation")
     assert tuple(pass_through_child.divergence_set) == ("carry",)

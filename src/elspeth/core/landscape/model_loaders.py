@@ -406,12 +406,14 @@ class NodeStateLoader:
             )
 
         elif status == NodeStateStatus.FAILED:
-            # FAILED states must have completed_at, duration_ms.
+            # FAILED states must have completed_at, duration_ms, and error_json.
             # success_reason_json must be NULL — success and failure are mutually exclusive.
             if row.duration_ms is None:
                 raise AuditIntegrityError(f"FAILED state {row.state_id} has NULL duration_ms - audit integrity violation")
             if row.completed_at is None:
                 raise AuditIntegrityError(f"FAILED state {row.state_id} has NULL completed_at - audit integrity violation")
+            if row.error_json is None:
+                raise AuditIntegrityError(f"FAILED state {row.state_id} has NULL error_json - audit integrity violation")
             if row.success_reason_json is not None:
                 raise AuditIntegrityError(f"FAILED state {row.state_id} has non-NULL success_reason_json - audit integrity violation")
             return NodeStateFailed(

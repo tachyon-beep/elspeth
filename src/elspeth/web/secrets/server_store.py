@@ -11,6 +11,7 @@ import os
 from elspeth.contracts.secrets import FingerprintKeyMissingError, SecretInventoryItem
 from elspeth.core.security.secret_loader import SecretNotFoundError, SecretRef
 from elspeth.web.secrets.user_store import _compute_fingerprint, _fingerprint_key_available
+from elspeth.web.validation import validate_secret_name
 
 _RESERVED_PREFIX = "ELSPETH_"
 """Server secrets are for third-party API keys, not ELSPETH internals.
@@ -33,10 +34,11 @@ class ServerSecretStore:
     """
 
     def __init__(self, allowlist: tuple[str, ...]) -> None:
-        reserved = [n for n in allowlist if _is_reserved(n)]
+        validated = tuple(validate_secret_name(name, field_name="Server secret allowlist entry") for name in allowlist)
+        reserved = [n for n in validated if _is_reserved(n)]
         if reserved:
             raise ValueError(f"Server secret allowlist contains ELSPETH internal names that must never be exposed: {sorted(reserved)}")
-        self._allowlist = allowlist
+        self._allowlist = validated
 
     def has_secret(self, name: str) -> bool:
         """Check if an allowlisted env var secret is resolvable.

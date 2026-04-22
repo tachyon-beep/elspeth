@@ -131,6 +131,47 @@ class TestSessionCRUD:
         with pytest.raises(ValueError):
             await service_with_dir.get_session(session.id)
 
+    @pytest.mark.asyncio
+    async def test_archive_session_quarantines_blob_dir_when_post_commit_purge_fails(
+        self,
+        engine,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Post-commit blob purge failure must not surface as a false delete failure.
+
+        The session delete has already committed by the time the filesystem purge
+        runs. The service must preserve a recoverable quarantine path instead of
+        raising after the session is already gone.
+        """
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        service_with_dir = SessionServiceImpl(engine, data_dir=data_dir)
+
+        session = await service_with_dir.create_session("alice", "Blob Session", "local")
+        sid = str(session.id)
+        blob_dir = data_dir / "blobs" / sid
+        blob_dir.mkdir(parents=True)
+        blob_file = blob_dir / "some-blob_data.csv"
+        blob_file.write_text("col1\nval1")
+
+        quarantine_dir = data_dir / ".archive_quarantine" / sid
+
+        def fail_rmtree(_path: object) -> None:
+            raise OSError("permission denied removing staged blob directory")
+
+        monkeypatch.setattr("elspeth.web.sessions.service.shutil.rmtree", fail_rmtree)
+
+        await service_with_dir.archive_session(session.id)
+
+        with pytest.raises(ValueError):
+            await service_with_dir.get_session(session.id)
+
+        assert not blob_dir.exists()
+        assert quarantine_dir.is_dir()
+        assert (quarantine_dir / blob_file.name).read_text() == "col1\nval1"
+
 
 class TestMessagePersistence:
     """Tests for chat message add and retrieval."""

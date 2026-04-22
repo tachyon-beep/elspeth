@@ -14,6 +14,7 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from elspeth.contracts.contexts import TransformContext
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.expression_parser import (
     ExpressionEvaluationError,
@@ -111,7 +112,7 @@ class ValueTransform(BaseTransform):
 
     name = "value_transform"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:95a45cc187549a43"
+    source_file_hash: str | None = "sha256:5a371ef8d6e0a5e9"
     config_model = ValueTransformConfig
     passes_through_input = True
 
@@ -120,6 +121,7 @@ class ValueTransform(BaseTransform):
         cfg = ValueTransformConfig.from_dict(config, plugin_name=self.name)
         self._initialize_declared_input_fields(cfg)
         self._operations = cfg.operations
+        self._configured_targets = frozenset(op.target for op in self._operations)
         self._schema_config = cfg.schema_config
 
         # declared_output_fields intentionally empty — we can't statically know which
@@ -127,8 +129,7 @@ class ValueTransform(BaseTransform):
         # The executor's field collision check only runs when this is non-empty.
         self.declared_output_fields: frozenset[str] = frozenset()
 
-        # Output schema passes through input guarantees since we can't declare new fields
-        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+        self._output_schema_config = self._build_value_transform_output_schema_config(cfg)
 
         self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
@@ -148,6 +149,32 @@ class ValueTransform(BaseTransform):
             ],
         }
 
+    def _build_value_transform_output_schema_config(
+        self,
+        cfg: ValueTransformConfig,
+    ) -> SchemaConfig:
+        """Build output guarantees for configured targets without forcing collision checks."""
+
+        base_guaranteed = set(cfg.schema_config.guaranteed_fields or ())
+        output_fields = base_guaranteed | self._configured_targets
+
+        # Preserve None-vs-empty-tuple semantics: None = abstain, () = explicitly empty.
+        # If upstream declared guarantees or this transform always writes targets,
+        # declare the effective guarantees explicitly for DAG validation.
+        upstream_declared = cfg.schema_config.guaranteed_fields is not None
+        if upstream_declared or output_fields:
+            guaranteed_fields_result = tuple(sorted(output_fields))
+        else:
+            guaranteed_fields_result = None
+
+        return SchemaConfig(
+            mode=cfg.schema_config.mode,
+            fields=cfg.schema_config.fields,
+            guaranteed_fields=guaranteed_fields_result,
+            audit_fields=cfg.schema_config.audit_fields,
+            required_fields=cfg.schema_config.required_fields,
+        )
+
     def process(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
         """Apply expression operations to row.
 
@@ -160,6 +187,7 @@ class ValueTransform(BaseTransform):
         """
         # Work on a copy to support atomic rollback
         working_data = copy.deepcopy(row.to_dict())
+        working_contract = row.contract
         fields_modified: list[str] = []
         fields_added: list[str] = []
         original_fields = set(row.to_dict().keys())
@@ -170,7 +198,7 @@ class ValueTransform(BaseTransform):
 
             # Create PipelineRow for evaluation to preserve dual-name access
             # (expressions can use original headers like row['Price USD'])
-            working_row = PipelineRow(working_data, row.contract)
+            working_row = PipelineRow(working_data, working_contract)
 
             try:
                 result = parser.evaluate(working_row)
@@ -180,15 +208,6 @@ class ValueTransform(BaseTransform):
                         "reason": "invalid_input",
                         "field": target,
                         "message": str(e),
-                    }
-                )
-            except Exception as e:
-                # Catch-all for unexpected evaluation errors
-                return TransformResult.error(
-                    {
-                        "reason": "invalid_input",
-                        "field": target,
-                        "message": f"Unexpected error: {type(e).__name__}: {e}",
                     }
                 )
 
@@ -202,8 +221,10 @@ class ValueTransform(BaseTransform):
 
             # Write result to working copy
             working_data[target] = result
+            if working_contract.find_field(target) is None:
+                working_contract = working_contract.with_field(target, target, result)
 
-        output_contract = self._align_output_contract(row.contract)
+        output_contract = self._align_output_contract(working_contract)
         return TransformResult.success(
             PipelineRow(working_data, output_contract),
             success_reason={

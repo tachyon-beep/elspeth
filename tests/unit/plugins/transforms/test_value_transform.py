@@ -6,8 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from elspeth.contracts.schema import SchemaConfig
-from elspeth.testing import make_pipeline_row
+from elspeth.testing import make_contract, make_pipeline_row, make_row
 from tests.fixtures.factories import make_source_context
+from tests.fixtures.pipeline import build_linear_pipeline
 
 if TYPE_CHECKING:
     from elspeth.contracts.plugin_context import PluginContext
@@ -230,6 +231,74 @@ class TestValueTransformBehavior:
         assert result.status == "success"
         assert result.row is not None
         assert result.row["result"] == 0
+
+    def test_fixed_schema_sequential_operations_can_read_added_fields(self, ctx: "PluginContext") -> None:
+        from elspeth.plugins.transforms.value_transform import ValueTransform
+
+        transform = ValueTransform(
+            {
+                "schema": {"mode": "fixed", "fields": ["price: int", "quantity: int"]},
+                "operations": [
+                    {"target": "subtotal", "expression": "row['price'] * row['quantity']"},
+                    {"target": "tax", "expression": "row['subtotal'] * 0.2"},
+                ],
+            }
+        )
+        row = make_row(
+            {"price": 100, "quantity": 2},
+            contract=make_contract(fields={"price": int, "quantity": int}, mode="FIXED"),
+        )
+
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row["subtotal"] == 200
+        assert result.row["tax"] == 40.0
+        assert "subtotal" in result.row
+        assert "tax" in result.row
+        assert result.row.contract.find_field("subtotal") is not None
+        assert result.row.contract.find_field("tax") is not None
+
+    def test_output_schema_config_guarantees_configured_targets_for_dag_validation(self) -> None:
+        from elspeth.plugins.transforms.value_transform import ValueTransform
+
+        producer = ValueTransform(
+            {
+                "schema": {"mode": "fixed", "fields": ["price: int", "quantity: int"]},
+                "operations": [{"target": "subtotal", "expression": "row['price'] * row['quantity']"}],
+            }
+        )
+        consumer = ValueTransform(
+            {
+                "schema": {"mode": "fixed", "fields": ["subtotal: float"]},
+                "required_input_fields": ["subtotal"],
+                "operations": [{"target": "with_tax", "expression": "row['subtotal'] * 1.2"}],
+            }
+        )
+
+        assert producer._output_schema_config is not None
+        assert "subtotal" in producer._output_schema_config.get_effective_guaranteed_fields()
+        build_linear_pipeline([{"price": 100, "quantity": 2}], transforms=[producer, consumer])
+
+    def test_unexpected_evaluator_exceptions_propagate(self, ctx: "PluginContext", monkeypatch: pytest.MonkeyPatch) -> None:
+        from elspeth.plugins.transforms.value_transform import ValueTransform
+
+        transform = ValueTransform(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "operations": [{"target": "out", "expression": "row['x'] + 1"}],
+            }
+        )
+        parser = transform._operations[0].get_parser()
+
+        def boom(row: object) -> object:
+            raise RuntimeError("sentinel plugin bug")
+
+        monkeypatch.setattr(parser, "evaluate", boom)
+
+        with pytest.raises(RuntimeError, match="sentinel plugin bug"):
+            transform.process(make_pipeline_row({"x": 1}), ctx)
 
 
 class TestValueTransformConfig:

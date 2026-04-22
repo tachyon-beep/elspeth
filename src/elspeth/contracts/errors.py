@@ -826,12 +826,19 @@ class DeclaredRequiredInputFieldsViolation(DeclarationContractViolation):
     payload_schema: ClassVar[type] = DeclaredRequiredInputFieldsPayload
 
 
+class DeclaredOutputFieldRowViolationPayload(TypedDict):
+    """Per-emitted-row evidence for ADR-011 declared-output-fields mismatches."""
+
+    emitted_index: Required[int]
+    runtime_observed: Required[list[str]]
+    missing: Required[list[str]]
+
+
 class DeclaredOutputFieldsPayload(TypedDict):
     """Audit payload for ADR-011 declared-output-fields mismatches."""
 
     declared: Required[list[str]]
-    runtime_observed: Required[list[str]]
-    missing: Required[list[str]]
+    violations: Required[list[DeclaredOutputFieldRowViolationPayload]]
 
 
 @tier_1_error(

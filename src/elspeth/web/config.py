@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from elspeth.web.validation import validate_secret_name
+
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
@@ -116,6 +118,11 @@ class WebSettings(BaseModel):
         if not v.strip():
             raise ValueError("must not be blank (omit the field to disable encryption)")
         return v
+
+    @field_validator("server_secret_allowlist")
+    @classmethod
+    def _validate_server_secret_allowlist(cls, v: tuple[str, ...]) -> tuple[str, ...]:
+        return tuple(validate_secret_name(name, field_name="server_secret_allowlist entry") for name in v)
 
     @model_validator(mode="after")
     def _validate_auth_fields(self) -> WebSettings:

@@ -216,14 +216,35 @@ class BatchTransformMixin:
                 self._batch_submissions[(token.token_id, state_id)] = ticket
 
         # Submit to worker pool
-        self._batch_executor.submit(
-            self._process_and_complete,
-            ticket,
-            token,
-            row,
-            ctx,
-            processor,
-        )
+        try:
+            self._batch_executor.submit(
+                self._process_and_complete,
+                ticket,
+                token,
+                row,
+                ctx,
+                processor,
+            )
+        except RuntimeError:
+            # The row has already been admitted to the FIFO buffer. Convert a
+            # shutdown-time submit race into an explicit row failure so the
+            # waiter/output path is satisfied and no ticket is stranded.
+            if state_id is not None:
+                with self._batch_submissions_lock:
+                    submission_key = (token.token_id, state_id)
+                    if submission_key in self._batch_submissions:
+                        self._batch_submissions.pop(submission_key)
+
+            from elspeth.contracts import TransformResult
+
+            shutdown_result = TransformResult.error(
+                {
+                    "reason": "shutdown_requested",
+                    "error": "thread pool shut down during submission",
+                },
+                retryable=False,
+            )
+            self._complete_ticket(ticket, token, shutdown_result, state_id)
 
     def _process_and_complete(
         self,
@@ -255,33 +276,39 @@ class BatchTransformMixin:
 
         try:
             result = processor(row, ctx)
-        except contract_errors.TIER_1_ERRORS:
-            raise  # Tier 1 errors must crash immediately — never wrap
         except Exception as e:
-            # Plugin bug - wrap exception for propagation to orchestrator
-            # The waiter will re-raise this exception in the main thread
+            # Worker threads cannot crash the orchestrator directly. Transport
+            # both plugin bugs and Tier 1 exceptions through the waiter path so
+            # the orchestrator thread re-raises the original exception instead
+            # of timing out waiting for a result.
             tb = traceback.format_exc()
-
-            # Import here to avoid circular dependency at module load time
             from elspeth.contracts import ExceptionResult
 
             exception_result = ExceptionResult(exception=e, traceback=tb)
-            # KeyError means ticket was evicted due to timeout — discard late result.
-            # This is expected when a waiter times out and retry proceeds
-            # while the original worker was still processing.
-            try:
-                self._batch_buffer.complete(ticket, (token, exception_result, state_id))
-            except KeyError:
-                _logger.debug("late_result_discarded", token_id=token.token_id, state_id=state_id, reason="timeout_evicted")
+            self._complete_ticket(ticket, token, exception_result, state_id)
             return
 
         # Mark complete — result will be released in FIFO order
         # Include state_id for retry-safe waiter matching
-        # KeyError means ticket was evicted due to timeout — discard late result.
+        self._complete_ticket(ticket, token, result, state_id)
+
+    def _complete_ticket(
+        self,
+        ticket: RowTicket,
+        token: TokenInfo,
+        result: TransformResult | ExceptionResult,
+        state_id: str | None,
+    ) -> None:
+        """Complete a ticket, discarding late results after timeout eviction."""
         try:
             self._batch_buffer.complete(ticket, (token, result, state_id))
         except KeyError:
-            _logger.debug("late_result_discarded", token_id=token.token_id, state_id=state_id, reason="timeout_evicted")
+            _logger.debug(
+                "late_result_discarded",
+                token_id=token.token_id,
+                state_id=state_id,
+                reason="timeout_evicted",
+            )
 
     def _release_loop(self) -> None:
         """Release thread: emit results in FIFO order to output port.

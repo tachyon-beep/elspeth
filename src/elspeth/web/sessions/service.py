@@ -7,6 +7,7 @@ thread pool executor to avoid blocking the async event loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import shutil
 import uuid
@@ -212,27 +213,68 @@ class SessionServiceImpl:
         ]
 
     async def archive_session(self, session_id: UUID) -> None:
-        """Delete a session and cascade to all related records and files."""
+        """Delete a session and cascade to all related records and files.
+
+        Filesystem cleanup is staged before the DB delete so the service can
+        restore the original blob directory if the transaction fails. After the
+        DB commit, any purge failure leaves the staged directory in a recoverable
+        quarantine path instead of raising after the session is already gone.
+        """
         sid = str(session_id)
 
         def _sync() -> None:
-            with self._engine.begin() as conn:
-                # Delete in dependency order (children first for non-CASCADE DBs)
-                # Get run IDs for this session to delete run_events
-                run_ids = [r.id for r in conn.execute(select(runs_table.c.id).where(runs_table.c.session_id == sid)).fetchall()]
-                if run_ids:
-                    conn.execute(delete(run_events_table).where(run_events_table.c.run_id.in_(run_ids)))
-                conn.execute(delete(runs_table).where(runs_table.c.session_id == sid))
-                conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
-                conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
-                conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
-
-            # Clean up filesystem artifacts after DB rows are committed.
-            # Blob files: data/blobs/{session_id}/
+            blob_dir: Path | None = None
+            staged_blob_dir: Path | None = None
             if self._data_dir is not None:
                 blob_dir = self._data_dir / "blobs" / sid
                 if blob_dir.is_dir():
-                    shutil.rmtree(blob_dir)
+                    staged_blob_dir = self._data_dir / ".archive_quarantine" / sid
+                    staged_blob_dir.parent.mkdir(parents=True, exist_ok=True)
+                    if staged_blob_dir.exists():
+                        raise OSError(
+                            f"archive_session({sid}): quarantine path {staged_blob_dir} already exists. "
+                            "Manual cleanup of the stale staged blob directory is required before archive can proceed."
+                        )
+                    blob_dir.rename(staged_blob_dir)
+
+            try:
+                with self._engine.begin() as conn:
+                    # Delete in dependency order (children first for non-CASCADE DBs)
+                    # Get run IDs for this session to delete run_events
+                    run_ids = [r.id for r in conn.execute(select(runs_table.c.id).where(runs_table.c.session_id == sid)).fetchall()]
+                    if run_ids:
+                        conn.execute(delete(run_events_table).where(run_events_table.c.run_id.in_(run_ids)))
+                    conn.execute(delete(runs_table).where(runs_table.c.session_id == sid))
+                    conn.execute(delete(chat_messages_table).where(chat_messages_table.c.session_id == sid))
+                    conn.execute(delete(composition_states_table).where(composition_states_table.c.session_id == sid))
+                    conn.execute(delete(sessions_table).where(sessions_table.c.id == sid))
+            except Exception as primary_exc:
+                if blob_dir is not None and staged_blob_dir is not None and staged_blob_dir.exists():
+                    try:
+                        blob_dir.parent.mkdir(parents=True, exist_ok=True)
+                        staged_blob_dir.rename(blob_dir)
+                    except OSError as restore_exc:
+                        primary_exc.add_note(
+                            f"RecoveryFailed[{type(restore_exc).__name__}]: "
+                            f"could not restore staged blob directory for session {sid} "
+                            f"from {staged_blob_dir} to {blob_dir} after archive rollback "
+                            f"({restore_exc}). Manual cleanup required."
+                        )
+                raise
+
+            # After commit, the delete succeeded from the caller's perspective.
+            # If the final purge fails, keep the staged directory in quarantine
+            # for manual cleanup rather than raising a false "delete failed"
+            # error after the session rows are already gone.
+            if staged_blob_dir is not None and staged_blob_dir.exists():
+                try:
+                    shutil.rmtree(staged_blob_dir)
+                except OSError:
+                    return
+
+                quarantine_root = staged_blob_dir.parent
+                with contextlib.suppress(OSError):
+                    quarantine_root.rmdir()
 
         await self._run_sync(_sync)
 
@@ -1044,7 +1086,10 @@ class SessionServiceImpl:
         # Load source composition state if it exists (read-only)
         source_state_record: CompositionStateRecord | None = None
         if pre_send_state_id is not None:
-            source_state_record = await self.get_state(pre_send_state_id)
+            source_state_record = await self.get_state_in_session(
+                pre_send_state_id,
+                source_session_id,
+            )
 
         # Prepare IDs and timestamps upfront
         new_session_id = uuid.uuid4()

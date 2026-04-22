@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from unittest.mock import patch
 
 import pytest
@@ -259,6 +260,24 @@ class TestCheckUserRefResolvable:
         """
         assert service.resolve("u1", "NEVER_EXISTED", auth_provider_type="local") is None
 
+    def test_returns_false_when_user_secret_deleted_between_probe_and_fetch(
+        self,
+        service: WebSecretService,
+        user_store: UserSecretStore,
+    ) -> None:
+        """Delete race is absence, not an exception, on the typed validate path."""
+        user_store.set_secret("RACE", value="v", user_id="u1", auth_provider_type="local")
+
+        original_probe = user_store.has_secret_record
+
+        def has_record_then_delete(*args: object, **kwargs: object) -> bool:
+            result = original_probe(*args, **kwargs)  # type: ignore[arg-type]
+            user_store.delete_secret("RACE", user_id="u1", auth_provider_type="local")
+            return result
+
+        with patch.object(user_store, "has_secret_record", side_effect=has_record_then_delete):
+            assert service.check_user_ref_resolvable("u1", "RACE", auth_provider_type="local") is False
+
 
 class TestServerStore:
     def test_allowlist_restricts_access(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -466,7 +485,7 @@ class TestHasRefResolveInvariant:
         monkeypatch.setattr(service_module, "_fingerprint_missing_last_logged_at", None)
         monkeypatch.setattr(service_module, "_fingerprint_missing_suppressed", 0)
         monotonic_values = iter((100.0, 100.0, 161.0))
-        monkeypatch.setattr(service_module.time, "monotonic", lambda: next(monotonic_values))
+        monkeypatch.setattr(service_module, "_rate_limit_monotonic", lambda: next(monotonic_values))
 
         with patch.object(service_module, "_slog") as mock_slog:
             service.resolve("u1", "KEY", auth_provider_type="local")
@@ -496,7 +515,7 @@ class TestHasRefResolveInvariant:
         monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY")
         monkeypatch.setattr(service_module, "_fingerprint_missing_last_logged_at", None)
         monkeypatch.setattr(service_module, "_fingerprint_missing_suppressed", 0)
-        monkeypatch.setattr(service_module.time, "monotonic", lambda: 100.0)
+        monkeypatch.setattr(service_module, "_rate_limit_monotonic", lambda: 100.0)
 
         with patch.object(service_module, "_slog") as mock_slog:
             service.resolve("u1", "KEY", auth_provider_type="local")
@@ -550,7 +569,7 @@ class TestHasRefResolveInvariant:
         monkeypatch.setattr(service_module, "_secret_decryption_last_logged_at", None, raising=False)
         monkeypatch.setattr(service_module, "_secret_decryption_suppressed", 0, raising=False)
         monotonic_values = iter((100.0, 100.0, 161.0))
-        monkeypatch.setattr(service_module.time, "monotonic", lambda: next(monotonic_values))
+        monkeypatch.setattr(service_module, "_rate_limit_monotonic", lambda: next(monotonic_values))
 
         with patch.object(service_module, "_slog") as mock_slog:
             assert rotated_service.resolve("u1", "ROT", auth_provider_type="local") is None
@@ -583,6 +602,46 @@ class TestHasRefResolveInvariant:
 
         assert result is None
         assert mock_slog.error.call_count == 0
+
+    def test_fingerprint_missing_breadcrumb_counts_all_suppressed_calls_under_concurrency(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Concurrent suppressed calls must not lose count updates."""
+        import time as stdlib_time
+
+        from elspeth.web.secrets import service as service_module
+
+        class _SlowCounter(int):
+            def __new__(cls, value: int, delay_seconds: float):
+                obj = int.__new__(cls, value)
+                obj._delay_seconds = delay_seconds
+                return obj
+
+            def __add__(self, other: int) -> int:
+                stdlib_time.sleep(self._delay_seconds)
+                return int(self) + other
+
+        monkeypatch.setattr(service_module, "_fingerprint_missing_last_logged_at", 100.0)
+        monkeypatch.setattr(service_module, "_fingerprint_missing_suppressed", _SlowCounter(0, 0.05))
+        monkeypatch.setattr(service_module, "_rate_limit_monotonic", lambda: 100.0)
+
+        start = threading.Barrier(6)
+
+        def _worker() -> None:
+            start.wait()
+            service_module._log_fingerprint_missing_rate_limited()
+
+        with patch.object(service_module, "_slog") as mock_slog:
+            threads = [threading.Thread(target=_worker) for _ in range(5)]
+            for thread in threads:
+                thread.start()
+            start.wait()
+            for thread in threads:
+                thread.join()
+
+        assert mock_slog.error.call_count == 0
+        assert service_module._fingerprint_missing_suppressed == 5
 
     def test_has_ref_returns_false_for_reserved_name_when_user_has_no_row(
         self,

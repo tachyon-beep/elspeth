@@ -1041,22 +1041,15 @@ class TestNodeStateLoader:
 
     # === FAILED variant ===
 
-    def test_failed_valid(self) -> None:
+    def test_failed_with_null_error_json_raises(self) -> None:
         sa_row = self._make_node_state_row(
             status="failed",
             completed_at=LATER,
             duration_ms=50.0,
         )
         loader = NodeStateLoader()
-        result = loader.load(sa_row)
-
-        assert isinstance(result, NodeStateFailed)
-        assert result.status == NodeStateStatus.FAILED
-        assert result.started_at == NOW
-        assert result.completed_at == LATER
-        assert result.duration_ms == 50.0
-        assert result.error_json is None
-        assert result.output_hash is None
+        with pytest.raises(AuditIntegrityError, match="NULL error_json"):
+            loader.load(sa_row)
 
     def test_failed_with_error_json(self) -> None:
         sa_row = self._make_node_state_row(
@@ -1077,6 +1070,7 @@ class TestNodeStateLoader:
             completed_at=NOW,
             duration_ms=50.0,
             output_hash="partial_out",
+            error_json='{"reason": "division by zero"}',
         )
         loader = NodeStateLoader()
         result = loader.load(sa_row)
@@ -1105,6 +1099,7 @@ class TestNodeStateLoader:
             duration_ms=50.0,
             context_before_json='{"b": 1}',
             context_after_json='{"a": 2}',
+            error_json='{"reason": "division by zero"}',
         )
         loader = NodeStateLoader()
         result = loader.load(sa_row)
@@ -1138,6 +1133,7 @@ class TestNodeStateLoader:
             status="failed",
             completed_at=NOW,
             duration_ms=50.0,
+            error_json='{"reason": "division by zero"}',
             success_reason_json='{"action": "should not be here"}',
         )
         loader = NodeStateLoader()
@@ -1172,8 +1168,14 @@ class TestNodeStateLoader:
     def test_status_routes_to_correct_variant(self, status_str: str, expected_type: type) -> None:
         """Each status string produces the correct variant type."""
         extra: dict[str, object] = {}
-        if status_str in ("pending", "failed"):
+        if status_str == "pending":
             extra = {"completed_at": NOW, "duration_ms": 100.0}
+        elif status_str == "failed":
+            extra = {
+                "completed_at": NOW,
+                "duration_ms": 100.0,
+                "error_json": '{"reason": "division by zero"}',
+            }
         elif status_str == "completed":
             extra = {
                 "output_hash": "out",

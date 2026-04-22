@@ -229,8 +229,48 @@ class TestDeclaredOutputFieldsRoundTrip:
         assert context["row_id"] == row_id
         assert context["token_id"] == token_id
         assert context["payload"]["declared"] == ["new_a", "new_b"]
-        assert context["payload"]["runtime_observed"] == ["new_a", "source"]
-        assert context["payload"]["missing"] == ["new_b"]
+        assert context["payload"]["violations"] == [{"emitted_index": 0, "runtime_observed": ["new_a", "source"], "missing": ["new_b"]}]
+
+    def test_multi_row_post_emission_violation_preserves_all_row_entries(self) -> None:
+        register_declaration_contract(DeclaredOutputFieldsContract())
+
+        run_id = "run-declared-output-fields-multi-row"
+        row_id = "row-declared-output-fields-multi-row"
+        token_id = "token-declared-output-fields-multi-row"
+        node_id = "node-declared-output-fields-multi-row"
+        setup = _setup_landscape(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id)
+
+        plugin = _plugin(node_id=node_id)
+        inputs = PostEmissionInputs(
+            plugin=plugin,
+            node_id=node_id,
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            input_row=_row(("source",)),
+            static_contract=frozenset({"new_a", "new_b"}),
+            effective_input_fields=frozenset({"source"}),
+        )
+        outputs = PostEmissionOutputs(emitted_rows=(_row(("source", "new_a")), _row(("source", "new_b"))))
+
+        try:
+            run_post_emission_checks(inputs=inputs, outputs=outputs)
+        except DeclaredOutputFieldsViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="executor_post_process",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected DeclaredOutputFieldsViolation")
+
+        context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
+        assert context["payload"]["declared"] == ["new_a", "new_b"]
+        assert context["payload"]["violations"] == [
+            {"emitted_index": 0, "runtime_observed": ["new_a", "source"], "missing": ["new_b"]},
+            {"emitted_index": 1, "runtime_observed": ["new_b", "source"], "missing": ["new_a"]},
+        ]
 
     def test_batch_flush_violation_survives_landscape_round_trip(self) -> None:
         register_declaration_contract(DeclaredOutputFieldsContract())
@@ -270,7 +310,7 @@ class TestDeclaredOutputFieldsRoundTrip:
         context = _record_failure(setup, token_id=token_id, node_id=node_id, run_id=run_id, error=error)
         assert context["exception_type"] == "DeclaredOutputFieldsViolation"
         assert context["contract_name"] == "declared_output_fields"
-        assert context["payload"]["missing"] == ["new_b"]
+        assert context["payload"]["violations"] == [{"emitted_index": 0, "runtime_observed": ["new_a", "source"], "missing": ["new_b"]}]
 
     def test_aggregate_round_trip_with_pass_through(self) -> None:
         register_declaration_contract(PassThroughDeclarationContract())
@@ -315,7 +355,9 @@ class TestDeclaredOutputFieldsRoundTrip:
         assert child_types == {"DeclaredOutputFieldsViolation", "PassThroughContractViolation"}
         declared_child = next(entry for entry in context["violations"] if entry["exception_type"] == "DeclaredOutputFieldsViolation")
         assert declared_child["contract_name"] == "declared_output_fields"
-        assert declared_child["payload"]["missing"] == ["new_b"]
+        assert declared_child["payload"]["violations"] == [
+            {"emitted_index": 0, "runtime_observed": ["new_a", "source"], "missing": ["new_b"]}
+        ]
 
         pass_through_child = next(entry for entry in context["violations"] if entry["exception_type"] == "PassThroughContractViolation")
         assert pass_through_child["divergence_set"] == ["carry"]

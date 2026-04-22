@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 
 import structlog
@@ -27,9 +28,16 @@ _slog = structlog.get_logger()
 _FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS = 60.0
 _fingerprint_missing_last_logged_at: float | None = None
 _fingerprint_missing_suppressed = 0
+_fingerprint_missing_state_lock = threading.Lock()
 _SECRET_DECRYPTION_LOG_INTERVAL_SECONDS = 60.0
 _secret_decryption_last_logged_at: float | None = None
 _secret_decryption_suppressed = 0
+_secret_decryption_state_lock = threading.Lock()
+
+
+def _rate_limit_monotonic() -> float:
+    """Return the monotonic clock used by rate-limited secret breadcrumbs."""
+    return time.monotonic()
 
 
 def _log_fingerprint_missing_rate_limited() -> None:
@@ -53,17 +61,18 @@ def _log_fingerprint_missing_rate_limited() -> None:
     """
     global _fingerprint_missing_last_logged_at, _fingerprint_missing_suppressed
 
-    now_monotonic = time.monotonic()
-    if (
-        _fingerprint_missing_last_logged_at is not None
-        and now_monotonic - _fingerprint_missing_last_logged_at < _FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS
-    ):
-        _fingerprint_missing_suppressed += 1
-        return
+    with _fingerprint_missing_state_lock:
+        now_monotonic = _rate_limit_monotonic()
+        if (
+            _fingerprint_missing_last_logged_at is not None
+            and now_monotonic - _fingerprint_missing_last_logged_at < _FINGERPRINT_MISSING_LOG_INTERVAL_SECONDS
+        ):
+            _fingerprint_missing_suppressed += 1
+            return
 
-    suppressed_since_last_emit = _fingerprint_missing_suppressed
-    _fingerprint_missing_last_logged_at = now_monotonic
-    _fingerprint_missing_suppressed = 0
+        suppressed_since_last_emit = _fingerprint_missing_suppressed
+        _fingerprint_missing_last_logged_at = now_monotonic
+        _fingerprint_missing_suppressed = 0
     _slog.error(
         "secret_resolve_fingerprint_key_missing",
         detail=(
@@ -86,17 +95,18 @@ def _log_secret_decryption_rate_limited() -> None:
     """
     global _secret_decryption_last_logged_at, _secret_decryption_suppressed
 
-    now_monotonic = time.monotonic()
-    if (
-        _secret_decryption_last_logged_at is not None
-        and now_monotonic - _secret_decryption_last_logged_at < _SECRET_DECRYPTION_LOG_INTERVAL_SECONDS
-    ):
-        _secret_decryption_suppressed += 1
-        return
+    with _secret_decryption_state_lock:
+        now_monotonic = _rate_limit_monotonic()
+        if (
+            _secret_decryption_last_logged_at is not None
+            and now_monotonic - _secret_decryption_last_logged_at < _SECRET_DECRYPTION_LOG_INTERVAL_SECONDS
+        ):
+            _secret_decryption_suppressed += 1
+            return
 
-    suppressed_since_last_emit = _secret_decryption_suppressed
-    _secret_decryption_last_logged_at = now_monotonic
-    _secret_decryption_suppressed = 0
+        suppressed_since_last_emit = _secret_decryption_suppressed
+        _secret_decryption_last_logged_at = now_monotonic
+        _secret_decryption_suppressed = 0
     _slog.error(
         "secret_resolve_decryption_failed",
         detail=(
@@ -237,7 +247,10 @@ class WebSecretService:
             # FingerprintKeyMissingError and SecretDecryptionError can
             # surface.  The plaintext is immediately discarded — this
             # method is security-equivalent to has_ref (no value leak).
-            self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
+            try:
+                self._user_store.get_secret(name, user_id=user_id, auth_provider_type=auth_provider_type)
+            except SecretNotFoundError:
+                return False
             return True
         # No user-scope row — check server scope.  A server-scope row
         # with fingerprint key unset will raise FingerprintKeyMissingError

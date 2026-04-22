@@ -132,14 +132,21 @@ class ProgressBroadcaster:
         event loop's internal _ready callback queue.
         """
         with self._lock:
-            if event.event_type in self._TERMINAL_EVENT_TYPES:
-                if run_id in self._terminalized:
+            if run_id in self._terminalized:
+                if event.event_type in self._TERMINAL_EVENT_TYPES:
                     slog.error(
                         "duplicate_terminal_broadcast_suppressed",
                         run_id=run_id,
                         event_type=event.event_type,
                     )
-                    return
+                else:
+                    slog.warning(
+                        "post_terminal_broadcast_suppressed",
+                        run_id=run_id,
+                        event_type=event.event_type,
+                    )
+                return
+            if event.event_type in self._TERMINAL_EVENT_TYPES:
                 self._terminalized.add(run_id)
             sub_map = self._subscribers.get(run_id)
             if not sub_map:
@@ -236,6 +243,12 @@ class ProgressBroadcaster:
         objects — events already queued will still be drained by connected
         WS handlers. Only prevents new subscribers from being added for
         this run_id.
+
+        Duplicate-terminal suppression is only needed while the run is
+        active. Once cleanup runs, future listeners seed terminal state
+        from the persisted Run record instead of this in-memory guard, so
+        retaining run_id in ``_terminalized`` only leaks memory.
         """
         with self._lock:
             self._subscribers.pop(run_id, None)
+            self._terminalized.discard(run_id)

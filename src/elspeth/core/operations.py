@@ -34,9 +34,13 @@ logger = logging.getLogger(__name__)
 
 def _render_exception(exc: BaseException) -> str:
     """Render an exception to a non-empty audit message."""
-    # Use BaseException.__str__ directly so audit rendering cannot be derailed
-    # by a subclass overriding __str__ with side effects or broad failures.
-    message = BaseException.__str__(exc)
+    # Preserve KeyError's quoted rendering, but otherwise prefer
+    # BaseException.__str__ so a broken custom __str__ override cannot
+    # derail audit completion.
+    if type(exc) is KeyError:
+        message = str(exc)
+    else:
+        message = BaseException.__str__(exc)
     return message if message else type(exc).__name__
 
 

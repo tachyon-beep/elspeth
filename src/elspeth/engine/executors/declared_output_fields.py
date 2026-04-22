@@ -28,6 +28,7 @@ from elspeth.contracts.declaration_contracts import (
     register_declaration_contract,
 )
 from elspeth.contracts.errors import (
+    DeclaredOutputFieldRowViolationPayload,
     DeclaredOutputFieldsPayload,
     DeclaredOutputFieldsViolation,
     FrameworkBugError,
@@ -77,7 +78,8 @@ def verify_declared_output_fields(
     if not emitted_rows:
         return
 
-    for emitted in emitted_rows:
+    violations: list[DeclaredOutputFieldRowViolationPayload] = []
+    for emitted_index, emitted in enumerate(emitted_rows):
         if emitted.contract is None:
             raise FrameworkBugError(f"Transform {plugin_name!r} emitted row with no contract. Framework invariant violated.")
         runtime_contract_fields = frozenset(fc.normalized_name for fc in emitted.contract.fields)
@@ -86,23 +88,34 @@ def verify_declared_output_fields(
         missing = declared_output_fields - runtime_observed
         if not missing:
             continue
-        raise DeclaredOutputFieldsViolation(
-            plugin=plugin_name,
-            node_id=node_id,
-            run_id=run_id,
-            row_id=row_id,
-            token_id=token_id,
-            payload={
-                "declared": sorted(declared_output_fields),
+        violations.append(
+            {
+                "emitted_index": emitted_index,
                 "runtime_observed": sorted(runtime_observed),
                 "missing": sorted(missing),
-            },
-            message=(
-                f"Transform {plugin_name!r} (node {node_id!r}) declared output fields "
-                f"{sorted(declared_output_fields)!r} but emitted a row missing "
-                f"{sorted(missing)!r} for row {row_id!r}."
-            ),
+            }
         )
+
+    if not violations:
+        return
+
+    failing_indexes = [entry["emitted_index"] for entry in violations]
+    raise DeclaredOutputFieldsViolation(
+        plugin=plugin_name,
+        node_id=node_id,
+        run_id=run_id,
+        row_id=row_id,
+        token_id=token_id,
+        payload={
+            "declared": sorted(declared_output_fields),
+            "violations": violations,
+        },
+        message=(
+            f"Transform {plugin_name!r} (node {node_id!r}) declared output fields "
+            f"{sorted(declared_output_fields)!r} but emitted row(s) at indexes "
+            f"{failing_indexes!r} that violated the declaration for row {row_id!r}."
+        ),
+    )
 
 
 class DeclaredOutputFieldsContract(DeclarationContract):

@@ -18,10 +18,12 @@ import pytest
 
 from elspeth.contracts import TransformResult
 from elspeth.contracts.contexts import TransformContext
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.plugin_context import PluginContext
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.landscape.factory import RecorderFactory
+from elspeth.engine.batch_adapter import SharedBatchAdapter
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.batching import BatchTransformMixin
 from elspeth.plugins.infrastructure.batching.ports import CollectorOutputPort, OutputPort
@@ -90,6 +92,15 @@ class SimpleBatchTransform(BaseTransform, BatchTransformMixin):
     def close(self) -> None:
         if self._batch_initialized:
             self.shutdown_batch_processing()
+
+
+class Tier1FailingBatchTransform(SimpleBatchTransform):
+    """Batch transform whose worker raises a Tier 1 audit exception."""
+
+    name = "tier1_failing_batch_transform"
+
+    def _process_row(self, row: PipelineRow, ctx: TransformContext) -> TransformResult:
+        raise AuditIntegrityError("simulated audit integrity failure")
 
 
 class TestBatchTransformMixinTokenValidation:
@@ -889,3 +900,76 @@ class TestFlushTimeoutRaisesTimeoutError:
 
         with pytest.raises(TimeoutError, match=r"\d+ rows still pending"):
             blocking_transform.flush_batch_processing(timeout=0.2)
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+class TestBatchTransformMixinWorkerFailurePropagation:
+    """Tests for worker-thread failure delivery to the orchestrator."""
+
+    def test_tier1_worker_exception_reaches_waiter_immediately(self) -> None:
+        """Tier 1 worker exceptions must travel through the waiter path.
+
+        If the worker thread re-raises directly, the waiter never receives a
+        result and times out instead of surfacing the original audit failure.
+        """
+        adapter = SharedBatchAdapter()
+        transform = Tier1FailingBatchTransform()
+        transform.connect_output(adapter, max_pending=5)
+
+        token = make_token("row-tier1")
+        ctx = make_context(
+            landscape=_make_factory(),
+            token=token,
+            state_id="state-tier1",
+        )
+        waiter = adapter.register(token.token_id, "state-tier1")
+
+        try:
+            transform.accept({"data": "test"}, ctx)
+
+            with pytest.raises(AuditIntegrityError, match="simulated audit integrity failure"):
+                waiter.wait(timeout=0.2)
+        finally:
+            if ctx.state_id is not None:
+                transform.evict_submission(token.token_id, ctx.state_id)
+            transform.close()
+
+
+class TestBatchTransformMixinSubmitRollback:
+    """Tests for submit-time rollback when the worker pool rejects a row."""
+
+    def test_submit_failure_returns_shutdown_error_without_stranding_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """A submit-time shutdown race must not leave a pending ticket behind."""
+        adapter = SharedBatchAdapter()
+        transform = SimpleBatchTransform()
+        transform.connect_output(adapter, max_pending=5)
+
+        token = make_token("row-submit-race")
+        state_id = "state-submit-race"
+        ctx = make_context(
+            landscape=_make_factory(),
+            token=token,
+            state_id=state_id,
+        )
+        waiter = adapter.register(token.token_id, state_id)
+
+        def fail_submit(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("cannot schedule new futures after shutdown")
+
+        monkeypatch.setattr(transform._batch_executor, "submit", fail_submit)
+
+        try:
+            transform.accept({"data": "test"}, ctx)
+
+            result = waiter.wait(timeout=1.0)
+
+            assert result.status == "error"
+            assert result.reason == {
+                "reason": "shutdown_requested",
+                "error": "thread pool shut down during submission",
+            }
+            assert transform.batch_pending_count == 0
+            assert (token.token_id, state_id) not in transform._batch_submissions
+            assert (token.token_id, state_id) not in adapter._entries
+        finally:
+            transform.close()

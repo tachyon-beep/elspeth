@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import Depends
 from pydantic import ValidationError
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import CompileError, OperationalError
 from starlette.testclient import TestClient
 
 from elspeth.web.app import (
@@ -18,6 +19,7 @@ from elspeth.web.app import (
     _periodic_orphan_cleanup,
     _settings_from_env,
     create_app,
+    lifespan,
 )
 from elspeth.web.config import WebSettings
 from elspeth.web.dependencies import get_settings
@@ -34,6 +36,36 @@ def _settings(tmp_path: Path, **overrides) -> WebSettings:
     }
     defaults.update(overrides)
     return WebSettings(**defaults)
+
+
+class _StaticJsonResponse:
+    """Minimal httpx-like response stub for lifespan discovery tests."""
+
+    def __init__(self, payload: object) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> object:
+        return self._payload
+
+
+class _StaticAsyncClient:
+    """Minimal async context manager stub for patched httpx.AsyncClient."""
+
+    def __init__(self, responses: list[_StaticJsonResponse]) -> None:
+        self._responses = iter(responses)
+
+    async def __aenter__(self) -> _StaticAsyncClient:
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+    async def get(self, url: str) -> _StaticJsonResponse:
+        del url
+        return next(self._responses)
 
 
 class TestCreateApp:
@@ -58,6 +90,16 @@ class TestCreateApp:
         app = create_app(settings)
         assert app.state.settings is settings
         assert app.state.settings.port == 9999
+
+    def test_loopback_default_secret_key_allowed_without_pytest_module(self, tmp_path, monkeypatch) -> None:
+        """Loopback startup must follow the WebSettings contract outside pytest too."""
+        settings = _settings(tmp_path, host="127.0.0.1")
+        monkeypatch.delitem(sys.modules, "pytest", raising=False)
+        monkeypatch.delenv("ELSPETH_ENV", raising=False)
+
+        app = create_app(settings)
+
+        assert app is not None
 
 
 class TestHealthEndpoint:
@@ -310,6 +352,41 @@ class TestExecutionWiring:
         assert "/ws/runs/{run_id}" in route_paths
 
 
+class TestOidcDiscoveryStartup:
+    """OIDC discovery in lifespan() must validate response shape before storing it."""
+
+    @staticmethod
+    def _oidc_settings(tmp_path: Path) -> WebSettings:
+        return _settings(
+            tmp_path,
+            auth_provider="oidc",
+            oidc_issuer="https://issuer.example.com",
+            oidc_audience="test-audience",
+            oidc_client_id="test-client-id",
+            secret_key="dev-secret",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {"authorization_endpoint": 123},
+            {"authorization_endpoint": "   "},
+        ],
+    )
+    async def test_lifespan_rejects_invalid_discovery_authorization_endpoint(self, tmp_path, payload) -> None:
+        """Malformed discovery JSON must fail as deterministic startup error."""
+        app = create_app(self._oidc_settings(tmp_path))
+
+        with (
+            patch("httpx.AsyncClient", return_value=_StaticAsyncClient([_StaticJsonResponse(payload)])),
+            pytest.raises(SystemExit, match="OIDC discovery failed"),
+        ):
+            async with lifespan(app):
+                pass
+
+
 class TestSettingsFromEnv:
     """Tests for _settings_from_env() environment variable parsing."""
 
@@ -350,6 +427,19 @@ class TestSettingsFromEnv:
         monkeypatch.setenv("ELSPETH_WEB__SERVER_SECRET_ALLOWLIST", '["MY_KEY"]')
         settings = _settings_from_env()
         assert settings.server_secret_allowlist == ("MY_KEY",)
+
+    @pytest.mark.parametrize(
+        ("raw_allowlist", "match"),
+        [
+            ('[""]', "must not be empty"),
+            ('["A/B"]', "must match"),
+            (f'["{"A" * 257}"]', "must be <= 256"),
+        ],
+    )
+    def test_server_secret_allowlist_rejects_malformed_names(self, monkeypatch, raw_allowlist: str, match: str) -> None:
+        monkeypatch.setenv("ELSPETH_WEB__SERVER_SECRET_ALLOWLIST", raw_allowlist)
+        with pytest.raises(ValidationError, match=match):
+            _settings_from_env()
 
     def test_secret_key_numeric_string_preserved(self, monkeypatch) -> None:
         """A string field set to a numeric value must stay str, not become int."""
@@ -830,6 +920,21 @@ class TestSecretsExceptionHandlers:
         assert "SELECT * FROM" not in body_text
         assert "LEAK_ME" not in body_text
 
+    def test_compile_error_is_not_laundered_to_database_unavailable(self, tmp_path, monkeypatch) -> None:
+        """Programmer/configuration SQLAlchemy bugs must not be translated to retryable 503s."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-k")
+        client = self._authed_client(tmp_path)
+
+        def _raise_compile_error(*args, **kwargs):
+            raise CompileError("broken query shape")
+
+        app = client.app
+        monkeypatch.setattr(app.state.secret_service, "list_refs", _raise_compile_error)
+
+        resp = client.get("/api/secrets")
+        assert resp.status_code == 500
+        assert "database_unavailable" not in resp.text
+
     # -- OSError → 503 --------------------------------------------------------
 
     def test_oserror_on_list_returns_503(self, tmp_path, monkeypatch) -> None:
@@ -854,6 +959,21 @@ class TestSecretsExceptionHandlers:
         assert body["request_id"]
         # Redaction: the underlying DB file path must not leak.
         assert "/var/lib/elspeth.db" not in resp.text
+
+    def test_filenotfound_error_is_not_laundered_to_storage_unavailable(self, tmp_path, monkeypatch) -> None:
+        """Missing-path bugs must not become retryable storage-outage responses."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "fp-k")
+        client = self._authed_client(tmp_path)
+
+        def _raise_missing_path(*args, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory", "/tmp/should-have-existed")
+
+        app = client.app
+        monkeypatch.setattr(app.state.secret_service, "list_refs", _raise_missing_path)
+
+        resp = client.get("/api/secrets")
+        assert resp.status_code == 500
+        assert "storage_unavailable" not in resp.text
 
     # -- Hypothesis property: TOCTOU-free create ------------------------------
 

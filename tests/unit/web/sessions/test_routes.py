@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock
 import pytest
 import yaml
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import StaticPool
 from starlette.testclient import TestClient
 
@@ -48,6 +49,44 @@ def _make_composer_mock(
         ),
     )
     return mock
+
+
+class _BlockingRecordingComposer:
+    """Composer stub that lets tests observe and gate concurrent compose() calls."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.first_call_started = asyncio.Event()
+        self.second_call_started = asyncio.Event()
+        self.release_first_call = asyncio.Event()
+
+    async def compose(
+        self,
+        message: str,
+        chat_messages: list[dict[str, object]],
+        state: CompositionState,
+        *,
+        session_id: str | None = None,
+        user_id: str | None = None,
+    ) -> ComposerResult:
+        del state, session_id, user_id
+
+        self.calls.append(
+            {
+                "message": message,
+                "chat_messages": [dict(entry) for entry in chat_messages],
+            }
+        )
+
+        if len(self.calls) == 1:
+            self.first_call_started.set()
+            await self.release_first_call.wait()
+            reply = "Reply to first"
+        else:
+            self.second_call_started.set()
+            reply = "Reply to second"
+
+        return ComposerResult(message=reply, state=_EMPTY_STATE)
 
 
 def _make_app(
@@ -1000,6 +1039,46 @@ class TestMessageRoutes:
                     "arguments": '{"kind":"csv"}',
                 },
             }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_send_message_serializes_concurrent_requests_per_session(self, tmp_path) -> None:
+        """Concurrent sends must not compose against an in-flight partial transcript."""
+        composer = _BlockingRecordingComposer()
+
+        app, _ = _make_app(tmp_path)
+        app.state.composer_service = composer
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            create_resp = await client.post("/api/sessions", json={"title": "Chat"})
+            assert create_resp.status_code == 201
+            session_id = create_resp.json()["id"]
+
+            async def send(content: str):
+                return await client.post(
+                    f"/api/sessions/{session_id}/messages",
+                    json={"content": content},
+                )
+
+            first_task = asyncio.create_task(send("First"))
+            await asyncio.wait_for(composer.first_call_started.wait(), timeout=1.0)
+
+            second_task = asyncio.create_task(send("Second"))
+
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(composer.second_call_started.wait(), timeout=0.3)
+
+            composer.release_first_call.set()
+
+            first_resp, second_resp = await asyncio.gather(first_task, second_task)
+
+        assert first_resp.status_code == 200
+        assert second_resp.status_code == 200
+        assert [call["message"] for call in composer.calls] == ["First", "Second"]
+        assert composer.calls[0]["chat_messages"] == []
+        assert composer.calls[1]["chat_messages"] == [
+            {"role": "user", "content": "First"},
+            {"role": "assistant", "content": "Reply to first"},
         ]
 
 

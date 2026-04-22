@@ -189,6 +189,27 @@ class TestReservedSecretNames:
         assert "VALID_KEY" in names
 
 
+class TestAllowlistNameValidation:
+    """Server secret names must satisfy the shared secret-name contract."""
+
+    @pytest.mark.parametrize(
+        ("name", "match"),
+        [
+            ("", "must not be empty"),
+            ("A/B", "must match"),
+            ("A" * 257, "must be <= 256"),
+        ],
+    )
+    def test_construction_rejects_malformed_allowlist_name(
+        self,
+        _fingerprint_key: None,
+        name: str,
+        match: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=match):
+            ServerSecretStore(allowlist=(name,))
+
+
 class TestFingerprintKeyAvailability:
     """has_secret and list_secrets must reflect fingerprint key readiness."""
 

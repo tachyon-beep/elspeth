@@ -19,7 +19,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from elspeth.contracts.secrets import SecretScope
-from elspeth.web.validation import has_visible_content
+from elspeth.web.validation import SECRET_NAME_MAX_LENGTH, SECRET_NAME_PATTERN, has_visible_content
 
 
 class _StrictResponse(BaseModel):
@@ -42,7 +42,7 @@ class CreateSecretRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(min_length=1, max_length=256, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    name: str = Field(min_length=1, max_length=SECRET_NAME_MAX_LENGTH, pattern=SECRET_NAME_PATTERN)
     value: str = Field(min_length=1, max_length=65536)
 
     @field_validator("value")

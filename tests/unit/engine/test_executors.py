@@ -206,6 +206,7 @@ def _make_transform(
             "declared_output_fields",
             "declared_input_fields",
             "input_schema",
+            "output_schema",
             "_on_start_called",
             "process",
             "passes_through_input",
@@ -220,6 +221,7 @@ def _make_transform(
     t.declared_output_fields = declared_output_fields or frozenset()
     t.declared_input_fields = declared_input_fields or frozenset()
     t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
+    t.output_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
     t._on_start_called = True
     t.passes_through_input = passes_through_input
     t.can_drop_rows = can_drop_rows
@@ -592,6 +594,35 @@ class TestTransformExecutor:
 
         assert captured_state_id == "state_001"
         assert captured_node_id == "node_1"
+
+    def test_output_schema_validation_rejects_success_row_before_completed(self) -> None:
+        """Schema-invalid emitted rows must fail the producing transform node."""
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+        token = _make_token()
+        transform = _make_transform()
+
+        from elspeth.contracts import PluginSchema
+
+        class StrictOutputSchema(PluginSchema):
+            processed: bool
+
+        output_contract = _make_output_contract()
+        transform.output_schema = StrictOutputSchema
+        transform.process.return_value = TransformResult.success(
+            make_row({"value": "out", "processed": "not-a-bool"}, contract=output_contract),
+            success_reason={"action": "test"},
+        )
+        ctx = make_context()
+
+        with pytest.raises(PluginContractViolation, match="output validation failed"):
+            executor.execute_transform(transform, token, ctx)
+
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args.kwargs
+        assert kwargs["status"] == NodeStateStatus.FAILED
+        assert kwargs["state_id"] == "state_001"
+        assert kwargs["error"].exception_type == "PluginContractViolation"
 
     # --- Error path (TransformResult.error) ---
 
@@ -4823,6 +4854,7 @@ class TestTransformExecutorBatchPath:
         # Build a concrete subclass to use as spec target — only needed for isinstance
         class _FakeBatchTransform(BatchTransformMixin):
             is_batch_aware = False
+            output_schema = _PermissiveSchema
 
             pass
 
@@ -4834,6 +4866,7 @@ class TestTransformExecutorBatchPath:
         t.declared_input_fields = frozenset()
         t.is_batch_aware = False
         t.input_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
+        t.output_schema = _PermissiveSchema  # Accepts any row — validation is a no-op
         t._on_start_called = True
         t._pool_size = pool_size
         t._batch_wait_timeout = batch_wait_timeout
