@@ -149,9 +149,23 @@ class NodeInfo:
     passes_through_input: bool = False
 
     def __post_init__(self) -> None:
+        component_type = self.node_type.name.lower()
+        component_id = self.node_id or None
+        if not self.node_id:
+            raise GraphValidationError(
+                "NodeInfo.node_id must not be empty",
+                component_id=component_id,
+                component_type=component_type,
+            )
+        if not self.plugin_name or not self.plugin_name.strip():
+            raise GraphValidationError(
+                f"NodeInfo.plugin_name must not be empty for node {self.node_id!r}",
+                component_id=component_id,
+                component_type=component_type,
+            )
         if len(self.node_id) > _NODE_ID_MAX_LENGTH:
             msg = f"node_id exceeds {_NODE_ID_MAX_LENGTH} characters: '{self.node_id}' (length={len(self.node_id)})"
-            raise GraphValidationError(msg, component_id=self.node_id, component_type=self.node_type.name.lower())
+            raise GraphValidationError(msg, component_id=self.node_id, component_type=component_type)
         # Offensive programming: declared_required_fields is sink-specific.
         # Catch the misuse at construction time rather than letting stray
         # data sit on a non-sink node until a future validator widens its
@@ -162,7 +176,7 @@ class NodeInfo:
                 f"node {self.node_id!r} has type {self.node_type.name} "
                 f"with declared_required_fields={sorted(self.declared_required_fields)!r}.",
                 component_id=self.node_id,
-                component_type=self.node_type.name.lower(),
+                component_type=component_type,
             )
         # Offensive programming: passes_through_input is for nodes that execute
         # a TransformProtocol plugin — TRANSFORM and AGGREGATION. Aggregations
@@ -175,7 +189,7 @@ class NodeInfo:
                 f"NodeInfo.passes_through_input is only meaningful for TRANSFORM or "
                 f"AGGREGATION nodes; node {self.node_id!r} has type {self.node_type.name}.",
                 component_id=self.node_id,
-                component_type=self.node_type.name.lower(),
+                component_type=component_type,
             )
         # NOTE: config is NOT frozen here because the builder mutates
         # output_schema_config on pass-through nodes (gates, coalesce) via

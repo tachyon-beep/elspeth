@@ -60,6 +60,11 @@ _ALLOWED_MODULE_PREFIXES: tuple[str, ...] = (
 _ExcT = TypeVar("_ExcT", bound=BaseException)
 
 
+def _module_is_allowed(module_name: str) -> bool:
+    """Return True when ``module_name`` is allowed to own Tier-1 classes."""
+    return any(module_name.startswith(p) or module_name == p.rstrip(".") for p in _ALLOWED_MODULE_PREFIXES)
+
+
 def tier_1_error(_cls: type | None = None, *, reason: str, caller_module: str):  # type: ignore[no-untyped-def]
     """Factory returning a decorator that registers ``cls`` as Tier-1.
 
@@ -118,11 +123,23 @@ def _register_with_module_prefix[ExcT: BaseException](*, cls: type[ExcT], reason
         )
     if not (isinstance(cls, type) and issubclass(cls, BaseException)):
         raise TypeError(f"@tier_1_error applied to {cls!r} — must be a BaseException subclass")
-    if not any(caller_module.startswith(p) or caller_module == p.rstrip(".") for p in _ALLOWED_MODULE_PREFIXES):
+    if not _module_is_allowed(caller_module):
         raise PermissionError(
             f"@tier_1_error used from {caller_module!r}; only allowed from "
             f"{_ALLOWED_MODULE_PREFIXES!r}. Plugin modules cannot elevate their "
             f"own exceptions to Tier-1 — request ADR review instead."
+        )
+    class_module = cls.__module__
+    if not isinstance(class_module, str) or not class_module.strip():
+        raise TypeError(
+            f"@tier_1_error applied to {cls!r} with invalid __module__={class_module!r}; "
+            "Tier-1 registration requires a non-empty module name."
+        )
+    if not _module_is_allowed(class_module):
+        raise PermissionError(
+            f"@tier_1_error cannot register {cls.__name__!r} from {class_module!r}; only "
+            f"{_ALLOWED_MODULE_PREFIXES!r} may own Tier-1 exceptions. Plugin modules "
+            "cannot elevate their own exceptions to Tier-1 — request ADR review instead."
         )
     if cls in _REGISTRY:
         if _REASONS[cls] != reason:

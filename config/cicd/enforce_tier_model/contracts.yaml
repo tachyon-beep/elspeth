@@ -250,20 +250,25 @@ allow_hits:
   owner: architecture
   reason: Optional lookup for original name - new fields from transforms may not have input mapping
   safety: Fallback to output field's original_name is correct behavior for transform-added fields
-- key: contracts/tier_registry.py:R5:tier_1_error:fp=3ac7f96f9f6019f9
+- key: contracts/tier_registry.py:R5:tier_1_error:fp=1e3e236bcd0531b7
   owner: architecture
   reason: Decorator API boundary — isinstance(reason, str) validates the caller-supplied reason kwarg; enforces non-empty string contract before the value is stored in the registry
   safety: Raises ValueError immediately on empty/non-string reason; no silent coercion or data loss
   expires: null
-- key: contracts/tier_registry.py:R5:tier_1_error:fp=004f18e168c5ebdc
+- key: contracts/tier_registry.py:R5:tier_1_error:fp=b0a3b3a08431fee6
   owner: architecture
   reason: Decorator API boundary (ADR-010 M8, issue elspeth-3af772b9e3) — isinstance(caller_module, str) validates the caller-supplied caller_module kwarg; the value feeds the module-prefix allowlist in _register_with_module_prefix, so empty-string or non-string values must crash before reaching allowlist spoofing
   safety: Raises ValueError immediately on empty/non-string caller_module; the scanner rule TDE2 also rejects non-literal values statically
   expires: null
-- key: contracts/tier_registry.py:R5:_register_with_module_prefix:fp=c24464f649abdb00
+- key: contracts/tier_registry.py:R5:_register_with_module_prefix:fp=112e155f2bbef50c
   owner: architecture
   reason: Decorator API boundary — isinstance(cls, type) and issubclass(cls, BaseException) validates that the decorated object is a BaseException subclass; this is an offensive invariant check, not defensive coercion
   safety: Raises TypeError immediately on non-exception class; no silent fallback
+  expires: null
+- key: contracts/tier_registry.py:R5:_register_with_module_prefix:fp=bdf708ae2b858423
+  owner: architecture
+  reason: Decorator API boundary — isinstance(class_module, str) validates the registered exception class exposes a concrete owning module string before the allowlist checks enforce Tier-1 ownership
+  safety: Raises TypeError immediately on invalid module metadata and PermissionError on disallowed module ownership; no silent fallback
   expires: null
 - key: contracts/declaration_contracts.py:R5:PostEmissionOutputs:__post_init__:fp=3cf77dfbdbc53693
   owner: architecture

@@ -58,6 +58,27 @@ def test_subclass_must_implement_to_audit_dict() -> None:
         _Incomplete("x")
 
 
+def test_subclass_cannot_bypass_abstract_check_with_non_cooperative_init() -> None:
+    """Direct ``RuntimeError.__init__`` calls must not bypass abstract enforcement."""
+
+    class _Incomplete(AuditEvidenceBase, RuntimeError):
+        def __init__(self, message: str) -> None:
+            RuntimeError.__init__(self, message)
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Incomplete("x")
+
+
+def test_subclass_cannot_bypass_abstract_check_with_reversed_base_order() -> None:
+    """Reversing the MRO must not bypass abstract enforcement."""
+
+    class _Incomplete(RuntimeError, AuditEvidenceBase):
+        pass
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Incomplete("x")
+
+
 def test_base_class_cannot_be_instantiated() -> None:
     with pytest.raises(TypeError):
         AuditEvidenceBase()  # type: ignore[abstract]

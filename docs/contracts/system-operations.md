@@ -598,7 +598,6 @@ transforms:
 | `count` | N tokens accumulated | First trigger to fire wins |
 | `timeout_seconds` | Duration elapsed since batch start | Checked before each row |
 | `condition` | Row matches expression | Immediate flush |
-| `manual` | Explicitly triggered via API/CLI | On-demand flush |
 | End-of-source | Source exhausted | Always checked (implicit) |
 
 ### Aggregation Execution Flow

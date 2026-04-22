@@ -743,6 +743,12 @@ class TestBatchLoader:
         with pytest.raises(ValueError):
             loader.load(sa_row)
 
+    def test_manual_trigger_type_raises_value_error(self) -> None:
+        sa_row = self._make_batch_row(trigger_type="manual")
+        loader = BatchLoader()
+        with pytest.raises(ValueError):
+            loader.load(sa_row)
+
 
 # ---------------------------------------------------------------------------
 # NodeStateLoader (discriminated union -- most complex)

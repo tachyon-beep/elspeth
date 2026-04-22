@@ -66,20 +66,25 @@ per_file_rules:
   expires: null
   max_hits: 2
 allow_hits:
-- key: engine/dependency_resolver.py:R1:_load_depends_on:fp=c863276501dbaaa5
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=f936e7a8efffb70d
   owner: architecture
-  reason: 'Tier 3 boundary: reads raw YAML from operator-authored settings files for cycle detection. depends_on is optional — absence means no dependencies.'
-  safety: Returns empty list on missing key; only used for lightweight cycle detection, not config validation
+  reason: 'Tier 3 boundary: raw operator-authored YAML for cycle detection must be a mapping before key access proceeds.'
+  safety: Raises ValueError with file path and observed top-level type on malformed input; no coercion
   expires: null
-- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=3ba17dbe0c7fd5a8
+- key: engine/dependency_resolver.py:R1:_load_depends_on:fp=0ecc84f5b6b35d41
   owner: architecture
-  reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate structure before use'
-  safety: Raises ValueError with file path and type info on malformed input
+  reason: 'Tier 3 boundary: depends_on is optional in operator-authored YAML, so .get() preserves the explicit no-dependencies default for cycle detection.'
+  safety: Missing depends_on yields []; malformed present values are still validated immediately by subsequent type checks
   expires: null
-- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=d5f0130e6d858b93
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=264c3e80726cfebb
   owner: architecture
-  reason: 'Tier 3 validation: raw YAML from operator files — isinstance checks validate each entry is a mapping'
-  safety: Raises ValueError with index and type info on malformed entry
+  reason: 'Tier 3 validation: depends_on from raw operator YAML must be a list before entry-level validation and contract normalization run.'
+  safety: Raises ValueError with file path and observed type on malformed input; no coercion
+  expires: null
+- key: engine/dependency_resolver.py:R5:_load_depends_on:fp=e35844f983fac115
+  owner: architecture
+  reason: 'Tier 3 validation: each depends_on entry from raw operator YAML must be a mapping before DependencyConfig.model_validate() can enforce the schema.'
+  safety: Raises ValueError with entry index and observed type on malformed input; no coercion
   expires: null
 - key: engine/coalesce_executor.py:R5:CoalesceExecutor:_execute_merge:fp=2116f4bed916112f
   owner: architecture

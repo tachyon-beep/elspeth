@@ -14,8 +14,8 @@ This is L0 contracts — no imports from core, engine, or plugins.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from typing import Any, cast
 
 
 class AuditEvidenceBase(ABC):
@@ -29,28 +29,40 @@ class AuditEvidenceBase(ABC):
     time (Tier-1) — the canonical-JSON serializer crashes on non-primitive
     values.
 
-    Implementation note: ``__init__`` explicitly re-enforces abstract-method
-    rejection. CPython 3.13 routes ``BaseException.__new__`` through a C-level
-    fast-path that bypasses the ``ABCMeta.__call__`` abstract-method guard, so
-    without this guard a subclass that inherits both ``AuditEvidenceBase`` and
-    any exception class can be instantiated without implementing
-    ``to_audit_dict``. The guard restores the invariant that ABC promises.
+    Implementation note: CPython 3.13 routes ``BaseException.__new__`` through
+    a C-level fast-path that bypasses the ``ABCMeta.__call__`` abstract-method
+    guard for exception subclasses. ``AuditEvidenceBase`` therefore installs a
+    checked ``__init__`` wrapper on every subclass via ``__init_subclass__``
+    and keeps a direct ``__init__`` guard for the base class itself. That
+    restores the invariant even when a subclass uses non-cooperative ``__init__``
+    logic or orders an exception base before ``AuditEvidenceBase`` in the MRO.
     """
 
-    def __init__(self, *args: object, **kwargs: object) -> None:
-        # Re-enforce ABC abstract-method rejection for exception subclasses.
-        # CPython 3.13 routes BaseException.__new__ through a C-level fast-path
-        # that bypasses ABCMeta.__call__'s abstract-method guard, so a subclass
-        # that inherits both AuditEvidenceBase and any exception class can be
-        # instantiated without this explicit check.
-        # Direct attribute access is safe: ABCMeta always sets __abstractmethods__
-        # on every class in the hierarchy (empty frozenset when all are implemented).
-        abstract_methods: frozenset[str] = type(self).__abstractmethods__
+    _InitCallable = Callable[..., None]
+
+    @staticmethod
+    def _raise_if_abstract(cls: type[object]) -> None:
+        # Direct attribute access is safe: ABCMeta always sets
+        # ``__abstractmethods__`` on every class in the hierarchy (empty
+        # frozenset when all are implemented).
+        abstract_methods = cast(frozenset[str], cast(Any, cls).__abstractmethods__)
         if abstract_methods:
             names = ", ".join(sorted(abstract_methods))
-            raise TypeError(
-                f"Can't instantiate abstract class {type(self).__name__} without an implementation for abstract method(s) {names}"
-            )
+            raise TypeError(f"Can't instantiate abstract class {cls.__name__} without an implementation for abstract method(s) {names}")
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+
+        original_init = cast(AuditEvidenceBase._InitCallable, cls.__init__)
+
+        def checked_init(self: object, *args: object, **inner_kwargs: object) -> None:
+            AuditEvidenceBase._raise_if_abstract(type(self))
+            original_init(self, *args, **inner_kwargs)
+
+        cls.__init__ = checked_init  # type: ignore[method-assign]
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        AuditEvidenceBase._raise_if_abstract(type(self))
         super().__init__(*args, **kwargs)
 
     @abstractmethod

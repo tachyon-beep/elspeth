@@ -44,3 +44,17 @@ class TestEnumCoercion:
 
         with pytest.raises(ValueError):
             RunStatus("invalid")
+
+
+class TestTriggerType:
+    """TriggerType must match the set of trigger causes the engine can actually emit."""
+
+    def test_values_match_current_engine_producers(self) -> None:
+        from elspeth.contracts import TriggerType
+
+        assert {trigger.value for trigger in TriggerType} == {
+            "count",
+            "timeout",
+            "condition",
+            "end_of_source",
+        }

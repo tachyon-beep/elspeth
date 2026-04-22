@@ -3744,6 +3744,36 @@ class TestNodeStateGuard:
         assert kwargs["error"].phase == "executor_post_process"
         assert kwargs["duration_ms"] >= 0
 
+    def test_incomplete_audit_evidence_instantiation_inside_guard_records_failed(self) -> None:
+        """Construction-time abstract failures still preserve the guard's terminal-state invariant."""
+        from elspeth.contracts.audit_evidence import AuditEvidenceBase
+        from elspeth.engine.executors import NodeStateGuard
+
+        class _Incomplete(AuditEvidenceBase, RuntimeError):
+            def __init__(self, message: str) -> None:
+                RuntimeError.__init__(self, message)
+
+        factory = _make_factory()
+        guard = NodeStateGuard(
+            factory.execution,
+            token_id="tok_1",
+            node_id="node_1",
+            run_id="run_1",
+            step_index=1,
+            input_data={"v": 1},
+        )
+
+        with pytest.raises(TypeError, match="abstract"), guard:
+            raise _Incomplete("test crash")
+
+        factory.execution.complete_node_state.assert_called_once()
+        kwargs = factory.execution.complete_node_state.call_args[1]
+        assert kwargs["status"] == NodeStateStatus.FAILED
+        assert kwargs["state_id"] == "state_001"
+        assert kwargs["error"].exception_type == "TypeError"
+        assert "abstract" in kwargs["error"].exception
+        assert kwargs["error"].phase == "executor_post_process"
+
     def test_explicit_complete_prevents_auto_fail(self) -> None:
         """If caller calls complete() before exception, guard is no-op."""
         from elspeth.engine.executors import NodeStateGuard

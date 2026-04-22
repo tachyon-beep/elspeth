@@ -116,6 +116,24 @@ def test_module_outside_allowlist_raises() -> None:
         )
 
 
+def test_plugin_owned_class_cannot_spoof_allowed_caller_module() -> None:
+    """The registry must bind Tier-1 ownership to the class's real module."""
+    from elspeth.contracts.tier_registry import _register_with_module_prefix
+
+    plugin_error = type(
+        "PluginDefinedError",
+        (Exception,),
+        {"__module__": "elspeth.plugins.transforms.evil"},
+    )
+
+    with pytest.raises(PermissionError, match="Plugin modules cannot elevate"):
+        _register_with_module_prefix(
+            cls=plugin_error,
+            reason="plugin spoof attempt",
+            caller_module="elspeth.core.fake",
+        )
+
+
 def test_registration_after_freeze_raises() -> None:
     from elspeth.contracts.tier_registry import (
         FrameworkBugError,

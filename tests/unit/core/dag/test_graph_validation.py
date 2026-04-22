@@ -113,6 +113,40 @@ class TestNodeInfoNodeIdLengthValidation:
             )
 
 
+class TestNodeInfoIdentifierValidation:
+    """NodeInfo must reject blank identifiers before they reach the graph/audit path."""
+
+    def test_node_info_rejects_empty_node_id(self) -> None:
+        with pytest.raises(GraphValidationError, match="node_id must not be empty"):
+            NodeInfo(
+                node_id=NodeID(""),
+                node_type=NodeType.TRANSFORM,
+                plugin_name="passthrough",
+            )
+
+    def test_node_info_rejects_empty_plugin_name(self) -> None:
+        with pytest.raises(GraphValidationError, match="plugin_name must not be empty"):
+            NodeInfo(
+                node_id=NodeID("node_1"),
+                node_type=NodeType.TRANSFORM,
+                plugin_name="",
+            )
+
+    def test_node_info_rejects_whitespace_only_plugin_name(self) -> None:
+        with pytest.raises(GraphValidationError, match="plugin_name must not be empty"):
+            NodeInfo(
+                node_id=NodeID("node_1"),
+                node_type=NodeType.TRANSFORM,
+                plugin_name="   ",
+            )
+
+    def test_execution_graph_add_node_rejects_blank_source_identifiers(self) -> None:
+        graph = ExecutionGraph()
+
+        with pytest.raises(GraphValidationError, match="node_id must not be empty"):
+            graph.add_node("", node_type=NodeType.SOURCE, plugin_name="")
+
+
 # ---------------------------------------------------------------------------
 # Gap 3b: NodeInfo.declared_required_fields sink-only invariant
 # ---------------------------------------------------------------------------

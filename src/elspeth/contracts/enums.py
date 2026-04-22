@@ -65,14 +65,12 @@ class TriggerType(StrEnum):
         TIMEOUT: Batch reached configured time limit
         CONDITION: Custom condition expression evaluated to true
         END_OF_SOURCE: Source exhausted, flush remaining rows
-        MANUAL: Explicitly triggered via API/CLI
     """
 
     COUNT = "count"
     TIMEOUT = "timeout"
     CONDITION = "condition"
     END_OF_SOURCE = "end_of_source"
-    MANUAL = "manual"
 
 
 class NodeType(StrEnum):
