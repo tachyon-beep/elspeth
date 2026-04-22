@@ -116,10 +116,15 @@ allow_hits:
   reason: Offensive isinstance — validates plugin return type to crash with PluginContractViolation instead of opaque AttributeError
   safety: Crashes immediately with clear error identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=c7e3ef2a30bfe6a1
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=c258325b17ffff20
   owner: bugfix
-  reason: Offensive isinstance — validates failsink return type to crash with PluginContractViolation instead of opaque AttributeError
-  safety: Crashes immediately with clear error identifying the buggy failsink plugin
+  reason: Offensive isinstance — validates failsink.write() returns SinkWriteResult, crashing with PluginContractViolation identifying the buggy failsink plugin instead of propagating an opaque AttributeError from the downstream artifact access
+  safety: Crashes immediately with PluginContractViolation naming the failsink and observed return type; no silent coercion
+  expires: null
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=8943e75f98e1c788
+  owner: bugfix
+  reason: Offensive isinstance — validates the artifact attached to the failsink's SinkWriteResult is an ArtifactDescriptor, crashing with PluginContractViolation identifying the buggy failsink plugin instead of propagating an opaque AttributeError from later artifact_path access
+  safety: Crashes immediately with PluginContractViolation naming the failsink and observed artifact type; no silent coercion
   expires: null
 - key: engine/processor.py:TC:_module_:fp=873d5f90adf363e0
   owner: architecture
@@ -135,6 +140,11 @@ allow_hits:
   owner: architecture
   reason: Best-effort TokenCompleted telemetry after batch-flush FAILED audit completion must not mask the original batch-flush violation
   safety: Telemetry runs only after the FAILED outcome is recorded for that token; failures are logged and the original violation continues to propagate
+  expires: '2026-07-10'
+- key: engine/processor.py:R4:RowProcessor:_handle_flush_error:fp=71d8fabe1b48000a
+  owner: architecture
+  reason: Best-effort TokenCompleted telemetry after batch-flush FAILED audit completion in _handle_flush_error — same pattern as the sibling _record_flush_violation entry; telemetry runs only after the FAILED recorder write succeeds, and its failure must not strand buffered tokens or mask the original flush error.
+  safety: Telemetry runs only after the per-token FAILED outcome is durably recorded; failures are logged with structured context and the original batch flush error continues to propagate via RowResult(outcome=FAILED, error=failure)
   expires: '2026-07-10'
 - key: engine/processor.py:R4:RowProcessor:_route_empty_emission_results:fp=e70811d518b4d79a
   owner: architecture

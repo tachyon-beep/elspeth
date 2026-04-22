@@ -489,6 +489,46 @@ class TestTransformExecutor:
         assert kwargs["outcome"] == RowOutcome.FAILED
         assert kwargs["context"]["exception_type"] == "DeclaredRequiredInputFieldsViolation"
 
+    def test_type_coerce_fixed_schema_accepts_pre_coercion_input_and_succeeds(self) -> None:
+        """TypeCoerce must validate input before coercion and output after coercion."""
+        from elspeth.plugins.transforms.type_coerce import TypeCoerce
+
+        factory = _make_factory()
+        executor = TransformExecutor(factory.execution, _make_span_factory(), _make_step_resolver(), data_flow=factory.data_flow)
+        transform = TypeCoerce(
+            {
+                "schema": {"mode": "fixed", "fields": ["quantity: str"]},
+                "conversions": [{"field": "quantity", "to": "int"}],
+            }
+        )
+        transform.node_id = "type_coerce_1"
+        transform.on_error = "discard"
+        token = _make_token(
+            data={"quantity": "42"},
+            contract=SchemaContract(
+                mode="FIXED",
+                fields=(
+                    make_field(
+                        "quantity",
+                        python_type=str,
+                        original_name="quantity",
+                        required=True,
+                        source="declared",
+                    ),
+                ),
+                locked=True,
+            ),
+        )
+        ctx = make_context()
+        transform.on_start(ctx)
+
+        result, updated_token, error_sink = executor.execute_transform(transform, token, ctx)
+
+        assert result.status == "success"
+        assert error_sink is None
+        assert updated_token.row_data["quantity"] == 42
+        assert type(updated_token.row_data["quantity"]) is int
+
     # --- Success path ---
 
     def test_successful_transform_returns_result_token_none(self) -> None:

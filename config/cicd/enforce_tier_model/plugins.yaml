@@ -135,6 +135,12 @@ per_file_rules:
   reason: Config discrimination and field type selection for scanning
   expires: null
   max_hits: 4
+- pattern: plugins/transforms/type_coerce.py
+  rules:
+  - R1
+  reason: "Optional per-field coercion mapping — conversion_targets / target_types map only fields the operator explicitly requested coercion for. dict.get(field.name, field.field_type) with the original field type as default is identity semantics (unchanged fields pass through) and dict.get() on conversion_targets with explicit None check distinguishes configured vs. unconfigured fields — this IS the discriminator that controls whether type coercion runs. Neither .get() call is defensive bug-hiding."
+  expires: null
+  max_hits: 2
 allow_hits:
 - key: plugins/infrastructure/schema_factory.py:R6:_find_non_finite_value_path:fp=b5937945437c8045
   owner: bugfix
@@ -210,11 +216,21 @@ allow_hits:
   reason: setdefault for lazy initialization
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=281f28276f1c2b45
+- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_batch_locked:fp=4c7380952efbd74a
   owner: bugfix
   reason: Thread pool may be shut down concurrently during submit(); RuntimeError is translated into deterministic per-row shutdown results so submission-order slots are still completed
   safety: Catch scope is RuntimeError-only; reserved buffer slots are completed with explicit shutdown_requested errors while unrelated exception types still propagate
   expires: '2026-05-17'
+- key: plugins/infrastructure/pooling/executor.py:R5:PooledExecutor:_build_retry_timeout_result:fp=01bb7c2c355b4459
+  owner: bugfix
+  reason: Nominal discriminated-union dispatch — retryable_error is PluginRetryableError | CapacityError and only CapacityError carries a status_code. isinstance narrows the union so the status_code field is only populated when it exists, rather than probing with getattr.
+  safety: Non-CapacityError branch omits status_code entirely (explicit None semantics); no silent coercion or fabrication
+  expires: null
+- key: plugins/infrastructure/pooling/executor.py:R6:PooledExecutor:_execute_single:fp=0fa942b6de024d61
+  owner: bugfix
+  reason: CapacityError is one arm of the retryable-error control flow — caught so the worker can release the semaphore, throttle, and retry within the capacity-retry budget. This is explicit retry orchestration, not silent swallowing.
+  safety: CapacityError is assigned to retryable_error and drives the retry loop; if the retry budget expires it is raised as a retry_timeout TransformResult via _build_retry_timeout_result, and if interrupted it surfaces via _build_interrupted_result. No path silently drops the error.
+  expires: null
 - key: plugins/infrastructure/batching/mixin.py:R6:BatchTransformMixin:accept_row:fp=e7a832f8c64e2c4e
   owner: bugfix
   reason: Thread-pool submit can race with shutdown after the row has already been admitted to the FIFO buffer

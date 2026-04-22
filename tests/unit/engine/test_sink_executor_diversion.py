@@ -580,6 +580,96 @@ class TestFailsinkCleanup:
             )
 
 
+class TestFailsinkCleanupEnvelope:
+    """Regression: cleanup must cover all failsink-mode raises after states exist."""
+
+    def test_failsink_reset_diversion_log_failure_cleans_primary_divert_states(self) -> None:
+        """Failsink setup errors must terminalize pre-opened primary divert states."""
+        executor, execution, _data_flow = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink._reset_diversion_log.side_effect = RuntimeError("failsink reset boom")
+        tokens = [_make_token("t0")]
+
+        with pytest.raises(RuntimeError, match="failsink reset boom"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,  # type: ignore[arg-type]
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+
+        failed_calls = [c for c in execution.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 1
+
+    def test_invalid_failsink_result_type_cleans_primary_divert_states(self) -> None:
+        """Malformed failsink return values must fail loudly after cleanup."""
+        executor, execution, _data_flow = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        failsink.write.return_value = object()
+        tokens = [_make_token("t0")]
+
+        with pytest.raises(PluginContractViolation, match=r"returned object, expected SinkWriteResult"):
+            executor.write(
+                sink=sink,
+                tokens=tokens,  # type: ignore[arg-type]
+                ctx=MagicMock(run_id="run-1"),
+                step_in_pipeline=5,
+                sink_name="primary",
+                pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+                failsink=failsink,
+                failsink_name="csv_failsink",
+                failsink_edge_id="edge-failsink-1",
+            )
+
+        failed_calls = [c for c in execution.complete_node_state.call_args_list if c.kwargs.get("status") == NodeStateStatus.FAILED]
+        assert len(failed_calls) == 1
+
+
+class TestFailsinkOperationAndSpanRecording:
+    """Failsink writes are real sink I/O and need their own operation/span records."""
+
+    def test_failsink_write_records_separate_operation_and_sink_span(self) -> None:
+        """Diverted writes should produce primary and failsink operation/span pairs."""
+        executor, execution, _data_flow = _make_executor()
+        diversions = (RowDiversion(row_index=0, reason="bad", row_data={"x": 1}),)
+        sink = _make_sink(diversions=diversions, on_write_failure="csv_failsink")
+        failsink = _make_failsink()
+        tokens = [_make_token("t0")]
+        ctx = MagicMock(run_id="run-1")
+        ctx.operation_id = None
+
+        executor.write(
+            sink=sink,
+            tokens=tokens,  # type: ignore[arg-type]
+            ctx=ctx,
+            step_in_pipeline=5,
+            sink_name="primary",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            failsink=failsink,
+            failsink_name="csv_failsink",
+            failsink_edge_id="edge-failsink-1",
+        )
+
+        assert execution.begin_operation.call_count == 2
+        operation_node_ids = [call.kwargs["node_id"] for call in execution.begin_operation.call_args_list]
+        assert operation_node_ids == ["node-primary", "node-failsink"]
+
+        assert executor._spans.sink_span.call_count == 2
+        span_names = [call.args[0] for call in executor._spans.sink_span.call_args_list]
+        span_node_ids = [call.kwargs["node_id"] for call in executor._spans.sink_span.call_args_list]
+        assert span_names == ["primary", "csv_failsink"]
+        assert span_node_ids == ["node-primary", "node-failsink"]
+
+
 class TestNonContiguousDiversions:
     """Verify correct partitioning when diverted rows are non-contiguous."""
 

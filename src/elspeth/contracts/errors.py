@@ -906,6 +906,19 @@ class SinkRequiredFieldsViolation(DeclarationContractViolation):
     payload_schema: ClassVar[type] = SinkRequiredFieldsPayload
 
 
+class SchemaConfigFieldMetadataMismatch(TypedDict):
+    """Per-field metadata drift evidence for ADR-014 schema-mode mismatches."""
+
+    field: Required[str]
+    expected_type: Required[str]
+    observed_type: Required[str]
+    expected_required: Required[bool]
+    observed_required: Required[bool]
+    expected_nullable: Required[bool]
+    observed_nullable: Required[bool]
+    observed_present: Required[bool]
+
+
 class SchemaConfigModePayload(TypedDict):
     """Audit payload for ADR-014 schema-mode/runtime-semantic mismatches."""
 
@@ -913,7 +926,10 @@ class SchemaConfigModePayload(TypedDict):
     observed_mode: Required[str]
     declared_locked: Required[bool]
     observed_locked: Required[bool]
+    runtime_observed_fields: NotRequired[list[str]]
+    missing_required_fields: NotRequired[list[str]]
     undeclared_extra_fields: NotRequired[list[str]]
+    field_metadata_mismatches: NotRequired[list[SchemaConfigFieldMetadataMismatch]]
 
 
 @tier_1_error(

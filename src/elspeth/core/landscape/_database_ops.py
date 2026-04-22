@@ -15,27 +15,51 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.database import LandscapeDB
 
 
-class DatabaseOps:
-    """Helper for common database operations.
+class ReadOnlyDatabaseOps:
+    """Helper for read-only database operations.
 
-    Reduces boilerplate in recorder methods by centralizing
-    connection management.
+    Uses the database's read-only connection path so query helpers cannot
+    mutate the audit store, even if a caller passes a write-capable statement.
     """
 
     def __init__(self, db: "LandscapeDB") -> None:
         self._db = db
 
     def execute_fetchone(self, query: Executable) -> Row[Any] | None:
-        """Execute query and return single row or None."""
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            return result.fetchone()
+        """Execute a single-row query.
+
+        Returns the row when exactly one matches, ``None`` when no rows match,
+        and raises ``LandscapeRecordError`` when multiple rows match.
+        """
+        try:
+            with self._db.read_only_connection() as conn:
+                result = conn.execute(query)
+                rows = result.fetchmany(2)
+        except SQLAlchemyError as exc:
+            raise LandscapeRecordError(f"execute_fetchone failed — database rejected audit query: {type(exc).__name__}: {exc}") from exc
+
+        if len(rows) > 1:
+            raise LandscapeRecordError("execute_fetchone matched multiple rows — single-row audit query is ambiguous")
+        if not rows:
+            return None
+        return rows[0]
 
     def execute_fetchall(self, query: Executable) -> list[Row[Any]]:
-        """Execute query and return all rows."""
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            return list(result.fetchall())
+        """Execute a read-only query and return all rows."""
+        try:
+            with self._db.read_only_connection() as conn:
+                result = conn.execute(query)
+                return list(result.fetchall())
+        except SQLAlchemyError as exc:
+            raise LandscapeRecordError(f"execute_fetchall failed — database rejected audit query: {type(exc).__name__}: {exc}") from exc
+
+
+class DatabaseOps(ReadOnlyDatabaseOps):
+    """Helper for common database operations.
+
+    Reduces boilerplate in recorder methods by centralizing
+    connection management.
+    """
 
     def execute_insert(self, stmt: Executable, *, context: str = "") -> None:
         """Execute insert statement.

@@ -78,8 +78,11 @@ from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
 from elspeth.plugins.infrastructure.pooling import CapacityError
 
-# Iteration guard to prevent infinite loops from bugs
-MAX_WORK_QUEUE_ITERATIONS = 10_000
+# Iteration guard to prevent infinite loops from bugs.
+# This counts dequeued work items, so it must exceed the largest supported
+# single-row fan-out; otherwise legal expansion trips the safety valve before
+# the final child runs.
+MAX_WORK_QUEUE_ITERATIONS = 100_000
 logger = logging.getLogger(__name__)
 
 type _SourceBoundaryFailure = (
@@ -673,12 +676,35 @@ class RowProcessor:
         failure = FailureInfo(exception_type="TransformError", message=fctx.error_msg)
 
         for token in fctx.buffered_tokens:
-            self._data_flow.record_token_outcome(
-                ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
-                outcome=RowOutcome.FAILED,
-                error_hash=error_hash,
-            )
-            self._emit_token_completed(token, RowOutcome.FAILED)
+            try:
+                self._data_flow.record_token_outcome(
+                    ref=TokenRef(token_id=token.token_id, run_id=self._run_id),
+                    outcome=RowOutcome.FAILED,
+                    error_hash=error_hash,
+                )
+            except LandscapeRecordError as record_failure:
+                raise AuditIntegrityError(
+                    f"Failed to record FAILED outcome for token {token.token_id!r} "
+                    f"during batch flush failure handling "
+                    f"(transform={fctx.transform.name!r}, node={fctx.node_id!r}). "
+                    f"Audit trail is INCOMPLETE — some buffered tokens may already "
+                    f"be terminalized while others remain BUFFERED. "
+                    f"Recorder failure: {type(record_failure).__name__}: {record_failure}. "
+                    f"Original flush error: {fctx.error_msg}"
+                ) from record_failure
+            try:
+                self._emit_token_completed(token, RowOutcome.FAILED)
+            except Exception as telemetry_failure:
+                logger.exception(
+                    "TokenCompleted telemetry failed after batch-flush FAILED audit completion; preserving batch failure outcomes",
+                    extra={
+                        "run_id": self._run_id,
+                        "token_id": token.token_id,
+                        "transform_node_id": fctx.node_id,
+                        "transform_name": fctx.transform.name,
+                        "telemetry_error_type": type(telemetry_failure).__name__,
+                    },
+                )
             results.append(RowResult(token=token, final_data=token.row_data, outcome=RowOutcome.FAILED, error=failure))
 
         return tuple(results)

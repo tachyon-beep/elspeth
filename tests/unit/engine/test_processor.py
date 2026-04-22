@@ -58,6 +58,7 @@ from elspeth.engine.retry import RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.infrastructure.clients.llm import LLMClientError
 from elspeth.plugins.infrastructure.pooling import CapacityError
+from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
 from elspeth.testing import make_contract, make_pipeline_row, make_row, make_source_row, make_token_info
 from tests.fixtures.factories import make_context
 from tests.fixtures.landscape import make_recorder_with_run
@@ -886,6 +887,100 @@ class TestProcessRowNoTransforms:
         assert mock_record_token_outcome.call_count == 2
         recorded_refs = {call.kwargs["ref"].token_id for call in mock_record_token_outcome.call_args_list}
         assert recorded_refs == {"token-a", "token-b"}
+
+    def test_handle_flush_error_telemetry_failure_does_not_interrupt_failed_outcomes(self) -> None:
+        """Batch-flush failure terminalization must continue after telemetry errors."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        transform = _make_mock_transform(node_id="aggregate-1", name="batch-transform")
+        token_a = make_token_info(row_id="row-a", token_id="token-a", data={"value": 1})
+        token_b = make_token_info(row_id="row-b", token_id="token-b", data={"value": 2})
+        token_c = make_token_info(row_id="row-c", token_id="token-c", data={"value": 3})
+        fctx = _FlushContext(
+            node_id=NodeID("aggregate-1"),
+            transform=transform,
+            settings=AggregationSettings(
+                name="agg",
+                plugin="batch-plugin",
+                input="source",
+                on_error="discard",
+                trigger={"count": 3},
+            ),
+            buffered_tokens=(token_a, token_b, token_c),
+            batch_id="batch-1",
+            error_msg="batch flush failed",
+            expand_parent_token=token_a,
+            triggering_token=token_c,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        with (
+            patch.object(factory.data_flow, "record_token_outcome") as mock_record_token_outcome,
+            patch.object(
+                processor,
+                "_emit_token_completed",
+                side_effect=[None, RuntimeError("telemetry down"), None],
+            ),
+        ):
+            results = processor._handle_flush_error(fctx)
+
+        assert mock_record_token_outcome.call_count == 3
+        recorded_refs = [call.kwargs["ref"].token_id for call in mock_record_token_outcome.call_args_list]
+        assert recorded_refs == ["token-a", "token-b", "token-c"]
+        assert tuple(result.token.token_id for result in results) == ("token-a", "token-b", "token-c")
+        assert tuple(result.outcome for result in results) == (
+            RowOutcome.FAILED,
+            RowOutcome.FAILED,
+            RowOutcome.FAILED,
+        )
+
+    def test_handle_flush_error_recorder_failure_raises_audit_integrity_error(self) -> None:
+        """Recorder failure during batch-flush terminalization must crash loudly."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        transform = _make_mock_transform(node_id="aggregate-1", name="batch-transform")
+        token_a = make_token_info(row_id="row-a", token_id="token-a", data={"value": 1})
+        token_b = make_token_info(row_id="row-b", token_id="token-b", data={"value": 2})
+        token_c = make_token_info(row_id="row-c", token_id="token-c", data={"value": 3})
+        fctx = _FlushContext(
+            node_id=NodeID("aggregate-1"),
+            transform=transform,
+            settings=AggregationSettings(
+                name="agg",
+                plugin="batch-plugin",
+                input="source",
+                on_error="discard",
+                trigger={"count": 3},
+            ),
+            buffered_tokens=(token_a, token_b, token_c),
+            batch_id="batch-1",
+            error_msg="batch flush failed",
+            expand_parent_token=token_a,
+            triggering_token=token_c,
+            coalesce_node_id=None,
+            coalesce_name=None,
+        )
+
+        attempted_refs: list[str] = []
+
+        def fail_on_second_record(*args: Any, **kwargs: Any) -> None:
+            token_id = kwargs["ref"].token_id
+            attempted_refs.append(token_id)
+            if token_id == "token-b":
+                raise LandscapeRecordError("audit DB down")
+
+        with (
+            patch.object(factory.data_flow, "record_token_outcome", side_effect=fail_on_second_record),
+            pytest.raises(
+                AuditIntegrityError,
+                match=r"Failed to record FAILED outcome for token 'token-b'",
+            ) as exc_info,
+        ):
+            processor._handle_flush_error(fctx)
+
+        assert attempted_refs == ["token-a", "token-b"]
+        assert isinstance(exc_info.value.__cause__, LandscapeRecordError)
 
     def test_empty_batch_flush_telemetry_failure_does_not_interrupt_dropped_outcomes(self) -> None:
         """Zero-row batch flush must still terminalize every buffered token if telemetry fails."""
@@ -2355,6 +2450,33 @@ class TestDrainWorkQueueIterationGuard:
                 WorkItem(token=token, current_node_id=NodeID("source-0")),
                 ctx=ctx,
             )
+
+    def test_iteration_guard_allows_supported_batch_replicate_fanout(self) -> None:
+        """The outer queue guard must not reject the largest supported legal fan-out."""
+        _db, factory = _make_factory()
+        processor = _make_processor(factory)
+        ctx = make_context(landscape=factory.plugin_audit_writer())
+        token = make_token_info(data={"value": 1})
+        max_supported_copies = BatchReplicateConfig.model_json_schema()["properties"]["max_copies"]["maximum"]
+        remaining_children = max_supported_copies
+
+        def supported_fanout_producer(token, ctx, current_node_id, **kwargs):
+            nonlocal remaining_children
+            if remaining_children == 0:
+                return (None, [])
+
+            remaining_children -= 1
+            child = make_token_info(data={"remaining": remaining_children})
+            return (None, [WorkItem(token=child, current_node_id=NodeID("source-0"))])
+
+        with patch.object(processor, "_process_single_token", side_effect=supported_fanout_producer) as mock_process_single_token:
+            results = processor._drain_work_queue(
+                WorkItem(token=token, current_node_id=NodeID("source-0")),
+                ctx=ctx,
+            )
+
+        assert results == []
+        assert mock_process_single_token.call_count == max_supported_copies + 1
 
     def test_max_iterations_constant_is_reasonable(self) -> None:
         """MAX_WORK_QUEUE_ITERATIONS should be at least 1000."""

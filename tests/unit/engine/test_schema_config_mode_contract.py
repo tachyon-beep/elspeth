@@ -39,6 +39,9 @@ def _contract(
     *,
     mode: str = "OBSERVED",
     locked: bool = True,
+    python_type: type | dict[str, type] = str,
+    required: bool | dict[str, bool] = True,
+    nullable: bool | dict[str, bool] = False,
 ) -> SchemaContract:
     return SchemaContract(
         mode=mode,  # type: ignore[arg-type]  # test helper uses closed-set literals
@@ -46,10 +49,10 @@ def _contract(
             FieldContract(
                 normalized_name=name,
                 original_name=name,
-                python_type=str,
-                required=True,
+                python_type=python_type[name] if isinstance(python_type, dict) else python_type,
+                required=required[name] if isinstance(required, dict) else required,
                 source="inferred",
-                nullable=False,
+                nullable=nullable[name] if isinstance(nullable, dict) else nullable,
             )
             for name in fields
         ),
@@ -62,8 +65,21 @@ def _row(
     *,
     mode: str = "OBSERVED",
     locked: bool = True,
+    python_type: type | dict[str, type] = str,
+    required: bool | dict[str, bool] = True,
+    nullable: bool | dict[str, bool] = False,
 ) -> PipelineRow:
-    return PipelineRow(dict.fromkeys(fields, "v"), _contract(fields, mode=mode, locked=locked))
+    return PipelineRow(
+        dict.fromkeys(fields, "v"),
+        _contract(
+            fields,
+            mode=mode,
+            locked=locked,
+            python_type=python_type,
+            required=required,
+            nullable=nullable,
+        ),
+    )
 
 
 def _schema_config(
@@ -239,6 +255,109 @@ def test_batch_flush_check_raises_on_fixed_mode_undeclared_extra_fields() -> Non
         contract.batch_flush_check(inputs, outputs)
 
     assert tuple(exc_info.value.payload["undeclared_extra_fields"]) == ("extra",)
+
+
+def test_post_emission_check_raises_on_observed_mode_missing_guaranteed_field() -> None:
+    contract = SchemaConfigModeContract()
+    plugin = _plugin(output_schema_config=_schema_config(mode="observed", guaranteed_fields=("source", "guaranteed_missing")))
+    inputs = PostEmissionInputs(
+        plugin=plugin,
+        node_id="n-1",
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        input_row=_row(("source",), mode="OBSERVED"),
+        static_contract=frozenset({"source"}),
+        effective_input_fields=frozenset({"source"}),
+    )
+    outputs = PostEmissionOutputs(emitted_rows=(_row(("source",), mode="OBSERVED"),))
+
+    with pytest.raises(SchemaConfigModeViolation) as exc_info:
+        contract.post_emission_check(inputs, outputs)
+
+    assert tuple(exc_info.value.payload["runtime_observed_fields"]) == ("source",)
+    assert tuple(exc_info.value.payload["missing_required_fields"]) == ("guaranteed_missing",)
+
+
+def test_batch_flush_check_raises_on_fixed_mode_missing_required_declared_field() -> None:
+    contract = SchemaConfigModeContract()
+    plugin = _plugin(
+        output_schema_config=SchemaConfig.from_dict(
+            {
+                "mode": "fixed",
+                "fields": [
+                    {"name": "source", "type": "str", "required": True, "nullable": False},
+                    {"name": "required_out", "type": "str", "required": True, "nullable": False},
+                ],
+            }
+        ),
+        is_batch_aware=True,
+    )
+    token_row = _row(("source",), mode="FIXED")
+    inputs = BatchFlushInputs(
+        plugin=plugin,
+        node_id="n-1",
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        buffered_tokens=(token_row,),
+        static_contract=frozenset({"source"}),
+        effective_input_fields=frozenset({"source"}),
+    )
+    outputs = BatchFlushOutputs(emitted_rows=(_row(("source",), mode="FIXED"),))
+
+    with pytest.raises(SchemaConfigModeViolation) as exc_info:
+        contract.batch_flush_check(inputs, outputs)
+
+    assert tuple(exc_info.value.payload["runtime_observed_fields"]) == ("source",)
+    assert tuple(exc_info.value.payload["missing_required_fields"]) == ("required_out",)
+
+
+def test_post_emission_check_raises_on_declared_field_metadata_mismatch() -> None:
+    contract = SchemaConfigModeContract()
+    plugin = _plugin(
+        output_schema_config=SchemaConfig.from_dict(
+            {
+                "mode": "fixed",
+                "fields": [{"name": "score", "type": "int", "required": True, "nullable": False}],
+            }
+        )
+    )
+    inputs = PostEmissionInputs(
+        plugin=plugin,
+        node_id="n-1",
+        run_id="run-1",
+        row_id="row-1",
+        token_id="token-1",
+        input_row=_row(("score",), mode="FIXED"),
+        static_contract=frozenset({"score"}),
+        effective_input_fields=frozenset({"score"}),
+    )
+    outputs = PostEmissionOutputs(
+        emitted_rows=(
+            _row(
+                ("score",),
+                mode="FIXED",
+                python_type={"score": str},
+                required={"score": False},
+                nullable={"score": True},
+            ),
+        )
+    )
+
+    with pytest.raises(SchemaConfigModeViolation) as exc_info:
+        contract.post_emission_check(inputs, outputs)
+
+    assert len(exc_info.value.payload["field_metadata_mismatches"]) == 1
+    mismatch = exc_info.value.payload["field_metadata_mismatches"][0]
+    assert mismatch["field"] == "score"
+    assert mismatch["expected_type"] == "int"
+    assert mismatch["observed_type"] == "str"
+    assert mismatch["expected_required"] is True
+    assert mismatch["observed_required"] is False
+    assert mismatch["expected_nullable"] is False
+    assert mismatch["observed_nullable"] is True
+    assert mismatch["observed_present"] is True
 
 
 def test_dispatcher_raises_single_violation_for_schema_config_mode_only(_isolated_registry) -> None:

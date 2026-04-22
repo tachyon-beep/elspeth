@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import update
 
 from elspeth.contracts import ExportStatus, FieldContract, ReproducibilityGrade, RunStatus, SchemaContract, SecretResolutionInput
-from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.contracts.errors import AuditIntegrityError, FrameworkBugError
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.model_loaders import RunLoader
@@ -139,10 +139,11 @@ class TestBeginRunRuntimeValManifest:
         for entry in declaration_entries:
             # H2 per-site extension: entries carry dispatch_sites in addition
             # to the 2A keys.
-            assert set(entry.keys()) == {"name", "class_name", "class_module", "dispatch_sites"}
+            assert set(entry.keys()) == {"name", "class_name", "class_module", "dispatch_sites", "implementation_hash"}
             assert entry["class_module"].startswith("elspeth.")
             assert isinstance(entry["dispatch_sites"], list)
             assert len(entry["dispatch_sites"]) >= 1
+            assert entry["implementation_hash"].startswith("sha256:")
 
     def test_manifest_records_expected_contract_sites(self) -> None:
         """The EXPECTED_CONTRACT_SITES per-site manifest (N1) is captured verbatim."""
@@ -165,6 +166,8 @@ class TestBeginRunRuntimeValManifest:
         assert len(tier_1_entries) > 0  # at least FrameworkBugError + AuditIntegrityError
 
         recorded_by_name = {(e["class_module"], e["class_name"]): e["reason"] for e in tier_1_entries}
+        for entry in tier_1_entries:
+            assert entry["implementation_hash"].startswith("sha256:")
         for cls in TIER_1_ERRORS:
             key = (cls.__module__, cls.__name__)
             assert key in recorded_by_name, f"Tier-1 class {key} missing from manifest"
@@ -185,18 +188,9 @@ class TestBeginRunRuntimeValManifest:
         assert key in recorded_by_name
         assert recorded_by_name[key] == tier_1_reason(LandscapeRecordError)
 
-    def test_manifest_changes_when_declaration_registry_is_patched(self) -> None:
-        """Temporarily removing a contract from the registry changes the recorded manifest.
-
-        Required regression guard from the M3 ticket: if a future refactor
-        accidentally captured a *static* snapshot of the registry (e.g.
-        cached at import time), both runs would show the same manifest
-        because the cache would dominate the per-run query. By asserting
-        the patched run differs from the unpatched run we confirm the
-        manifest is computed at begin_run time, not earlier.
-        """
+    def test_begin_run_fails_when_declaration_registry_is_not_frozen(self) -> None:
+        """begin_run must fail closed if the declaration registry is still mutable."""
         import elspeth.contracts.declaration_contracts as dc
-        from elspeth.engine.executors import pass_through  # noqa: F401  (import side-effect)
 
         db = make_landscape_db()
         ops = DatabaseOps(db)
@@ -204,25 +198,15 @@ class TestBeginRunRuntimeValManifest:
 
         snapshot = dc._snapshot_registry_for_tests()
         try:
-            # Baseline: registry populated by pass_through import.
-            repo.begin_run(config={}, canonical_version="v1", run_id="m3-baseline")
-            baseline_manifest = self._fetch_manifest(db, "m3-baseline")
-
-            # Patch the registry to simulate a contract being absent.
-            # Pytest-gated via _require_pytest_process inside dc (C3).
             dc._REGISTRY[:] = []  # type: ignore[attr-defined]  # test-only patch under pytest gate
-            repo.begin_run(config={}, canonical_version="v1", run_id="m3-patched")
-            patched_manifest = self._fetch_manifest(db, "m3-patched")
+            for site_list in dc._REGISTRY_BY_SITE.values():  # type: ignore[attr-defined]  # test-only patch under pytest gate
+                site_list.clear()
+            dc._FROZEN = False  # type: ignore[attr-defined]  # test-only patch under pytest gate
+
+            with pytest.raises(FrameworkBugError, match="requires frozen runtime-VAL registries"):
+                repo.begin_run(config={}, canonical_version="v1", run_id="m3-unfrozen")
         finally:
             dc._restore_registry_snapshot_for_tests(snapshot)
-
-        assert baseline_manifest["declaration_contracts"] != patched_manifest["declaration_contracts"]
-        assert patched_manifest["declaration_contracts"] == []
-        # Expected-manifest (C2) is a module-level frozen constant, so it
-        # is identical across both runs — this confirms the manifest and
-        # the live registry are serialized independently.
-        # H2: the frozen constant is now per-site (``expected_contract_sites``).
-        assert baseline_manifest["expected_contract_sites"] == patched_manifest["expected_contract_sites"]
 
 
 class TestFinalizeRunDirect:

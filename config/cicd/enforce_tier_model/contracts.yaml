@@ -142,6 +142,14 @@ per_file_rules:
   reason: Secret-scrubbing dispatch — _scrub_value recurses over arbitrary Mapping[str, Any] payloads (Tier 3) and uses isinstance to distinguish Mapping, str, and sequence types for correct redaction routing
   expires: null
   max_hits: 3
+- pattern: contracts/runtime_val_manifest.py
+  rules:
+  - R2
+  - R5
+  - R6
+  reason: "ADR-010 §Decision 3 M3 + H2 N1 runtime-VAL manifest hashing — introspects arbitrary callables, CodeType constants, and TypedDict classes to build deterministic implementation hashes. getattr with explicit None default is marker-discovery semantics ('no such attribute exists'), not defensive coercion; isinstance dispatches over CodeType/tuple/list/frozenset/bytes/scalar to normalize code-object constants for stable JSON serialization; the sole except (OSError, TypeError) in _class_source_hash is for inspect.getsource() failures on builtin/dynamically-generated classes (expected, returns None so the hash falls back to the mro-only branch). Direct attribute access would crash on every non-decorated callable walked; replacing the isinstance dispatch would require a type registry. No silent error suppression — the except path returns an explicit None that the caller handles."
+  expires: null
+  max_hits: 30
 allow_hits:
 - key: contracts/url.py:R6:SanitizedDatabaseUrl:from_raw_url:fp=a8a9139e2ff09e37
   owner: architecture
@@ -320,7 +328,7 @@ allow_hits:
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for ExampleBundle.args — the tuple-only branch is an offensive invariant check, not a silent fallback."
   safety: TypeError raised immediately when args is not list or tuple; no coercion beyond the explicit list->tuple normalization
   expires: null
-- key: contracts/declaration_contracts.py:R2:_collect_contract_sites:fp=eacd17e6ef21d69e
+- key: contracts/declaration_contracts.py:R2:_collect_contract_sites:fp=11309a69d1252ffa
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) getattr(candidate, _DISPATCH_SITE_MARKER_ATTR, None) probes for the @implements_dispatch_site decorator marker on contract methods. The default-None is semantic: 'this method did not declare a dispatch site'. Using direct attribute access (bare .x access) would crash on every non-decorated method walked (applies_to, negative_example, __init_subclass__, etc.), defeating the discovery pass. This is the canonical marker-discovery pattern the @implements_dispatch_site decorator contract specifies."
   safety: Invalid marker values (site_name not in _DISPATCH_SITE_VALUES) raise FrameworkBugError immediately — no silent fallthrough

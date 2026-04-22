@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from elspeth.contracts.secret_scrub import scrub_payload_for_audit
+from elspeth.contracts.freeze import deep_freeze
+from elspeth.contracts.secret_scrub import scrub_payload_for_audit, scrub_text_for_audit
 
 REDACTED = "<redacted-secret>"
 
@@ -12,10 +13,18 @@ def test_plain_values_pass_through() -> None:
     assert scrub_payload_for_audit(p) == {"field": "name", "count": 3, "flag": True}
 
 
+def test_plain_text_passes_through() -> None:
+    assert scrub_text_for_audit("plain audit message") == "plain audit message"
+
+
 def test_api_key_like_value_is_redacted() -> None:
     p = {"api_key": "sk-1234567890abcdef1234567890abcdef"}
     out = scrub_payload_for_audit(p)
     assert out["api_key"] == REDACTED
+
+
+def test_secret_like_text_is_redacted() -> None:
+    assert scrub_text_for_audit("secret sk-1234567890abcdef1234567890abcdef leaked") == REDACTED
 
 
 def test_aws_access_key_redacted() -> None:
@@ -34,6 +43,18 @@ def test_sequence_values_scrubbed() -> None:
     p = {"secrets": ["sk-abcdef1234567890abcdef1234567890", "normal"]}
     out = scrub_payload_for_audit(p)
     assert out["secrets"] == [REDACTED, "normal"]
+
+
+def test_secret_named_tuple_value_redacted_after_freeze() -> None:
+    p = deep_freeze({"api_key": ["dev-token-123", "dev-token-456"]})
+    out = scrub_payload_for_audit(p)
+    assert out["api_key"] == REDACTED
+
+
+def test_secret_named_mapping_value_redacted_after_freeze() -> None:
+    p = deep_freeze({"authorization": {"scheme": "Bearer", "credentials": "opaque-dev-token"}})
+    out = scrub_payload_for_audit(p)
+    assert out["authorization"] == REDACTED
 
 
 # -----------------------------------------------------------------------------
@@ -133,6 +154,30 @@ def test_plain_https_url_without_credentials_passes_through() -> None:
     p = {"endpoint": "https://api.example.com/v1/resource?search=foo"}
     out = scrub_payload_for_audit(p)
     assert out["endpoint"] == "https://api.example.com/v1/resource?search=foo"
+
+
+def test_https_username_only_userinfo_is_redacted() -> None:
+    p = {"endpoint": "https://tokenonlysecret@api.example.com/webhook"}
+    out = scrub_payload_for_audit(p)
+    assert out["endpoint"] == REDACTED
+
+
+def test_https_token_query_param_is_redacted() -> None:
+    p = {"endpoint": "https://api.example.com/webhook?token=opaque-dev-token"}
+    out = scrub_payload_for_audit(p)
+    assert out["endpoint"] == REDACTED
+
+
+def test_https_api_key_query_param_is_redacted() -> None:
+    p = {"endpoint": "https://api.example.com/webhook?api_key=opaque-dev-token"}
+    out = scrub_payload_for_audit(p)
+    assert out["endpoint"] == REDACTED
+
+
+def test_https_access_token_fragment_is_redacted() -> None:
+    p = {"endpoint": "https://api.example.com/callback#access_token=opaque-dev-token"}
+    out = scrub_payload_for_audit(p)
+    assert out["endpoint"] == REDACTED
 
 
 # ----- Bearer/session tokens in non-Authorization payload keys -----

@@ -4,6 +4,11 @@ allow_hits:
   reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict
   safety: Returns None on miss, handled by 404 response
   expires: null
+- key: web/config.py:R5:WebSettings:_reject_blank_path_strings:fp=f910241221787832
+  owner: architecture
+  reason: Pydantic before-validator at Tier 3 config boundary — isinstance(v, str) distinguishes raw YAML string input (which may be all-whitespace) from already-coerced Path values or None, rejecting blank strings before Pydantic's str→Path coercion silently accepts them. Mode=before runs prior to coercion so the type is not yet guaranteed, which is why isinstance rather than direct .strip() is used.
+  safety: Raises ValueError on blank string input; non-string values pass through to Pydantic's normal path validation; no silent coercion
+  expires: null
 # JSON Schema traversal — keys like "properties", "required", "type",
 # "description", "default", "$ref" are conditionally present per the JSON
 # Schema spec, not missing-in-our-contract. .get() with default is the

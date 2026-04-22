@@ -16,6 +16,9 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from typing import Any, cast
+from urllib.parse import parse_qs, urlparse
+
+from elspeth.contracts.url import SENSITIVE_PARAMS
 
 _REDACTED = "<redacted-secret>"
 
@@ -99,11 +102,22 @@ def scrub_payload_for_audit(payload: Mapping[str, Any]) -> dict[str, Any]:
     return cast(dict[str, Any], _scrub_value(payload, parent_key=None))
 
 
+def scrub_text_for_audit(text: str) -> str:
+    """Return a secret-redacted version of freeform audit text.
+
+    Uses the same whole-string replacement rules as payload string values so
+    persisted exception messages do not bypass the audit scrubber.
+    """
+    return cast(str, _scrub_value(text, parent_key=None))
+
+
 def _scrub_value(value: Any, *, parent_key: str | None) -> Any:
+    if parent_key is not None and parent_key.lower() in _SECRET_KEY_NAMES:
+        return _REDACTED
     if isinstance(value, Mapping):
         return {k: _scrub_value(v, parent_key=k) for k, v in value.items()}
     if isinstance(value, str):
-        if parent_key is not None and parent_key.lower() in _SECRET_KEY_NAMES:
+        if _contains_sensitive_http_url(value):
             return _REDACTED
         for pattern in _PATTERNS:
             if pattern.search(value):
@@ -113,3 +127,26 @@ def _scrub_value(value: Any, *, parent_key: str | None) -> Any:
     if isinstance(value, (list, tuple)):
         return [_scrub_value(item, parent_key=None) for item in value]
     return value
+
+
+def _contains_sensitive_http_url(value: str) -> bool:
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return True
+    query_params = parse_qs(parsed.query, keep_blank_values=True)
+    if any(_base_param_name(key.lower()) in SENSITIVE_PARAMS for key in query_params):
+        return True
+    fragment_params = parse_qs(parsed.fragment, keep_blank_values=True)
+    return any(_base_param_name(key.lower()) in SENSITIVE_PARAMS for key in fragment_params)
+
+
+def _base_param_name(key: str) -> str:
+    bracket = key.find("[")
+    if bracket != -1:
+        key = key[:bracket]
+    dot = key.find(".")
+    if dot != -1:
+        key = key[:dot]
+    return key

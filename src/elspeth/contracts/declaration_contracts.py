@@ -82,7 +82,7 @@ from typing import (
 
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
-from elspeth.contracts.secret_scrub import scrub_payload_for_audit
+from elspeth.contracts.secret_scrub import scrub_payload_for_audit, scrub_text_for_audit
 from elspeth.contracts.tier_registry import FrameworkBugError, tier_1_error
 
 # =============================================================================
@@ -705,7 +705,7 @@ class DeclarationContractViolation(AuditEvidenceBase, RuntimeError):
             "row_id": self.row_id,
             "token_id": self.token_id,
             "payload": scrub_payload_for_audit(self.payload),
-            "message": str(self),
+            "message": scrub_text_for_audit(str(self)),
         }
 
 
@@ -825,7 +825,7 @@ class AggregateDeclarationContractViolation(AuditEvidenceBase, RuntimeError):
             "is_aggregate": True,
             "plugin": self.plugin,
             "violations": tuple(v.to_audit_dict() for v in self.violations),
-            "message": str(self),
+            "message": scrub_text_for_audit(str(self)),
         }
 
 
@@ -1074,15 +1074,29 @@ def _collect_contract_sites(contract: DeclarationContract) -> frozenset[Dispatch
     same per-contract site set.
     """
     sites: set[DispatchSiteName] = set()
+    first_definitions: dict[str, tuple[type[object], object, str | None]] = {}
     for klass in type(contract).__mro__:
         if klass is object or klass is DeclarationContract:
             continue
-        for attr_name in vars(klass):
-            candidate = vars(klass)[attr_name]
+        for attr_name, candidate in vars(klass).items():
+            site_name = getattr(candidate, _DISPATCH_SITE_MARKER_ATTR, None)
+            if attr_name in first_definitions:
+                _overriding_class, _, overriding_site_name = first_definitions[attr_name]
+                if site_name is not None and overriding_site_name is None:
+                    raise FrameworkBugError(
+                        f"Contract {type(contract).__name__!r} attribute "
+                        f"{attr_name!r} overrides decorated site "
+                        f"{site_name!r} from base class {klass.__name__!r} "
+                        f"without @implements_dispatch_site. Methods without "
+                        f"the marker are NOT dispatched; redecorate the "
+                        f"override or rename the attribute so registration and "
+                        f"runtime dispatch cannot disagree."
+                    )
+                continue
+            first_definitions[attr_name] = (klass, candidate, cast(str | None, site_name))
             # Only functions carry the marker; non-callables and dataclass
             # fields are skipped naturally because getattr returns the
             # unwrapped value.
-            site_name = getattr(candidate, _DISPATCH_SITE_MARKER_ATTR, None)
             if site_name is None:
                 continue
             if site_name not in _DISPATCH_SITE_VALUES:

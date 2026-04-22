@@ -1,7 +1,7 @@
 """QueryRepository: read-only queries for audit trail entities.
 
 Provides the external read-only API used by MCP server, exporter, CLI,
-and TUI. Does NOT need LandscapeDB — only DatabaseOps for queries.
+and TUI. Does NOT need LandscapeDB — only read-only database ops for queries.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from elspeth.contracts import (
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.payload_store import IntegrityError as PayloadIntegrityError
 from elspeth.contracts.payload_store import PayloadNotFoundError, PayloadStore
-from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape._database_ops import ReadOnlyDatabaseOps
 from elspeth.core.landscape.model_loaders import (
     CallLoader,
     NodeStateLoader,
@@ -56,7 +56,7 @@ class QueryRepository:
 
     def __init__(
         self,
-        ops: DatabaseOps,
+        ops: ReadOnlyDatabaseOps,
         *,
         row_loader: RowLoader,
         token_loader: TokenLoader,

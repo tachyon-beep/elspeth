@@ -276,6 +276,19 @@ class TestSecretKeyGuard:
         )
         assert settings.secret_key == "my-real-secret"
 
+    @pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0"])
+    @pytest.mark.parametrize("secret_key", ["", "   "])
+    def test_blank_secret_key_rejected_on_all_hosts(self, host: str, secret_key: str) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                host=host,
+                secret_key=secret_key,
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
+
 
 class TestAuthFieldValidation:
     """Tests for OIDC/Entra conditional field requirements."""
@@ -301,6 +314,72 @@ class TestAuthFieldValidation:
                 composer_timeout_seconds=85.0,
                 composer_rate_limit_per_minute=10,
             )
+
+
+class TestPathFieldValidation:
+    """Tests for path normalization and blank-path rejection."""
+
+    @pytest.mark.parametrize(
+        ("field_name", "value"),
+        [
+            ("data_dir", ""),
+            ("data_dir", "   "),
+            ("payload_store_path", ""),
+            ("payload_store_path", "   "),
+        ],
+    )
+    def test_blank_path_fields_rejected(self, field_name: str, value: str) -> None:
+        with pytest.raises(ValidationError, match="must not be blank"):
+            WebSettings(
+                **{
+                    field_name: value,
+                    "composer_max_composition_turns": 15,
+                    "composer_max_discovery_turns": 10,
+                    "composer_timeout_seconds": 85.0,
+                    "composer_rate_limit_per_minute": 10,
+                }
+            )
+
+    def test_data_dir_expands_user_home(self) -> None:
+        settings = WebSettings(
+            data_dir="~/data",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
+        expected = Path("~/data").expanduser()
+        assert settings.data_dir == expected
+        assert settings.get_landscape_url() == f"sqlite:///{expected / 'runs' / 'audit.db'}"
+        assert settings.get_session_db_url() == f"sqlite:///{expected / 'sessions.db'}"
+
+    def test_payload_store_path_expands_user_home(self) -> None:
+        settings = WebSettings(
+            payload_store_path="~/payloads",
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
+        assert settings.get_payload_store_path() == Path("~/payloads").expanduser()
+
+
+class TestServerSecretAllowlistValidation:
+    """Tests for server_secret_allowlist field validation."""
+
+    def test_reserved_elspeth_server_secret_names_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="ELSPETH_"):
+            WebSettings(
+                server_secret_allowlist=("ELSPETH_FINGERPRINT_KEY",),
+                composer_max_composition_turns=15,
+                composer_max_discovery_turns=10,
+                composer_timeout_seconds=85.0,
+                composer_rate_limit_per_minute=10,
+            )
+
+
+class TestAuthFieldValidationContinued:
+    """Additional OIDC/Entra field requirement coverage."""
 
     def test_oidc_provider_with_all_fields_valid(self) -> None:
         """OIDC provider with all required fields should succeed."""

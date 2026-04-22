@@ -545,3 +545,41 @@ class TestTypeCoerceBehavior:
         assert result.row is not None
         assert result.row.contract.mode == "FIXED"
         assert result.row.contract.locked is True
+
+    def test_success_updates_emitted_contract_field_type(self, ctx: "PluginContext") -> None:
+        """Successful coercion must evolve the emitted contract, not just the payload."""
+        from elspeth.contracts.schema_contract import SchemaContract
+        from elspeth.plugins.transforms.type_coerce import TypeCoerce
+        from elspeth.testing import make_field, make_row
+
+        transform = TypeCoerce(
+            {
+                "schema": {"mode": "observed"},
+                "conversions": [{"field": "quantity", "to": "int"}],
+            }
+        )
+        input_contract = SchemaContract(
+            mode="OBSERVED",
+            fields=(
+                make_field(
+                    "quantity",
+                    str,
+                    original_name="Quantity",
+                    required=True,
+                    source="declared",
+                ),
+            ),
+            locked=True,
+        )
+        row = make_row({"quantity": "42"}, contract=input_contract)
+
+        result = transform.process(row, ctx)
+
+        assert result.status == "success"
+        assert result.row is not None
+        field = result.row.contract.get_field("quantity")
+        assert field is not None
+        assert field.python_type is int
+        assert field.original_name == "Quantity"
+        assert field.required is True
+        assert result.row.contract is not row.contract

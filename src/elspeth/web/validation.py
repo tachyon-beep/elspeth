@@ -23,6 +23,7 @@ _VISIBLE_CATEGORIES = frozenset({"L", "N", "P", "S"})
 SECRET_NAME_MAX_LENGTH = 256
 SECRET_NAME_PATTERN = r"^[A-Za-z][A-Za-z0-9_]*$"
 _SECRET_NAME_RE = re.compile(SECRET_NAME_PATTERN)
+SERVER_SECRET_RESERVED_PREFIX = "ELSPETH_"
 
 
 def has_visible_content(s: str) -> bool:
@@ -48,3 +49,8 @@ def validate_secret_name(name: str, *, field_name: str = "Secret name") -> str:
     if _SECRET_NAME_RE.fullmatch(name) is None:
         raise ValueError(f"{field_name} must match {SECRET_NAME_PATTERN}")
     return name
+
+
+def is_reserved_server_secret_name(name: str) -> bool:
+    """Return True when a server-secret name targets ELSPETH internals."""
+    return name.startswith(SERVER_SECRET_RESERVED_PREFIX)

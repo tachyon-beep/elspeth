@@ -237,6 +237,19 @@ class VerificationReport:
             return 100.0
         return (self.matches / verifiable) * 100
 
+    def snapshot(self) -> VerificationReport:
+        """Return a detached copy safe to hand to external callers."""
+        return VerificationReport(
+            total_calls=self.total_calls,
+            matches=self.matches,
+            mismatches=self.mismatches,
+            missing_recordings=self.missing_recordings,
+            missing_payloads=self.missing_payloads,
+            unverifiable=self.unverifiable,
+            no_response_recorded=self.no_response_recorded,
+            results=list(self.results),
+        )
+
 
 class CallVerifier:
     """Verifies live API calls against recorded responses.
@@ -297,6 +310,31 @@ class CallVerifier:
         """The run ID containing baseline recordings."""
         return self._source_run_id
 
+    def _record_result(
+        self,
+        sequence_key: tuple[str, str],
+        sequence_index: int,
+        result: VerificationResult,
+        *,
+        matches: int = 0,
+        mismatches: int = 0,
+        missing_recordings: int = 0,
+        missing_payloads: int = 0,
+        unverifiable: int = 0,
+        no_response_recorded: int = 0,
+    ) -> VerificationResult:
+        """Update in-memory verifier state after a concrete result exists."""
+        self._report.total_calls += 1
+        self._report.matches += matches
+        self._report.mismatches += mismatches
+        self._report.missing_recordings += missing_recordings
+        self._report.missing_payloads += missing_payloads
+        self._report.unverifiable += unverifiable
+        self._report.no_response_recorded += no_response_recorded
+        self._report.results.append(result)
+        self._sequence_counters[sequence_key] = sequence_index + 1
+        return result
+
     def verify(
         self,
         call_type: CallType,
@@ -324,10 +362,11 @@ class CallVerifier:
         request_hash = stable_hash(request_data)
         sequence_key = (call_type, request_hash)
 
-        # Get the current sequence index for this request and increment it
-        # Using defaultdict(int) ensures missing keys default to 0
-        sequence_index = self._sequence_counters[sequence_key]
-        self._sequence_counters[sequence_key] = sequence_index + 1
+        # Read without mutating so exceptional exits leave state untouched.
+        if sequence_key in self._sequence_counters:
+            sequence_index = self._sequence_counters[sequence_key]
+        else:
+            sequence_index = 0
 
         # Look up recorded call with sequence index to get Nth occurrence
         call = self._execution.find_call_by_request_hash(
@@ -337,16 +376,17 @@ class CallVerifier:
             sequence_index=sequence_index,
         )
 
-        self._report.total_calls += 1
-
         if call is None:
             result = VerificationResult.missing_recording(
                 request_hash=request_hash,
                 live_response=live_response,
             )
-            self._report.missing_recordings += 1
-            self._report.results.append(result)
-            return result
+            return self._record_result(
+                sequence_key,
+                sequence_index,
+                result,
+                missing_recordings=1,
+            )
 
         # Get recorded response with explicit state discrimination
         call_data = self._execution.get_call_response_data(call.call_id)
@@ -355,8 +395,6 @@ class CallVerifier:
         if call_data.state != CallDataState.AVAILABLE:
             # Payload was expected but is missing (purged or store not configured)
             if call_data.state in (CallDataState.PURGED, CallDataState.STORE_NOT_CONFIGURED, CallDataState.HASH_ONLY):
-                self._report.missing_payloads += 1
-
                 # When response_hash exists, perform hash-based
                 # verification even though the full payload is missing. Per CLAUDE.md:
                 # "Hashes survive payload deletion — integrity is always verifiable."
@@ -370,10 +408,6 @@ class CallVerifier:
                     if can_verify_by_hash:
                         live_hash = stable_hash(live_response)
                         is_match = live_hash == call.response_hash
-                        if is_match:
-                            self._report.matches += 1
-                        else:
-                            self._report.mismatches += 1
                         result = VerificationResult.missing_payload(
                             request_hash=request_hash,
                             live_response=live_response,
@@ -387,11 +421,18 @@ class CallVerifier:
                             if not is_match
                             else None,
                         )
+                        return self._record_result(
+                            sequence_key,
+                            sequence_index,
+                            result,
+                            missing_payloads=1,
+                            matches=1 if is_match else 0,
+                            mismatches=0 if is_match else 1,
+                        )
                     else:
                         # Cannot perform meaningful verification: payload is gone and
                         # hash comparison would be stricter than the configured semantic
                         # comparison (ignore_paths/ignore_order not applicable to hashes).
-                        self._report.unverifiable += 1
                         result = VerificationResult.missing_payload(
                             request_hash=request_hash,
                             live_response=live_response,
@@ -406,9 +447,15 @@ class CallVerifier:
                                 }
                             },
                         )
+                        return self._record_result(
+                            sequence_key,
+                            sequence_index,
+                            result,
+                            missing_payloads=1,
+                            unverifiable=1,
+                        )
                 else:
                     # No hash available — cannot verify, just mark as missing
-                    self._report.unverifiable += 1
                     result = VerificationResult.missing_payload(
                         request_hash=request_hash,
                         live_response=live_response,
@@ -420,9 +467,13 @@ class CallVerifier:
                             }
                         },
                     )
-
-                self._report.results.append(result)
-                return result
+                    return self._record_result(
+                        sequence_key,
+                        sequence_index,
+                        result,
+                        missing_payloads=1,
+                        unverifiable=1,
+                    )
 
             # CALL_NOT_FOUND: The call record was found by find_call_by_request_hash
             # but vanished before get_call_response_data — database corruption or
@@ -437,13 +488,16 @@ class CallVerifier:
             # NEVER_STORED: Call exists but never had a response (e.g., connection
             # timeout, DNS failure). Cannot compare, not a match, not missing payload.
             if call_data.state == CallDataState.NEVER_STORED:
-                self._report.no_response_recorded += 1
                 result = VerificationResult.no_recorded_response(
                     request_hash=request_hash,
                     live_response=live_response,
                 )
-                self._report.results.append(result)
-                return result
+                return self._record_result(
+                    sequence_key,
+                    sequence_index,
+                    result,
+                    no_response_recorded=1,
+                )
 
             # Unknown state — CallDataState may have gained a new member.
             # Offensive programming: crash rather than silently misclassify.
@@ -467,29 +521,37 @@ class CallVerifier:
         is_match = len(diff) == 0
 
         if is_match:
-            self._report.matches += 1
             result = VerificationResult.matched(
                 request_hash=request_hash,
                 live_response=live_response,
                 recorded_response=recorded_response,
             )
+            return self._record_result(
+                sequence_key,
+                sequence_index,
+                result,
+                matches=1,
+            )
         else:
-            self._report.mismatches += 1
             result = VerificationResult.mismatched(
                 request_hash=request_hash,
                 live_response=live_response,
                 recorded_response=recorded_response,
                 differences=diff.to_dict(),
             )
-        self._report.results.append(result)
-        return result
+            return self._record_result(
+                sequence_key,
+                sequence_index,
+                result,
+                mismatches=1,
+            )
 
     def get_report(self) -> VerificationReport:
         """Get the verification report for this session.
 
-        Returns the accumulated report of all verifications performed.
+        Returns a defensive snapshot of all verifications performed.
         """
-        return self._report
+        return self._report.snapshot()
 
     def reset_report(self) -> None:
         """Reset the verification report and sequence counters.

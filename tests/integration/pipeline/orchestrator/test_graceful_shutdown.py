@@ -24,7 +24,7 @@ from elspeth.contracts.types import AggregationName
 from elspeth.core.canonical import canonical_json
 from elspeth.core.config import AggregationSettings, SourceSettings, TriggerConfig
 from elspeth.core.dag import ExecutionGraph
-from elspeth.engine.orchestrator import PipelineConfig
+from elspeth.engine.orchestrator import PipelineConfig, prepare_for_run
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from tests.fixtures.base_classes import (
@@ -43,6 +43,7 @@ if TYPE_CHECKING:
 
 def _runtime_val_manifest_json() -> str:
     """Mirror the run-header manifest production begin_run() stores."""
+    prepare_for_run()
     return canonical_json(build_runtime_val_manifest())
 
 

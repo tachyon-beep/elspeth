@@ -14,10 +14,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import TransformContext
@@ -275,7 +277,7 @@ class TypeCoerce(BaseTransform):
 
     name = "type_coerce"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:d706c99f20755d08"
+    source_file_hash: str | None = "sha256:cd665aaedabd43a5"
     config_model = TypeCoerceConfig
     passes_through_input = True
 
@@ -285,11 +287,17 @@ class TypeCoerce(BaseTransform):
         self._initialize_declared_input_fields(cfg)
         self._conversions = cfg.conversions
         self._schema_config = cfg.schema_config
-        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+        self._output_schema_config = self._build_type_coerce_output_schema_config(cfg.schema_config)
 
-        self.input_schema, self.output_schema = self._create_schemas(
+        self.input_schema = create_schema_from_config(
             cfg.schema_config,
-            "TypeCoerce",
+            "TypeCoerceInput",
+            allow_coercion=False,
+        )
+        self.output_schema = create_schema_from_config(
+            self._output_schema_config,
+            "TypeCoerceOutput",
+            allow_coercion=False,
         )
 
     @classmethod
@@ -322,6 +330,7 @@ class TypeCoerce(BaseTransform):
         output = copy.deepcopy(row.to_dict())
         fields_coerced: list[str] = []
         fields_unchanged: list[str] = []
+        conversion_targets: dict[str, Literal["int", "float", "bool", "str"]] = {}
 
         for spec in self._conversions:
             config_field = spec.field  # Field name from config (may be original header)
@@ -343,6 +352,7 @@ class TypeCoerce(BaseTransform):
                 # Field exists in row but not in contract — use config name as-is
                 # (shouldn't happen for valid rows, but defensive for edge cases)
                 normalized_key = config_field
+            conversion_targets[normalized_key] = target_type_name
 
             value = row[config_field]
 
@@ -383,7 +393,7 @@ class TypeCoerce(BaseTransform):
             output[normalized_key] = converted
             fields_coerced.append(normalized_key)
 
-        output_contract = self._align_output_contract(row.contract)
+        output_contract = self._build_output_contract(row.contract, conversion_targets)
         return TransformResult.success(
             PipelineRow(output, output_contract),
             success_reason={
@@ -400,3 +410,66 @@ class TypeCoerce(BaseTransform):
     def close(self) -> None:
         """No resources to release."""
         pass
+
+    def _build_type_coerce_output_schema_config(self, schema_config: SchemaConfig) -> SchemaConfig:
+        """Return the output schema config after applying configured target types."""
+        if schema_config.fields is None:
+            return self._build_output_schema_config(schema_config)
+
+        target_types = {spec.field: spec.to for spec in self._conversions}
+        output_fields = tuple(
+            FieldDefinition(
+                name=field.name,
+                field_type=target_types.get(field.name, field.field_type),
+                required=field.required,
+                nullable=False if field.name in target_types else field.nullable,
+            )
+            for field in schema_config.fields
+        )
+        return SchemaConfig(
+            mode=schema_config.mode,
+            fields=output_fields,
+            guaranteed_fields=schema_config.guaranteed_fields,
+            required_fields=schema_config.required_fields,
+            audit_fields=schema_config.audit_fields,
+        )
+
+    def _build_output_contract(
+        self,
+        contract: SchemaContract,
+        conversion_targets: dict[str, Literal["int", "float", "bool", "str"]],
+    ) -> SchemaContract:
+        """Return an aligned output contract whose field types match the emitted row."""
+        if not conversion_targets:
+            return self._align_output_contract(contract)
+
+        changed = False
+        output_fields: list[FieldContract] = []
+        for field in contract.fields:
+            target_type_name = conversion_targets.get(field.normalized_name)
+            if target_type_name is None:
+                output_fields.append(field)
+                continue
+
+            target_type = _TARGET_TYPES[target_type_name]
+            new_field = FieldContract(
+                normalized_name=field.normalized_name,
+                original_name=field.original_name,
+                python_type=target_type,
+                required=field.required,
+                source=field.source,
+                nullable=False,
+            )
+            output_fields.append(new_field)
+            if new_field != field:
+                changed = True
+
+        evolved_contract = contract
+        if changed:
+            evolved_contract = SchemaContract(
+                mode=contract.mode,
+                fields=tuple(output_fields),
+                locked=contract.locked,
+            )
+
+        return self._align_output_contract(evolved_contract)

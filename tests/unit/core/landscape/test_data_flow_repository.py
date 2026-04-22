@@ -297,6 +297,81 @@ class TestRegisterNodeDirect:
             key=b"test-fingerprint-key",
         )
 
+    def test_from_plugin_instances_configs_are_fingerprinted_before_node_persistence(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Graph-built node configs still hit the audit scrubber before persistence."""
+        from elspeth.contracts.security import secret_fingerprint
+        from elspeth.core.config import SourceSettings
+        from elspeth.core.dag import ExecutionGraph
+        from tests.fixtures.plugins import CollectSink, ListSource
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-fingerprint-key")
+
+        _db, repo, _fac = _make_repo(run_id="run-graph")
+        source = ListSource([], name="list_source", on_success="output")
+        source.config = {
+            "schema": {"mode": "observed"},
+            "api_key": "source-secret",
+        }
+        sink = CollectSink("output")
+        sink.config = {
+            "schema": {"mode": "observed"},
+            "headers": {
+                "authorization_token": "sink-secret",
+            },
+        }
+        graph = ExecutionGraph.from_plugin_instances(
+            source=source,
+            source_settings=SourceSettings(
+                plugin=source.name,
+                on_success="output",
+                options={},
+            ),
+            transforms=[],
+            sinks={"output": sink},
+            aggregations={},
+            gates=[],
+        )
+
+        plugin_by_name = {
+            source.name: source,
+            sink.name: sink,
+        }
+        for node_info in graph.get_nodes():
+            schema_config = node_info.output_schema_config
+            assert schema_config is not None
+            plugin = plugin_by_name[node_info.plugin_name]
+            repo.register_node(
+                run_id="run-graph",
+                node_id=node_info.node_id,
+                plugin_name=node_info.plugin_name,
+                node_type=node_info.node_type,
+                plugin_version=plugin.plugin_version,
+                config=node_info.config,
+                determinism=plugin.determinism,
+                schema_config=schema_config,
+            )
+
+        source_node_id = next(node.node_id for node in graph.get_nodes() if node.node_type == NodeType.SOURCE)
+        sink_node_id = next(node.node_id for node in graph.get_nodes() if node.node_type == NodeType.SINK)
+        source_node = repo.get_node(source_node_id, "run-graph")
+        sink_node = repo.get_node(sink_node_id, "run-graph")
+        assert source_node is not None
+        assert sink_node is not None
+
+        parsed_source = json.loads(source_node.config_json)
+        parsed_sink = json.loads(sink_node.config_json)
+
+        assert "api_key" not in parsed_source
+        assert parsed_source["api_key_fingerprint"] == secret_fingerprint("source-secret", key=b"test-fingerprint-key")
+        assert "authorization_token" not in parsed_sink["headers"]
+        assert parsed_sink["headers"]["authorization_token_fingerprint"] == secret_fingerprint(
+            "sink-secret",
+            key=b"test-fingerprint-key",
+        )
+
 
 class TestRegisterEdgeAndEdgeMapDirect:
     """Tests for DataFlowRepository edge registration and edge map via direct repo."""

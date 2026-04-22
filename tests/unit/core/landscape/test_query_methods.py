@@ -52,6 +52,17 @@ def _setup_full(*, run_id: str = "run-1"):
     return db, factory
 
 
+class TestQueryRepositoryCapabilityBoundary:
+    """Pin the factory wiring for the read-side capability split."""
+
+    def test_factory_injects_read_only_ops_into_query_repository(self) -> None:
+        db = make_landscape_db()
+        factory = make_factory(db)
+
+        assert not hasattr(factory.query._ops, "execute_insert")
+        assert not hasattr(factory.query._ops, "execute_update")
+
+
 class TestGetRows:
     """Tests for RecorderFactory query — retrieves rows for a run ordered by row_index."""
 

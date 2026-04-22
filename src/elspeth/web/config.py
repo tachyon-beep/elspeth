@@ -7,7 +7,11 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from elspeth.web.validation import validate_secret_name
+from elspeth.web.validation import (
+    SERVER_SECRET_RESERVED_PREFIX,
+    is_reserved_server_secret_name,
+    validate_secret_name,
+)
 
 _LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -119,10 +123,37 @@ class WebSettings(BaseModel):
             raise ValueError("must not be blank (omit the field to disable encryption)")
         return v
 
+    @field_validator("secret_key")
+    @classmethod
+    def _reject_blank_secret_key(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be blank")
+        return v
+
+    @field_validator("data_dir", "payload_store_path", mode="before")
+    @classmethod
+    def _reject_blank_path_strings(cls, v: object) -> object:
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("must not be blank")
+        return v
+
+    @field_validator("data_dir", "payload_store_path")
+    @classmethod
+    def _normalize_paths(cls, v: Path | None) -> Path | None:
+        if v is None:
+            return None
+        if not str(v).strip():
+            raise ValueError("must not be blank")
+        return v.expanduser()
+
     @field_validator("server_secret_allowlist")
     @classmethod
     def _validate_server_secret_allowlist(cls, v: tuple[str, ...]) -> tuple[str, ...]:
-        return tuple(validate_secret_name(name, field_name="server_secret_allowlist entry") for name in v)
+        validated = tuple(validate_secret_name(name, field_name="server_secret_allowlist entry") for name in v)
+        reserved = tuple(name for name in validated if is_reserved_server_secret_name(name))
+        if reserved:
+            raise ValueError(f"server_secret_allowlist entries must not start with {SERVER_SECRET_RESERVED_PREFIX}: {sorted(reserved)}")
+        return validated
 
     @model_validator(mode="after")
     def _validate_auth_fields(self) -> WebSettings:

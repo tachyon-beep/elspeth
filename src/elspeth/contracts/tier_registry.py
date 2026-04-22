@@ -165,6 +165,11 @@ def freeze_tier_registry() -> None:
     _FROZEN = True
 
 
+def tier_registry_is_frozen() -> bool:
+    """Return whether the Tier-1 registry has been sealed by bootstrap."""
+    return _FROZEN
+
+
 class _Tier1ErrorsView:
     """Live view of the Tier-1 error registry.
 

@@ -280,6 +280,9 @@ class PooledExecutor:
         # Reset per-batch statistics
         self._reset_batch_stats()
 
+        # Fatal exceptions from one worker must stop sibling retry loops promptly.
+        batch_cancel_event = Event()
+
         # Track futures by their buffer index
         futures: dict[Future[tuple[int, TransformResult]], int] = {}
 
@@ -301,6 +304,7 @@ class PooledExecutor:
                     ctx.row,
                     ctx.state_id,
                     process_fn,
+                    batch_cancel_event,
                 )
             except RuntimeError:
                 # Thread pool is shut down (concurrent shutdown() call).
@@ -334,7 +338,7 @@ class PooledExecutor:
             try:
                 _returned_idx, result = future.result()
             except Exception:
-                self._drain_failed_batch_futures(futures)
+                self._drain_failed_batch_futures(futures, batch_cancel_event)
                 raise
 
             # Complete in buffer (may be out of order)
@@ -360,15 +364,106 @@ class PooledExecutor:
 
         return entries
 
-    def _drain_failed_batch_futures(self, futures: Mapping[Future[tuple[int, TransformResult]], int]) -> None:
+    def _drain_failed_batch_futures(
+        self,
+        futures: Mapping[Future[tuple[int, TransformResult]], int],
+        batch_cancel_event: Event,
+    ) -> None:
         """Drain/cancel outstanding futures before propagating a batch-crashing exception."""
+        batch_cancel_event.set()
         for future in futures:
             if future.done():
                 continue
             future.cancel()
         wait(futures)
 
-    def _wait_for_dispatch_gate(self) -> None:
+    def _is_interrupted(self, batch_cancel_event: Event | None = None) -> bool:
+        """Return True when executor-wide or batch-local shutdown has been requested."""
+        return self._shutdown_event.is_set() or (batch_cancel_event is not None and batch_cancel_event.is_set())
+
+    def _wait_interruptibly(
+        self,
+        timeout_seconds: float,
+        batch_cancel_event: Event | None = None,
+    ) -> tuple[bool, float]:
+        """Wait up to timeout_seconds, returning (interrupted, actual_wait_ms)."""
+        if timeout_seconds <= 0:
+            return (self._is_interrupted(batch_cancel_event), 0.0)
+
+        start = time.monotonic()
+        deadline = start + timeout_seconds
+
+        while True:
+            if self._is_interrupted(batch_cancel_event):
+                return (True, (time.monotonic() - start) * 1000)
+
+            remaining_s = deadline - time.monotonic()
+            if remaining_s <= 0:
+                return (False, (time.monotonic() - start) * 1000)
+
+            wait_slice_s = min(remaining_s, 0.05)
+            if batch_cancel_event is None:
+                if self._shutdown_event.wait(timeout=wait_slice_s):
+                    return (True, (time.monotonic() - start) * 1000)
+                continue
+
+            if batch_cancel_event.wait(timeout=wait_slice_s):
+                return (True, (time.monotonic() - start) * 1000)
+
+    def _acquire_worker_slot(self, batch_cancel_event: Event | None = None) -> bool:
+        """Acquire a worker permit while remaining responsive to cancellation."""
+        while True:
+            if self._is_interrupted(batch_cancel_event):
+                return False
+            if self._semaphore.acquire(timeout=0.05):
+                self._increment_active_workers()
+                return True
+
+    def _build_retry_timeout_result(
+        self,
+        retryable_error: PluginRetryableError | CapacityError,
+        start_time: float,
+    ) -> TransformResult:
+        """Build a retry_timeout result for the retryable error that exhausted the budget."""
+        elapsed = time.monotonic() - start_time
+        error_data: TransformErrorReason = {
+            "reason": "retry_timeout",
+            "error": str(retryable_error),
+            "error_type": type(retryable_error).__name__,
+            "elapsed_seconds": elapsed,
+            "max_seconds": self._max_capacity_retry_seconds,
+        }
+        if isinstance(retryable_error, CapacityError):
+            error_data["status_code"] = retryable_error.status_code
+        return TransformResult.error(error_data, retryable=False)
+
+    def _build_interrupted_result(
+        self,
+        retryable_error: PluginRetryableError | CapacityError | None,
+        batch_cancel_event: Event | None = None,
+    ) -> TransformResult:
+        """Build a deterministic result when work stops before redispatch."""
+        if self._shutdown_event.is_set():
+            return TransformResult.error(
+                {
+                    "reason": "shutdown_requested",
+                    "error": "Shutdown requested before dispatch" if retryable_error is None else str(retryable_error),
+                },
+                retryable=False,
+            )
+
+        if batch_cancel_event is not None and batch_cancel_event.is_set():
+            error_message = "Cancelled because another worker in the batch failed unexpectedly"
+            if retryable_error is not None:
+                error_message = f"{error_message}: {retryable_error}"
+            return TransformResult.error(
+                {"reason": "unexpected_pool_error", "error": error_message},
+                retryable=False,
+            )
+
+        raise RuntimeError("Interrupted result requested without shutdown or batch cancellation")
+
+    def _wait_for_dispatch_gate(self, batch_cancel_event: Event | None = None) -> bool:
         """Wait until we're allowed to dispatch, ensuring global pacing.
 
         Enforces min_dispatch_delay_ms between consecutive dispatches across
@@ -387,7 +482,7 @@ class PooledExecutor:
         """
         delay_ms = self._config.min_dispatch_delay_ms
         if delay_ms <= 0:
-            return  # No pacing needed
+            return not self._is_interrupted(batch_cancel_event)  # No pacing needed
 
         delay_s = delay_ms / 1000
         total_wait_ms = 0.0
@@ -411,19 +506,22 @@ class PooledExecutor:
 
                 # Calculate remaining wait time
                 remaining_s = delay_s - time_since_last
-                remaining_ms = remaining_s * 1000
 
-            # Bail out if shutdown was requested (don't block at gate indefinitely)
-            if self._shutdown_event.is_set():
+            # Bail out if shutdown or batch cancellation was requested.
+            if self._is_interrupted(batch_cancel_event):
                 break
 
             # Sleep OUTSIDE the lock to allow other workers to check
-            time.sleep(remaining_s)
-            total_wait_ms += remaining_ms
+            interrupted, waited_ms = self._wait_interruptibly(remaining_s, batch_cancel_event)
+            total_wait_ms += waited_ms
+            if interrupted:
+                break
 
         # Record accumulated wait time for audit trail
         if total_wait_ms > 0:
             self._throttle.record_throttle_wait(total_wait_ms)
+
+        return not self._is_interrupted(batch_cancel_event)
 
     def _execute_single(
         self,
@@ -431,6 +529,7 @@ class PooledExecutor:
         row: Mapping[str, Any],
         state_id: str,
         process_fn: Callable[[Mapping[str, Any], str], TransformResult],
+        batch_cancel_event: Event,
     ) -> tuple[int, TransformResult]:
         """Execute single row with capacity error retry and timeout.
 
@@ -451,37 +550,40 @@ class PooledExecutor:
             row: Row to process
             state_id: State ID for audit trail
             process_fn: Processing function
+            batch_cancel_event: Per-batch signal used to stop sibling retries after a fatal failure
 
         Returns:
             Tuple of (buffer_idx, result)
         """
         start_time = time.monotonic()
         max_time = start_time + self._max_capacity_retry_seconds
+        retryable_error: PluginRetryableError | CapacityError | None = None
 
         # Acquire semaphore at start of worker (not in execute_batch)
         # This prevents deadlock when capacity errors cause release-then-reacquire
-        self._semaphore.acquire()
+        if not self._acquire_worker_slot(batch_cancel_event):
+            return (buffer_idx, self._build_interrupted_result(None, batch_cancel_event))
         holding_semaphore = True
-        self._increment_active_workers()
 
         try:
             while True:
+                if retryable_error is not None and time.monotonic() >= max_time:
+                    return (buffer_idx, self._build_retry_timeout_result(retryable_error, start_time))
+
                 # Wait for global dispatch gate (ensures pacing between ALL dispatches)
                 # CRITICAL: Always check the gate, even after retries. The retry backoff
                 # sleep is for THIS worker's cooldown, but OTHER workers may have
                 # dispatched while we slept. We must check the global gate to maintain
                 # min_dispatch_delay_ms between ALL dispatches across ALL workers.
-                self._wait_for_dispatch_gate()
+                if not self._wait_for_dispatch_gate(batch_cancel_event):
+                    return (buffer_idx, self._build_interrupted_result(retryable_error, batch_cancel_event))
+
+                if retryable_error is not None and time.monotonic() >= max_time:
+                    return (buffer_idx, self._build_retry_timeout_result(retryable_error, start_time))
 
                 # Check shutdown before dispatching to external service
-                if self._shutdown_event.is_set():
-                    return (
-                        buffer_idx,
-                        TransformResult.error(
-                            {"reason": "shutdown_requested", "error": "Shutdown requested before dispatch"},
-                            retryable=False,
-                        ),
-                    )
+                if self._is_interrupted(batch_cancel_event):
+                    return (buffer_idx, self._build_interrupted_result(retryable_error, batch_cancel_event))
 
                 try:
                     result = process_fn(row, state_id)
@@ -501,47 +603,15 @@ class PooledExecutor:
                             ),
                         )
 
-                    if time.monotonic() >= max_time:
-                        elapsed = time.monotonic() - start_time
-                        error_data: TransformErrorReason = {
-                            "reason": "retry_timeout",
-                            "error": str(e),
-                            "error_type": type(e).__name__,
-                            "elapsed_seconds": elapsed,
-                            "max_seconds": self._max_capacity_retry_seconds,
-                        }
-                        return (
-                            buffer_idx,
-                            TransformResult.error(error_data, retryable=False),
-                        )
-
-                    retryable_error: PluginRetryableError | CapacityError = e
+                    retryable_error = e
                 except CapacityError as e:
-                    if time.monotonic() >= max_time:
-                        elapsed = time.monotonic() - start_time
-                        error_data = {
-                            "reason": "retry_timeout",
-                            "error": str(e),
-                            "error_type": type(e).__name__,
-                            "elapsed_seconds": elapsed,
-                            "max_seconds": self._max_capacity_retry_seconds,
-                            "status_code": e.status_code,
-                        }
-                        return (
-                            buffer_idx,
-                            TransformResult.error(error_data, retryable=False),
-                        )
-
                     retryable_error = e
 
-                if self._shutdown_event.is_set():
-                    return (
-                        buffer_idx,
-                        TransformResult.error(
-                            {"reason": "shutdown_requested", "error": str(retryable_error)},
-                            retryable=False,
-                        ),
-                    )
+                if time.monotonic() >= max_time:
+                    return (buffer_idx, self._build_retry_timeout_result(retryable_error, start_time))
+
+                if self._is_interrupted(batch_cancel_event):
+                    return (buffer_idx, self._build_interrupted_result(retryable_error, batch_cancel_event))
 
                 self._throttle.on_capacity_error()
 
@@ -554,12 +624,19 @@ class PooledExecutor:
                 # Wait throttle delay before retry
                 retry_delay_ms = self._throttle.current_delay_ms
                 if retry_delay_ms > 0:
-                    time.sleep(retry_delay_ms / 1000)
-                    self._throttle.record_throttle_wait(retry_delay_ms)
+                    remaining_retry_budget_s = max(0.0, max_time - time.monotonic())
+                    retry_sleep_s = min(retry_delay_ms / 1000, remaining_retry_budget_s)
+                    interrupted, waited_ms = self._wait_interruptibly(retry_sleep_s, batch_cancel_event)
+                    self._throttle.record_throttle_wait(waited_ms)
+                    if interrupted:
+                        return (buffer_idx, self._build_interrupted_result(retryable_error, batch_cancel_event))
+
+                if time.monotonic() >= max_time:
+                    return (buffer_idx, self._build_retry_timeout_result(retryable_error, start_time))
 
                 # Re-acquire semaphore for retry
-                self._semaphore.acquire()
-                self._increment_active_workers()
+                if not self._acquire_worker_slot(batch_cancel_event):
+                    return (buffer_idx, self._build_interrupted_result(retryable_error, batch_cancel_event))
                 holding_semaphore = True
 
                 # Continue to top of loop for retry

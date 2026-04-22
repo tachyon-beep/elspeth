@@ -29,6 +29,7 @@ from elspeth.contracts.declaration_contracts import (
 from elspeth.contracts.errors import (
     FrameworkBugError,
     OrchestrationInvariantError,
+    SchemaConfigFieldMetadataMismatch,
     SchemaConfigModePayload,
     SchemaConfigModeViolation,
 )
@@ -38,6 +39,7 @@ from elspeth.contracts.schema_contract import (
     PipelineRow,
     SchemaContract,
 )
+from elspeth.contracts.schema_contract_factory import create_contract_from_config
 
 
 def _build_contract(
@@ -79,6 +81,51 @@ def _allowed_declared_fields(output_schema_config: SchemaConfig) -> frozenset[st
     return declared_fields | explicit_guarantees | audit_fields
 
 
+def _declared_field_contracts(output_schema_config: SchemaConfig) -> dict[str, FieldContract]:
+    return {field.normalized_name: field for field in create_contract_from_config(output_schema_config).fields}
+
+
+def _collect_field_metadata_mismatches(
+    *,
+    output_schema_config: SchemaConfig,
+    emitted_row: PipelineRow,
+) -> list[SchemaConfigFieldMetadataMismatch]:
+    if output_schema_config.fields is None:
+        return []
+
+    mismatches: list[SchemaConfigFieldMetadataMismatch] = []
+    declared_fields = _declared_field_contracts(output_schema_config)
+    runtime_row_fields = frozenset(emitted_row.keys())
+
+    for field_name, declared_field in declared_fields.items():
+        if field_name not in runtime_row_fields:
+            continue
+
+        observed_field = emitted_row.contract.find_field(field_name)
+        if (
+            observed_field is not None
+            and observed_field.python_type is declared_field.python_type
+            and observed_field.required == declared_field.required
+            and observed_field.nullable == declared_field.nullable
+        ):
+            continue
+
+        mismatches.append(
+            {
+                "field": field_name,
+                "expected_type": declared_field.python_type.__name__,
+                "observed_type": observed_field.python_type.__name__ if observed_field is not None else "<missing>",
+                "expected_required": declared_field.required,
+                "observed_required": observed_field.required if observed_field is not None else False,
+                "expected_nullable": declared_field.nullable,
+                "observed_nullable": observed_field.nullable if observed_field is not None else False,
+                "observed_present": observed_field is not None,
+            }
+        )
+
+    return mismatches
+
+
 def verify_schema_config_mode(
     *,
     output_schema_config: SchemaConfig,
@@ -96,6 +143,7 @@ def verify_schema_config_mode(
     declared_mode = output_schema_config.mode
     declared_locked = True
     allowed_declared_fields = _allowed_declared_fields(output_schema_config)
+    required_output_fields = output_schema_config.get_effective_guaranteed_fields()
 
     for emitted in emitted_rows:
         if emitted.contract is None:
@@ -103,15 +151,33 @@ def verify_schema_config_mode(
 
         observed_mode = emitted.contract.mode.lower()
         observed_locked = emitted.contract.locked
+        runtime_row_fields = frozenset(emitted.keys())
+        runtime_contract_fields = frozenset(fc.normalized_name for fc in emitted.contract.fields)
 
         undeclared_extra_fields: list[str] | None = None
         if declared_mode == "fixed":
-            runtime_fields = frozenset(fc.normalized_name for fc in emitted.contract.fields) | frozenset(emitted.keys())
+            runtime_fields = runtime_contract_fields | runtime_row_fields
             extras = runtime_fields - allowed_declared_fields
             if extras:
                 undeclared_extra_fields = sorted(extras)
 
-        if observed_mode == declared_mode and observed_locked == declared_locked and undeclared_extra_fields is None:
+        missing_required_fields: list[str] | None = None
+        missing = required_output_fields - runtime_row_fields
+        if missing:
+            missing_required_fields = sorted(missing)
+
+        field_metadata_mismatches = _collect_field_metadata_mismatches(
+            output_schema_config=output_schema_config,
+            emitted_row=emitted,
+        )
+
+        if (
+            observed_mode == declared_mode
+            and observed_locked == declared_locked
+            and undeclared_extra_fields is None
+            and missing_required_fields is None
+            and not field_metadata_mismatches
+        ):
             continue
 
         payload: SchemaConfigModePayload = {
@@ -120,8 +186,22 @@ def verify_schema_config_mode(
             "declared_locked": declared_locked,
             "observed_locked": observed_locked,
         }
+        problem_details: list[str] = []
+        if observed_mode != declared_mode:
+            problem_details.append(f"mode {observed_mode!r} != declared {declared_mode!r}")
+        if observed_locked != declared_locked:
+            problem_details.append(f"locked={observed_locked!r} != declared {declared_locked!r}")
         if undeclared_extra_fields is not None:
             payload["undeclared_extra_fields"] = undeclared_extra_fields
+            problem_details.append(f"undeclared extra fields {undeclared_extra_fields!r}")
+        if missing_required_fields is not None:
+            payload["runtime_observed_fields"] = sorted(runtime_row_fields)
+            payload["missing_required_fields"] = missing_required_fields
+            problem_details.append(f"missing required fields {missing_required_fields!r}")
+        if field_metadata_mismatches:
+            payload["field_metadata_mismatches"] = field_metadata_mismatches
+            mismatch_fields = [mismatch["field"] for mismatch in field_metadata_mismatches]
+            problem_details.append(f"field metadata mismatches for {mismatch_fields!r}")
 
         raise SchemaConfigModeViolation(
             plugin=plugin_name,
@@ -131,9 +211,9 @@ def verify_schema_config_mode(
             token_id=token_id,
             payload=payload,
             message=(
-                f"Transform {plugin_name!r} (node {node_id!r}) declared output schema "
-                f"mode {declared_mode!r} but emitted contract mode {observed_mode!r} "
-                f"(locked={observed_locked!r}) for row {row_id!r}."
+                f"Transform {plugin_name!r} (node {node_id!r}) emitted output schema "
+                f"semantics inconsistent with its declaration for row {row_id!r}: "
+                f"{'; '.join(problem_details)}."
             ),
         )
 

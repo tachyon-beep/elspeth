@@ -224,6 +224,38 @@ def test_batch_replicate_mixed_valid_invalid_excludes_quarantined():
     assert result.success_reason["metadata"]["quarantined"][1]["row_data"]["id"] == 3
 
 
+def test_batch_replicate_contract_excludes_quarantined_only_fields():
+    """Successful output contracts describe emitted rows only, not quarantined rows."""
+    transform = BatchReplicate(
+        {
+            "schema": {"mode": "observed"},
+            "copies_field": "copies",
+        }
+    )
+
+    invalid_row = {"id": 1, "copies": 0, "quarantined_only_marker": "invalid"}
+    valid_row = {"id": 2, "copies": 1}
+
+    invalid_fields = tuple(make_field(key, object, original_name=key, required=False, source="inferred") for key in invalid_row)
+    valid_fields = tuple(make_field(key, object, original_name=key, required=False, source="inferred") for key in valid_row)
+
+    pipeline_rows = [
+        make_row(invalid_row, contract=SchemaContract(mode="OBSERVED", fields=invalid_fields, locked=True)),
+        make_row(valid_row, contract=SchemaContract(mode="OBSERVED", fields=valid_fields, locked=True)),
+    ]
+
+    ctx = make_context()
+    result = transform.process(pipeline_rows, ctx)
+
+    assert result.status == "success"
+    assert result.rows is not None
+    assert len(result.rows) == 1
+    assert "quarantined_only_marker" not in result.rows[0]
+
+    contract_field_names = {field.normalized_name for field in result.rows[0].contract.fields}
+    assert contract_field_names == {"id", "copies", "copy_index"}
+
+
 def test_batch_replicate_quarantined_indices_in_success_reason():
     """T26: Quarantined row indices must be in success_reason for audit trail.
 

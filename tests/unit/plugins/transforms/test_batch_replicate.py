@@ -347,6 +347,26 @@ class TestBatchReplicateConfigValidation:
                 }
             )
 
+    def test_explicit_schema_declaring_copy_index_is_rejected(self) -> None:
+        """Fixed/flexible schemas must fail closed when copy_index would collide."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        with pytest.raises(PluginConfigError, match="copy_index"):
+            BatchReplicate(
+                {
+                    "schema": {
+                        "mode": "fixed",
+                        "fields": [
+                            "id: int",
+                            "copies: int",
+                            "copy_index: int",
+                        ],
+                    },
+                    "include_copy_index": True,
+                }
+            )
+
 
 class TestBatchReplicateSchemaContract:
     """Schema contract tests."""
@@ -428,6 +448,17 @@ class TestBatchReplicateDeepCopy:
 
         second = result.rows[1].to_dict()
         assert "injected" not in second["meta"]
+
+    def test_runtime_collision_on_copy_index_raises_plugin_contract_violation(self, ctx: PluginContext) -> None:
+        """Observed batches must reject incoming copy_index instead of overwriting it."""
+        from elspeth.contracts.errors import PluginContractViolation
+        from elspeth.plugins.transforms.batch_replicate import BatchReplicate
+
+        transform = BatchReplicate({"schema": DYNAMIC_SCHEMA, "copies_field": "copies", "include_copy_index": True})
+        rows = [make_pipeline_row({"id": 1, "copies": 2, "copy_index": "source-value"})]
+
+        with pytest.raises(PluginContractViolation, match=r"would overwrite existing input fields \['copy_index'\]"):
+            transform.process(rows, ctx)
 
 
 class TestBatchReplicateDeclaredOutputFields:

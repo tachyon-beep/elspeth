@@ -9,6 +9,7 @@ from typing import NotRequired, TypedDict
 import pytest
 
 from elspeth.contracts.declaration_contracts import (
+    AggregateDeclarationContractViolation,
     BatchFlushInputs,
     BatchFlushOutputs,
     BoundaryInputs,
@@ -22,6 +23,8 @@ from elspeth.contracts.declaration_contracts import (
     PreEmissionInputs,
     _attach_contract_name_from_dispatcher,
     _clear_registry_for_tests,
+    _mark_aggregate_dispatched,
+    contract_sites,
     freeze_declaration_registry,
     implements_dispatch_site,
     negative_example_bundles,
@@ -364,6 +367,59 @@ def test_violation_payload_secrets_scrubbed() -> None:
     assert dump["payload"]["api_key"] == "<redacted-secret>"
 
 
+def test_violation_message_secrets_scrubbed() -> None:
+    v = _TestViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"note": "safe"},
+        message="secret sk-abcdef1234567890abcdef1234567890 leaked",
+    )
+    _attach_contract_name_from_dispatcher(v, "t")
+    dump = v.to_audit_dict()
+    assert dump["message"] == "<redacted-secret>"
+    assert dump["payload"]["note"] == "safe"
+
+
+def test_aggregate_violation_messages_secrets_scrubbed() -> None:
+    child_a = _TestViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk",
+        payload={"note": "safe-a"},
+        message="secret sk-abcdef1234567890abcdef1234567890 leaked",
+    )
+    child_b = _TestViolation(
+        plugin="P",
+        node_id="n",
+        run_id="r",
+        row_id="rw",
+        token_id="tk2",
+        payload={"note": "safe-b"},
+        message="safe child message",
+    )
+    _attach_contract_name_from_dispatcher(child_a, "contract-a")
+    _attach_contract_name_from_dispatcher(child_b, "contract-b")
+
+    aggregate = AggregateDeclarationContractViolation(
+        plugin="P",
+        violations=(child_a, child_b),
+        message="aggregate saw sk-abcdef1234567890abcdef1234567890",
+    )
+    _mark_aggregate_dispatched(aggregate)
+
+    dump = aggregate.to_audit_dict()
+    assert dump["message"] == "<redacted-secret>"
+    assert dump["violations"][0]["message"] == "<redacted-secret>"
+    assert dump["violations"][0]["payload"]["note"] == "safe-a"
+    assert dump["violations"][1]["message"] == "safe child message"
+    assert dump["violations"][1]["payload"]["note"] == "safe-b"
+
+
 def test_runtime_check_raises_violation() -> None:
     """Invoke the contract through the dispatcher so C4's contract_name
     attribution path is exercised. Post-H2 renames to
@@ -524,6 +580,38 @@ def test_negative_example_bundle_helper_collects_all_claimed_sites() -> None:
         DispatchSite.POST_EMISSION,
         DispatchSite.BATCH_FLUSH,
     )
+
+
+def test_shadowed_undecorated_override_rejected() -> None:
+    class _BaseMarkedContract(DeclarationContract):
+        name = "base_marked"
+        payload_schema: type = _FakePayload
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+            return None
+
+        @classmethod
+        def negative_example(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(object(), object()))
+
+        @classmethod
+        def positive_example_does_not_apply(cls) -> ExampleBundle:
+            return ExampleBundle(site=DispatchSite.POST_EMISSION, args=(object(), object()))
+
+    class _ShadowingChildContract(_BaseMarkedContract):
+        name = "shadowing_child"
+
+        def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+            return None
+
+    with pytest.raises(FrameworkBugError, match="without @implements_dispatch_site"):
+        contract_sites(_ShadowingChildContract())
+    with pytest.raises(FrameworkBugError, match="without @implements_dispatch_site"):
+        register_declaration_contract(_ShadowingChildContract())
 
 
 def test_negative_example_bundle_helper_requires_every_claimed_site() -> None:

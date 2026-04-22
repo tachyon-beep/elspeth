@@ -666,109 +666,137 @@ class SinkExecutor:
             ]
 
             if failsink is not None:
+                primary_divert_pairs = [(t, s) for t, _, s in primary_divert_states]
+                diverted_only_tokens = [token for token, _idx, _state in primary_divert_states]
+                primary_divert_states_closed = False
+
                 # Failsink mode: write enriched rows to failsink
-                if failsink.node_id is None:
-                    raise OrchestrationInvariantError(f"Failsink '{failsink.name}' executed without node_id - orchestrator bug")
-                if failsink_edge_id is None:
-                    raise OrchestrationInvariantError("failsink_edge_id is None but failsink is not None — orchestrator bug")
-                if failsink_name is None:
-                    raise OrchestrationInvariantError("failsink_name is None but failsink is not None — orchestrator bug")
-                failsink_node_id: str = failsink.node_id
-
-                # Build enriched rows — keyed by token_id so failsink node states
-                # can record the enriched payload (what was actually written), not
-                # the original row data.
-                iso_ts = datetime.now(UTC).isoformat()
-                enriched_rows: list[dict[str, object]] = []
-                enriched_by_token: dict[str, dict[str, object]] = {}
-                for token, idx, _state in primary_divert_states:
-                    diversion = diversion_by_index[idx]
-                    enriched_row = {
-                        **diversion.row_data,
-                        "__diversion_reason": diversion.reason,
-                        "__diverted_from": sink_name,
-                        "__diversion_timestamp": iso_ts,
-                    }
-                    enriched_rows.append(enriched_row)
-                    enriched_by_token[token.token_id] = enriched_row
-
-                # Write to failsink — if validation or write fails, complete
-                # primary divert states as FAILED before re-raising (they're
-                # already open from the pre-phase).
-                failsink._reset_diversion_log()
                 try:
-                    try:
-                        self._run_sink_boundary_checks(
-                            sink=failsink,
-                            rows=enriched_rows,
-                            tokens=[token for token, _idx, _state in primary_divert_states],
-                            run_id=ctx.run_id,
+                    if failsink.node_id is None:
+                        raise OrchestrationInvariantError(f"Failsink '{failsink.name}' executed without node_id - orchestrator bug")
+                    if failsink_edge_id is None:
+                        raise OrchestrationInvariantError("failsink_edge_id is None but failsink is not None — orchestrator bug")
+                    if failsink_name is None:
+                        raise OrchestrationInvariantError("failsink_name is None but failsink is not None — orchestrator bug")
+                    failsink_node_id: str = failsink.node_id
+
+                    # Build enriched rows — keyed by token_id so failsink node states
+                    # can record the enriched payload (what was actually written), not
+                    # the original row data.
+                    iso_ts = datetime.now(UTC).isoformat()
+                    enriched_rows: list[dict[str, object]] = []
+                    enriched_by_token: dict[str, dict[str, object]] = {}
+                    for token, idx, _state in primary_divert_states:
+                        diversion = diversion_by_index[idx]
+                        enriched_row = {
+                            **diversion.row_data,
+                            "__diversion_reason": diversion.reason,
+                            "__diverted_from": sink_name,
+                            "__diversion_timestamp": iso_ts,
+                        }
+                        enriched_rows.append(enriched_row)
+                        enriched_by_token[token.token_id] = enriched_row
+
+                    with track_operation(
+                        recorder=self._execution,
+                        run_id=self._run_id,
+                        node_id=failsink_node_id,
+                        operation_type="sink_write",
+                        ctx=ctx,
+                        input_data={
+                            "sink_plugin": failsink.name,
+                            "row_count": len(primary_divert_states),
+                            "diverted_from": sink_name,
+                        },
+                    ) as failsink_handle:
+                        with self._spans.sink_span(
+                            failsink.name,
                             node_id=failsink_node_id,
-                            row_contracts=None,
+                            token_ids=[token.token_id for token in diverted_only_tokens],
+                        ):
+                            failsink._reset_diversion_log()
+                            try:
+                                self._run_sink_boundary_checks(
+                                    sink=failsink,
+                                    rows=enriched_rows,
+                                    tokens=diverted_only_tokens,
+                                    run_id=ctx.run_id,
+                                    node_id=failsink_node_id,
+                                    row_contracts=None,
+                                )
+                                # Validate enriched rows against failsink required fields.
+                                # skip_schema=True because the executor injects __diversion_*
+                                # fields that are outside the failsink's declared schema —
+                                # a fixed-schema failsink (extra="forbid") would reject them.
+                                # Required-field checking still catches missing upstream fields.
+                                # Don't pass primary-path contracts here: the failsink's
+                                # declared_required_fields are diagnostic-shaped (e.g.,
+                                # __diversion_reason) and have no relationship to the
+                                # primary contract's field optionality. Annotating with
+                                # "optional in coalesce merge" would be misdirection —
+                                # the operator is debugging a failsink write, not a
+                                # missing primary field.
+                                self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
+                            except (
+                                DeclarationContractViolation,
+                                AggregateDeclarationContractViolation,
+                                SinkTransactionalInvariantError,
+                            ) as boundary_violation:
+                                self._complete_states_failed(
+                                    states=primary_divert_pairs,
+                                    duration_ms=0.0,
+                                    error=self._build_boundary_error(exc=boundary_violation, phase="failsink_write"),
+                                )
+                                self._record_boundary_failure_outcomes(
+                                    tokens=diverted_only_tokens,
+                                    sink_name=failsink.name,
+                                    phase="failsink_write",
+                                    violation=boundary_violation,
+                                )
+                                primary_divert_states_closed = True
+                                raise
+
+                            failsink_write_result = failsink.write(enriched_rows, ctx)
+                            if not isinstance(failsink_write_result, SinkWriteResult):
+                                raise PluginContractViolation(
+                                    f"Failsink '{failsink_name}' returned {type(failsink_write_result).__name__}, "
+                                    f"expected SinkWriteResult. This is a sink plugin bug."
+                                )
+                            failsink_artifact_info = failsink_write_result.artifact
+                            if not isinstance(failsink_artifact_info, ArtifactDescriptor):
+                                raise PluginContractViolation(
+                                    f"Failsink '{failsink_name}' returned SinkWriteResult with artifact of type "
+                                    f"{type(failsink_artifact_info).__name__}, expected ArtifactDescriptor. "
+                                    f"This is a sink plugin bug."
+                                )
+                            if failsink_write_result.diversions:
+                                raise FrameworkBugError(
+                                    f"Failsink '{failsink_name}' produced {len(failsink_write_result.diversions)} "
+                                    f"diversions during failsink write — failsinks must not divert rows."
+                                )
+
+                        failsink.flush()
+                        failsink_handle.output_data = {
+                            "artifact_path": failsink_artifact_info.path_or_uri,
+                            "content_hash": failsink_artifact_info.content_hash,
+                        }
+                except contract_errors.TIER_1_ERRORS as e:
+                    if not primary_divert_states_closed:
+                        self._best_effort_cleanup(primary_divert_pairs, e, "failsink_write")
+                    raise
+                except Exception as e:
+                    if not primary_divert_states_closed:
+                        fs_write_error = ExecutionError(
+                            exception=str(e),
+                            exception_type=type(e).__name__,
+                            phase="failsink_write",
                         )
-                        # Validate enriched rows against failsink required fields.
-                        # skip_schema=True because the executor injects __diversion_*
-                        # fields that are outside the failsink's declared schema —
-                        # a fixed-schema failsink (extra="forbid") would reject them.
-                        # Required-field checking still catches missing upstream fields.
-                        # Inside the try block so failures close primary divert states.
-                        # Don't pass primary-path contracts here: the failsink's
-                        # declared_required_fields are diagnostic-shaped (e.g.,
-                        # __diversion_reason) and have no relationship to the
-                        # primary contract's field optionality. Annotating with
-                        # "optional in coalesce merge" would be misdirection —
-                        # the operator is debugging a failsink write, not a
-                        # missing primary field.
-                        self._validate_sink_input(failsink, enriched_rows, skip_schema=True)
-                    except (
-                        DeclarationContractViolation,
-                        AggregateDeclarationContractViolation,
-                        SinkTransactionalInvariantError,
-                    ) as boundary_violation:
-                        primary_divert_pairs = [(t, s) for t, _, s in primary_divert_states]
                         self._complete_states_failed(
                             states=primary_divert_pairs,
                             duration_ms=0.0,
-                            error=self._build_boundary_error(exc=boundary_violation, phase="failsink_write"),
+                            error=fs_write_error,
                         )
-                        self._record_boundary_failure_outcomes(
-                            tokens=[token for token, _idx, _state in primary_divert_states],
-                            sink_name=failsink.name,
-                            phase="failsink_write",
-                            violation=boundary_violation,
-                        )
-                        raise
-
-                    failsink_write_result = failsink.write(enriched_rows, ctx)
-                    failsink.flush()
-                except contract_errors.TIER_1_ERRORS:
                     raise
-                except Exception as e:
-                    fs_write_error = ExecutionError(
-                        exception=str(e),
-                        exception_type=type(e).__name__,
-                        phase="failsink_write",
-                    )
-                    self._complete_states_failed(
-                        states=[(t, s) for t, _, s in primary_divert_states],
-                        duration_ms=0.0,
-                        error=fs_write_error,
-                    )
-                    raise
-
-                if failsink_write_result.diversions:
-                    raise FrameworkBugError(
-                        f"Failsink '{failsink_name}' produced {len(failsink_write_result.diversions)} "
-                        f"diversions during failsink write — failsinks must not divert rows."
-                    )
-
-                failsink_artifact_info = failsink_write_result.artifact
-                if not isinstance(failsink_artifact_info, ArtifactDescriptor):
-                    raise PluginContractViolation(
-                        f"Failsink '{failsink_name}' returned SinkWriteResult with artifact of type "
-                        f"{type(failsink_artifact_info).__name__}, expected ArtifactDescriptor. "
-                        f"This is a sink plugin bug."
-                    )
 
                 # Open node_states at failsink node (destination).
                 # Use the enriched payload (what was actually written to the failsink),

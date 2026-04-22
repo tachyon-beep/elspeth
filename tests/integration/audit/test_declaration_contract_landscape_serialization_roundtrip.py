@@ -53,6 +53,14 @@ class _SecretViolation(DeclarationContractViolation):
     payload_schema = _SecretPayload
 
 
+class _SecretMessagePayload(TypedDict):
+    note: str
+
+
+class _SecretMessageViolation(DeclarationContractViolation):
+    payload_schema = _SecretMessagePayload
+
+
 class _AggregateChildPayload(TypedDict):
     reason: str
 
@@ -214,6 +222,45 @@ class _SecretContract(DeclarationContract):
             args=(
                 _post_emission_inputs(
                     run_id="secret-neg-run", row_id="secret-neg-row", token_id="secret-neg-token", node_id="secret-neg-node"
+                ),
+                _post_emission_outputs(),
+            ),
+        )
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        return cls.negative_example()
+
+
+class _SecretMessageContract(DeclarationContract):
+    name = "secret_message_test"
+    payload_schema: type = _SecretMessagePayload
+
+    def applies_to(self, plugin: object) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(self, inputs: PostEmissionInputs, outputs: PostEmissionOutputs) -> None:
+        raise _SecretMessageViolation(
+            plugin=inputs.plugin.name,
+            node_id=inputs.node_id,
+            run_id=inputs.run_id,
+            row_id=inputs.row_id,
+            token_id=inputs.token_id,
+            payload={"note": "safe"},
+            message="secret sk-abcdef1234567890abcdef1234567890 leaked",
+        )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        return ExampleBundle(
+            site=DispatchSite.POST_EMISSION,
+            args=(
+                _post_emission_inputs(
+                    run_id="secret-msg-neg-run",
+                    row_id="secret-msg-neg-row",
+                    token_id="secret-msg-neg-token",
+                    node_id="secret-msg-neg-node",
                 ),
                 _post_emission_outputs(),
             ),
@@ -396,6 +443,49 @@ class TestDeclarationContractViolationRoundTrip:
         assert "sk-abcdef" not in json.dumps(context)
         assert context["contract_name"] == "secret_test"
         assert context["payload"]["api_key"] == "<redacted-secret>"
+
+    def test_secrets_in_message_are_scrubbed_before_landscape_write(self) -> None:
+        run_id = "run-secret-message"
+        row_id = "row-secret-message"
+        token_id = "tok-secret-message"
+        node_id = "n-secret-message"
+
+        setup = _setup_landscape(
+            run_id=run_id,
+            row_id=row_id,
+            token_id=token_id,
+            node_id=node_id,
+        )
+
+        register_declaration_contract(_SecretMessageContract())
+        try:
+            run_post_emission_checks(
+                inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
+                outputs=_post_emission_outputs(),
+            )
+        except _SecretMessageViolation as violation:
+            error = ExecutionError(
+                exception=str(violation),
+                exception_type=type(violation).__name__,
+                phase="executor_post_process",
+                context=violation.to_audit_dict(),
+            )
+        else:
+            raise AssertionError("Expected _SecretMessageViolation")
+
+        context = _record_failure(
+            setup,
+            token_id=token_id,
+            node_id=node_id,
+            run_id=run_id,
+            input_data={"note": "safe"},
+            error=error,
+        )
+
+        assert "sk-abcdef" not in json.dumps(context)
+        assert context["contract_name"] == "secret_message_test"
+        assert context["message"] == "<redacted-secret>"
+        assert context["payload"]["note"] == "safe"
 
 
 class TestAggregateDeclarationContractViolationRoundTrip:

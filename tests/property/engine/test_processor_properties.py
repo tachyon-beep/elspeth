@@ -39,6 +39,7 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.engine.processor import MAX_WORK_QUEUE_ITERATIONS
+from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
 from tests.fixtures.base_classes import as_sink, as_source, as_transform
 from tests.fixtures.factories import wire_transforms
 from tests.fixtures.landscape import make_landscape_db
@@ -540,13 +541,12 @@ class TestIterationGuardProperties:
         assert MAX_WORK_QUEUE_ITERATIONS >= 1000, f"Guard too low for normal pipelines: {MAX_WORK_QUEUE_ITERATIONS}"
         assert MAX_WORK_QUEUE_ITERATIONS <= 100_000, f"Guard too high to catch bugs quickly: {MAX_WORK_QUEUE_ITERATIONS}"
 
-    def test_max_iterations_constant_value(self) -> None:
-        """Property: MAX_WORK_QUEUE_ITERATIONS is exactly 10,000.
-
-        This documents the expected value. If changed, tests must be updated.
-        """
-        assert MAX_WORK_QUEUE_ITERATIONS == 10_000, (
-            f"MAX_WORK_QUEUE_ITERATIONS changed from 10_000 to {MAX_WORK_QUEUE_ITERATIONS}. Update this test if this is intentional."
+    def test_max_iterations_constant_exceeds_supported_batch_replicate_fanout(self) -> None:
+        """Property: the outer guard must exceed supported single-row expansion."""
+        max_supported_copies = BatchReplicateConfig.model_json_schema()["properties"]["max_copies"]["maximum"]
+        assert max_supported_copies < MAX_WORK_QUEUE_ITERATIONS, (
+            "MAX_WORK_QUEUE_ITERATIONS must exceed BatchReplicate max_copies so a legal "
+            "fan-out plus the original work item does not trip the outer guard."
         )
 
     @given(num_rows=st.integers(min_value=1, max_value=100))

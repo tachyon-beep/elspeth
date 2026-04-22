@@ -1505,6 +1505,82 @@ class TestCounterAccountingGap:
         assert result.is_match is None  # Indeterminate, not False
 
 
+class TestVerifierStateIntegrityOnExceptionalPaths:
+    """Regression tests for exceptional paths that must not mutate verifier state."""
+
+    def _create_mock_call(self, *, request_hash: str) -> Call:
+        return Call(
+            call_id="call_123",
+            state_id="state_123",
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_hash=request_hash,
+            created_at=datetime.now(UTC),
+            latency_ms=150.0,
+            response_ref=None,
+            response_hash=None,
+        )
+
+    def test_call_not_found_leaves_report_and_sequence_state_unchanged(self) -> None:
+        """CALL_NOT_FOUND must raise without consuming verifier state."""
+        recorder = MagicMock()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        recorder.find_call_by_request_hash.return_value = self._create_mock_call(request_hash=request_hash)
+        recorder.get_call_response_data.return_value = CallDataResult(state=CallDataState.CALL_NOT_FOUND, data=None)
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        sequence_key = (CallType.LLM, request_hash)
+
+        with pytest.raises(AuditIntegrityError, match="CALL_NOT_FOUND"):
+            verifier.verify(
+                call_type=CallType.LLM,
+                request_data=request_data,
+                live_response={"content": "Hello"},
+            )
+
+        report = verifier.get_report()
+        assert report.total_calls == 0
+        assert report.matches == 0
+        assert report.mismatches == 0
+        assert report.missing_recordings == 0
+        assert report.missing_payloads == 0
+        assert report.unverifiable == 0
+        assert report.no_response_recorded == 0
+        assert report.results == []
+        assert sequence_key not in verifier._sequence_counters
+
+    def test_repository_integrity_error_leaves_report_and_sequence_state_unchanged(self) -> None:
+        """Repository-raised AuditIntegrityError must not corrupt verifier state."""
+        recorder = MagicMock()
+        request_data = {"model": "gpt-4", "messages": []}
+        request_hash = stable_hash(request_data)
+        recorder.find_call_by_request_hash.return_value = self._create_mock_call(request_hash=request_hash)
+        recorder.get_call_response_data.side_effect = AuditIntegrityError("payload integrity failure")
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        sequence_key = (CallType.LLM, request_hash)
+
+        with pytest.raises(AuditIntegrityError, match="payload integrity failure"):
+            verifier.verify(
+                call_type=CallType.LLM,
+                request_data=request_data,
+                live_response={"content": "Hello"},
+            )
+
+        report = verifier.get_report()
+        assert report.total_calls == 0
+        assert report.matches == 0
+        assert report.mismatches == 0
+        assert report.missing_recordings == 0
+        assert report.missing_payloads == 0
+        assert report.unverifiable == 0
+        assert report.no_response_recorded == 0
+        assert report.results == []
+        assert sequence_key not in verifier._sequence_counters
+
+
 class TestHasDifferencesNoRecordedResponse:
     """Tests for elspeth-3895543969: has_differences misleading for no_recorded_response."""
 
@@ -1524,3 +1600,51 @@ class TestHasDifferencesNoRecordedResponse:
         assert result.has_differences is False  # Bug: was True, should be False
         assert result.recorded_call_missing is False
         assert result.payload_missing is False
+
+
+class TestGetReportSnapshots:
+    """Regression tests for report snapshot isolation."""
+
+    def test_get_report_returns_defensive_snapshot(self) -> None:
+        """Mutating a returned report must not alter verifier internals."""
+        recorder = MagicMock()
+        request_data = {"id": 1}
+        request_hash = stable_hash(request_data)
+        recorder.find_call_by_request_hash.return_value = Call(
+            call_id="call_123",
+            state_id="state_123",
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_hash=request_hash,
+            created_at=datetime.now(UTC),
+            latency_ms=150.0,
+            response_ref=None,
+            response_hash=None,
+        )
+        recorder.get_call_response_data.return_value = CallDataResult(
+            state=CallDataState.AVAILABLE,
+            data={"content": "recorded"},
+        )
+
+        verifier = CallVerifier(recorder, source_run_id="run_abc123")
+        verifier.verify(
+            call_type=CallType.LLM,
+            request_data=request_data,
+            live_response={"content": "recorded"},
+        )
+
+        snapshot = verifier.get_report()
+        snapshot.matches = 99
+        snapshot.results.append(
+            VerificationResult.missing_recording(
+                request_hash="forged",
+                live_response={"content": "forged"},
+            )
+        )
+
+        fresh = verifier.get_report()
+        assert fresh is not snapshot
+        assert fresh.matches == 1
+        assert len(fresh.results) == 1
+        assert fresh.results[0].request_hash == request_hash

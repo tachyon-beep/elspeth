@@ -23,7 +23,7 @@ from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.call_data import CallPayload
 from elspeth.contracts.errors import ContractViolation, TransformErrorReason
 from elspeth.contracts.schema_contract import SchemaContract
-from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape._database_ops import DatabaseOps, ReadOnlyDatabaseOps
 from elspeth.core.landscape.data_flow_repository import DataFlowRepository
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.execution_repository import ExecutionRepository
@@ -251,6 +251,7 @@ class RecorderFactory:
 
         # Database operations helper for reduced boilerplate
         ops = DatabaseOps(db)
+        read_ops = ReadOnlyDatabaseOps(db)
 
         # Loader instances for row-to-object conversions
         run_loader = RunLoader()
@@ -301,7 +302,7 @@ class RecorderFactory:
 
         # Composed repository for read-only queries
         self._query = QueryRepository(
-            ops,
+            read_ops,
             row_loader=row_loader,
             token_loader=token_loader,
             token_parent_loader=token_parent_loader,

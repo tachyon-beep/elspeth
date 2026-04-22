@@ -127,3 +127,37 @@ def _allow_raw_secrets_in_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     with FrameworkBugError.  This fixture ensures consistent behaviour.
     """
     monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
+
+
+@pytest.fixture(autouse=True)
+def _freeze_runtime_val_registries_before_begin_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mirror the runtime-VAL manifest precondition for direct repository tests.
+
+    Production reaches ``RunLifecycleRepository.begin_run()`` only after
+    orchestrator bootstrap has sealed the declaration and Tier-1 registries.
+    Many tests exercise the repository layer directly or register test-only
+    declaration contracts that are intentionally outside
+    ``EXPECTED_CONTRACT_SITES``. For those paths we freeze the current test
+    registry state immediately before ``begin_run()`` rather than forcing the
+    full production bootstrap equality check.
+
+    Empty declaration registries are left unfrozen so ``begin_run()`` still
+    fails closed when a test genuinely models the unsafe path.
+    """
+    from elspeth.contracts.declaration_contracts import (
+        freeze_declaration_registry,
+        registered_declaration_contracts,
+    )
+    from elspeth.contracts.tier_registry import TIER_1_ERRORS, freeze_tier_registry
+    from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
+
+    original_begin_run = RunLifecycleRepository.begin_run
+
+    def wrapped_begin_run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if registered_declaration_contracts():
+            freeze_declaration_registry()
+        if len(TIER_1_ERRORS) > 0:
+            freeze_tier_registry()
+        return original_begin_run(self, *args, **kwargs)
+
+    monkeypatch.setattr(RunLifecycleRepository, "begin_run", wrapped_begin_run)

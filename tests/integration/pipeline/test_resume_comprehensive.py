@@ -37,7 +37,7 @@ from elspeth.core.landscape.schema import (
     tokens_table,
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
-from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.engine.orchestrator import Orchestrator, PipelineConfig, prepare_for_run
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.plugins.sinks.json_sink import JSONSink
 from elspeth.plugins.sources.null_source import NullSource
@@ -55,6 +55,7 @@ def _null_source(on_success: str = "default") -> NullSource:
 
 def _runtime_val_manifest_json() -> str:
     """Mirror the run-header manifest production begin_run() stores."""
+    prepare_for_run()
     return canonical_json(build_runtime_val_manifest())
 
 
