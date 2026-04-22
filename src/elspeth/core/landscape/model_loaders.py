@@ -702,6 +702,8 @@ class OperationLoader:
                 raise AuditIntegrityError(f"Operation {oid}: status={row.status!r} but duration_ms is NULL — audit integrity violation")
             if row.status == "failed" and row.error_message is None:
                 raise AuditIntegrityError(f"Operation {oid}: status='failed' but error_message is NULL — audit integrity violation")
+            if row.status == "failed" and row.error_message == "":
+                raise AuditIntegrityError(f"Operation {oid}: status='failed' but error_message is empty — audit integrity violation")
             if row.status == "completed" and row.error_message is not None:
                 raise AuditIntegrityError(f"Operation {oid}: status='completed' but error_message is set — audit integrity violation")
 

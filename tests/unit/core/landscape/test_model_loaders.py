@@ -1201,6 +1201,7 @@ class TestValidationErrorLoader:
             run_id="run-1",
             node_id="node-src",
             row_hash="hash123",
+            row_id="row-1",
             error="Missing required field 'amount'",
             schema_mode="fixed",
             destination="quarantine",
@@ -1219,6 +1220,7 @@ class TestValidationErrorLoader:
         assert result.error_id == "ve-1"
         assert result.error == "Missing required field 'amount'"
         assert result.schema_mode == "fixed"
+        assert result.row_id == "row-1"
         assert result.row_data_json == '{"name": "test"}'
         assert result.violation_type == "missing_field"
         assert result.original_field_name == "Amount USD"
@@ -1232,6 +1234,7 @@ class TestValidationErrorLoader:
             run_id="run-1",
             node_id=None,
             row_hash="hash456",
+            row_id=None,
             error="Type error",
             schema_mode="flexible",
             destination="quarantine",
@@ -1246,6 +1249,7 @@ class TestValidationErrorLoader:
         loader = ValidationErrorLoader()
         result = loader.load(sa_row)
         assert result.node_id is None
+        assert result.row_id is None
         assert result.row_data_json is None
         assert result.violation_type is None
         assert result.original_field_name is None
@@ -1812,6 +1816,17 @@ class TestOperationLoader:
             completed_at=LATER,
             duration_ms=100.0,
             error_message=None,
+        )
+        loader = OperationLoader()
+        with pytest.raises(AuditIntegrityError, match="error_message"):
+            loader.load(sa_row)
+
+    def test_failed_with_empty_error_message_raises(self) -> None:
+        sa_row = self._make_operation_row(
+            status="failed",
+            completed_at=LATER,
+            duration_ms=100.0,
+            error_message="",
         )
         loader = OperationLoader()
         with pytest.raises(AuditIntegrityError, match="error_message"):

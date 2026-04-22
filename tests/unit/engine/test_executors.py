@@ -4838,6 +4838,7 @@ class TestTransformExecutorBatchPath:
         t._pool_size = pool_size
         t._batch_wait_timeout = batch_wait_timeout
         t.passes_through_input = False
+        t.can_drop_rows = False
         t._output_schema_config = None
         return t
 

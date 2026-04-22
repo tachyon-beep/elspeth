@@ -122,10 +122,20 @@ class TestProtocolDiscrimination:
 
 # [R3] Executor-only fields: on PluginContext but intentionally NOT in any protocol.
 # These are fields the engine mutates directly and plugins never access via ctx.
-EXECUTOR_ONLY_FIELDS = {"config", "_checkpoint", "_batch_checkpoints"}
+# _pending_quarantine_validation_errors is orchestrator bookkeeping used to
+# link a validation error audit record to the later persisted quarantine row.
+EXECUTOR_ONLY_FIELDS = {
+    "config",
+    "_checkpoint",
+    "_batch_checkpoints",
+    "_pending_quarantine_validation_errors",
+}
 
 # [R4] Engine-internal methods: on PluginContext but called by engine, not plugins.
-ENGINE_INTERNAL_METHODS = {"record_transform_error"}
+ENGINE_INTERNAL_METHODS = {
+    "record_transform_error",
+    "pop_pending_quarantine_validation_error_id",
+}
 
 
 class TestProtocolFieldCoverage:

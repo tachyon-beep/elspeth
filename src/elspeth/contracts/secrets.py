@@ -9,6 +9,18 @@ from dataclasses import dataclass
 from typing import Literal, Protocol, runtime_checkable
 
 SecretScope = Literal["user", "server", "org"]
+_ALLOWED_SECRET_SCOPES = frozenset({"user", "server", "org"})
+_LOWERCASE_HEX = frozenset("0123456789abcdef")
+
+
+def _validate_secret_scope(owner: str, scope: SecretScope) -> None:
+    if scope not in _ALLOWED_SECRET_SCOPES:
+        raise ValueError(f"{owner}: scope must be one of {sorted(_ALLOWED_SECRET_SCOPES)}, got {scope!r}")
+
+
+def _validate_secret_fingerprint(owner: str, fingerprint: str) -> None:
+    if len(fingerprint) != 64 or any(ch not in _LOWERCASE_HEX for ch in fingerprint):
+        raise ValueError(f"{owner}: fingerprint must be 64-char lowercase hex, got {fingerprint!r}")
 
 
 class SecretsError(Exception):
@@ -77,6 +89,10 @@ class CreateSecretResult:
     scope: SecretScope
     fingerprint: str
 
+    def __post_init__(self) -> None:
+        _validate_secret_scope(type(self).__name__, self.scope)
+        _validate_secret_fingerprint(type(self).__name__, self.fingerprint)
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedSecret:
@@ -90,6 +106,10 @@ class ResolvedSecret:
     value: str
     scope: SecretScope
     fingerprint: str
+
+    def __post_init__(self) -> None:
+        _validate_secret_scope(type(self).__name__, self.scope)
+        _validate_secret_fingerprint(type(self).__name__, self.fingerprint)
 
     def __repr__(self) -> str:
         return f"ResolvedSecret(name={self.name!r}, scope={self.scope!r}, fingerprint={self.fingerprint!r})"
@@ -112,6 +132,9 @@ class SecretInventoryItem:
     scope: SecretScope
     available: bool
     source_kind: str = ""
+
+    def __post_init__(self) -> None:
+        _validate_secret_scope(type(self).__name__, self.scope)
 
 
 @runtime_checkable

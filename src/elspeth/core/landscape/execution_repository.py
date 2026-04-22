@@ -791,6 +791,8 @@ class ExecutionRepository:
             raise FrameworkBugError(f"complete_operation({operation_id!r}): status='completed' but error is set")
         if status == "failed" and error is None:
             raise FrameworkBugError(f"complete_operation({operation_id!r}): status='failed' but error is None")
+        if status == "failed" and error == "":
+            raise FrameworkBugError(f"complete_operation({operation_id!r}): status='failed' but error must not be empty")
 
         # Atomic check-and-update: WHERE constrains both identity and status
         # to eliminate the TOCTOU race between separate SELECT and UPDATE.

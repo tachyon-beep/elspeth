@@ -32,6 +32,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _render_exception(exc: BaseException) -> str:
+    """Render an exception to a non-empty audit message."""
+    # Use BaseException.__str__ directly so audit rendering cannot be derailed
+    # by a subclass overriding __str__ with side effects or broad failures.
+    message = BaseException.__str__(exc)
+    return message if message else type(exc).__name__
+
+
 class OperationHandle:
     """Mutable handle for capturing operation output within context manager.
 
@@ -145,7 +153,7 @@ def track_operation(
         raise
     except Exception as e:
         status = "failed"
-        error_msg = str(e)
+        error_msg = _render_exception(e)
         original_exception = e
         raise
     except BaseException as e:
@@ -154,7 +162,7 @@ def track_operation(
         # Without this, interrupted operations would be recorded as "completed".
         # Must come AFTER except Exception (more specific handlers first).
         status = "failed"
-        error_msg = str(e)
+        error_msg = _render_exception(e)
         original_exception = e
         raise
     finally:

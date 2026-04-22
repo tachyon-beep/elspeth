@@ -767,6 +767,8 @@ class Operation:
                 raise ValueError(f"Operation {self.operation_id!r}: status={self.status!r} but duration_ms is None")
             if self.status == "failed" and self.error_message is None:
                 raise ValueError(f"Operation {self.operation_id!r}: status='failed' but error_message is None")
+            if self.status == "failed" and self.error_message == "":
+                raise ValueError(f"Operation {self.operation_id!r}: status='failed' but error_message must not be empty")
             if self.status == "completed" and self.error_message is not None:
                 raise ValueError(f"Operation {self.operation_id!r}: status='completed' but error_message is set")
 

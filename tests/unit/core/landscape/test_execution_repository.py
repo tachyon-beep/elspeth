@@ -553,6 +553,19 @@ class TestCompleteOperationWithPayloadStore:
         assert result.status == "failed"
         assert result.error_message == "Connection refused"
 
+    def test_complete_operation_failed_status_rejects_empty_error_message(self) -> None:
+        """complete_operation must reject blank error strings for failed operations."""
+        _db, repo, _fac, _tok = _make_repo_with_token()
+        op = repo.begin_operation("run-1", "source-0", "source_load")
+
+        with pytest.raises(FrameworkBugError, match="error must not be empty"):
+            repo.complete_operation(
+                op.operation_id,
+                "failed",
+                error="",
+                duration_ms=100.0,
+            )
+
     def test_complete_operation_pending_status(self) -> None:
         """complete_operation with pending status (BatchPendingError scenario)."""
         _db, repo, _fac, _tok = _make_repo_with_token()

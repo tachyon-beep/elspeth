@@ -1671,6 +1671,21 @@ class TestOperation:
                 error_message=None,
             )
 
+    def test_failed_rejects_empty_error_message(self) -> None:
+        """Status 'failed' must not accept blank error messages."""
+        with pytest.raises(ValueError, match="error_message must not be empty"):
+            Operation(
+                operation_id="op-1",
+                run_id="run-1",
+                node_id="node-1",
+                operation_type="source_load",
+                started_at=datetime.now(UTC),
+                status="failed",
+                completed_at=datetime.now(UTC),
+                duration_ms=100.0,
+                error_message="",
+            )
+
     def test_completed_rejects_error_message(self) -> None:
         """Status 'completed' must not have error_message set."""
         with pytest.raises(ValueError, match="status='completed' but error_message is set"):

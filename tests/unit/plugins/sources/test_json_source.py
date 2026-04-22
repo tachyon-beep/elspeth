@@ -1301,6 +1301,122 @@ class TestJSONSourceArrayModeUnicodeDecodeError:
         assert results[0].quarantine_error is not None
 
 
+class TestJSONSourceRowShapeBoundaryErrors:
+    """Regression tests for malformed JSON row shapes at the source boundary."""
+
+    @pytest.fixture
+    def ctx(self) -> PluginContext:
+        """Create a plugin context with proper FK records for validation error recording."""
+        return make_source_context(plugin_name="json")
+
+    def test_jsonl_scalar_row_quarantined_and_later_rows_continue(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """JSONL scalar rows are quarantined instead of crashing the source."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "scalar-first.jsonl"
+        jsonl_file.write_text('1\n{"id": 2}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 2
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
+        assert "expected json object" in results[0].quarantine_error.lower()
+        assert "int" in results[0].quarantine_error.lower()
+        assert results[1].is_quarantined is False
+        assert results[1].row == {"id": 2}
+
+    def test_json_array_scalar_element_quarantined_and_later_rows_continue(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Array-mode scalar elements are quarantined instead of aborting the file."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "mixed.json"
+        json_file.write_text('[1, {"id": 2}]')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 2
+        assert results[0].is_quarantined is True
+        assert results[0].quarantine_error is not None
+        assert "expected json object" in results[0].quarantine_error.lower()
+        assert "int" in results[0].quarantine_error.lower()
+        assert results[1].is_quarantined is False
+        assert results[1].row == {"id": 2}
+
+    def test_later_row_normalization_collision_quarantined_and_later_rows_continue(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Normalization collisions quarantine the offending row instead of crashing."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "colliding-keys.jsonl"
+        jsonl_file.write_text('{"id": 1}\n{"A B": 2, "a_b": 3}\n{"id": 4}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 3
+        assert results[0].is_quarantined is False
+        assert results[0].row == {"id": 1}
+        assert results[1].is_quarantined is True
+        assert results[1].quarantine_error is not None
+        assert "collision after normalization" in results[1].quarantine_error.lower()
+        assert results[1].row == {"A B": 2, "a_b": 3}
+        assert results[2].is_quarantined is False
+        assert results[2].row == {"id": 4}
+
+    def test_row_key_normalizing_to_empty_identifier_quarantined(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Keys that normalize to an empty identifier are quarantined, not fatal."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        jsonl_file = tmp_path / "empty-normalized-key.jsonl"
+        jsonl_file.write_text('{"id": 1}\n{"!!!": 2}\n{"id": 4}\n')
+
+        source = JSONSource(
+            {
+                "path": str(jsonl_file),
+                "format": "jsonl",
+                "schema": {"mode": "observed"},
+                "on_validation_failure": "quarantine",
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        assert len(results) == 3
+        assert results[0].is_quarantined is False
+        assert results[1].is_quarantined is True
+        assert results[1].quarantine_error is not None
+        assert "normalizes to empty string" in results[1].quarantine_error.lower()
+        assert results[1].row == {"!!!": 2}
+        assert results[2].is_quarantined is False
+        assert results[2].row == {"id": 4}
+
+
 class TestJSONSourceKeyNormalization:
     """Tests for JSON source field name normalization and resolution.
 

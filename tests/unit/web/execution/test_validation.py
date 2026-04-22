@@ -602,6 +602,8 @@ class TestValidatePipelineInMemoryLoading:
 class FakeSecretService:
     """Minimal WebSecretResolver stand-in for validation tests."""
 
+    _VALID_FINGERPRINT = "a" * 64
+
     def __init__(self, available_refs: set[str]) -> None:
         self._available = available_refs
 
@@ -613,7 +615,7 @@ class FakeSecretService:
 
     def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
         if name in self._available:
-            return ResolvedSecret(name=name, value="fake", scope="user", fingerprint="abc123")
+            return ResolvedSecret(name=name, value="fake", scope="user", fingerprint=self._VALID_FINGERPRINT)
         return None
 
 

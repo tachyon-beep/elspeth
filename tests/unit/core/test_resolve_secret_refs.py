@@ -7,6 +7,8 @@ import pytest
 from elspeth.contracts.secrets import ResolvedSecret, SecretInventoryItem
 from elspeth.core.secrets import SecretResolutionError, resolve_secret_refs
 
+_VALID_FINGERPRINT = "a" * 64
+
 
 class FakeResolver:
     def __init__(self, secrets: dict[str, str]):
@@ -21,7 +23,7 @@ class FakeResolver:
     def resolve(self, user_id: str, name: str) -> ResolvedSecret | None:
         if name not in self._secrets:
             return None
-        return ResolvedSecret(name=name, value=self._secrets[name], scope="user", fingerprint="fp")
+        return ResolvedSecret(name=name, value=self._secrets[name], scope="user", fingerprint=_VALID_FINGERPRINT)
 
 
 def test_replaces_secret_ref_in_flat_dict() -> None:

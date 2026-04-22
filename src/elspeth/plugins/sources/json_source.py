@@ -136,7 +136,7 @@ class JSONSource(BaseSource):
 
     name = "json"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:71a82deab29b2ed3"
+    source_file_hash: str | None = "sha256:ac27ba8d557f48a7"
     config_model = JSONSourceConfig
     # Override parent type - SourceDataConfig requires this to be set
     _on_validation_failure: str
@@ -393,7 +393,7 @@ class JSONSource(BaseSource):
         for row in data:
             yield from self._validate_and_yield(row, ctx)
 
-    def _normalize_row_keys(self, row: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_row_keys(self, row: Any) -> dict[str, Any]:
         """Normalize JSON keys to valid Python identifiers.
 
         On the first row, builds field resolution via resolve_field_names()
@@ -406,9 +406,15 @@ class JSONSource(BaseSource):
         Returns:
             Row data with normalized keys
         """
+        try:
+            row_items = list(row.items())
+        except AttributeError:
+            raise ValueError(f"Expected JSON object, got {type(row).__name__}") from None
+
+        raw_keys = [key for key, _ in row_items]
+
         if self._field_resolution is None:
             # First row — build field resolution from its keys
-            raw_keys = list(row.keys())
             self._field_resolution = resolve_field_names(
                 raw_headers=raw_keys,
                 field_mapping=self._field_mapping,
@@ -432,7 +438,7 @@ class JSONSource(BaseSource):
         mapping = self._field_resolution.resolution_mapping
         normalized: dict[str, Any] = {}
         has_unmapped_fields = False
-        for key, value in row.items():
+        for key, value in row_items:
             if key in mapping:
                 normalized[mapping[key]] = value
             else:
@@ -453,7 +459,7 @@ class JSONSource(BaseSource):
 
         return normalized
 
-    def _validate_and_yield(self, row: dict[str, Any], ctx: SourceContext) -> Iterator[SourceRow]:
+    def _validate_and_yield(self, row: Any, ctx: SourceContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
 
         Field names are normalized to valid Python identifiers before validation.
@@ -461,14 +467,25 @@ class JSONSource(BaseSource):
         locks the contract. Subsequent rows validate against the locked contract.
 
         Args:
-            row: Row data to validate (raw JSON keys)
+            row: Row data to validate. May be a non-dict JSON value from the
+                 external source boundary.
             ctx: Plugin context for recording validation errors
 
         Yields:
             SourceRow.valid() if valid, SourceRow.quarantined() if invalid
         """
         # Normalize JSON keys at the source boundary (Tier 3 → Tier 2)
-        normalized_row = self._normalize_row_keys(row)
+        try:
+            normalized_row = self._normalize_row_keys(row)
+        except ValueError as exc:
+            quarantined = self._record_validation_failure(
+                ctx=ctx,
+                row=row,
+                error_msg=str(exc),
+            )
+            if quarantined is not None:
+                yield quarantined
+            return
 
         try:
             # Validate and potentially coerce row data
@@ -510,23 +527,13 @@ class JSONSource(BaseSource):
 
             yield SourceRow.valid(validated_row, contract=contract)
         except ValidationError as e:
-            # Record validation failure in audit trail
-            # This is a trust boundary: external data may be invalid
-            ctx.record_validation_error(
+            quarantined = self._record_validation_failure(
+                ctx=ctx,
                 row=normalized_row,
-                error=str(e),
-                schema_mode=self._schema_config.mode,
-                destination=self._on_validation_failure,
+                error_msg=str(e),
             )
-
-            # Yield quarantined row for routing to configured sink
-            # If "discard", don't yield - row is intentionally dropped
-            if self._on_validation_failure != "discard":
-                yield SourceRow.quarantined(
-                    row=normalized_row,
-                    error=str(e),
-                    destination=self._on_validation_failure,
-                )
+            if quarantined is not None:
+                yield quarantined
 
     def _record_parse_error(
         self,
@@ -540,6 +547,28 @@ class JSONSource(BaseSource):
             row=row_payload,
             error=error_msg,
             schema_mode="parse",
+            destination=self._on_validation_failure,
+        )
+        if self._on_validation_failure == "discard":
+            return None
+        return SourceRow.quarantined(
+            row=row_payload,
+            error=error_msg,
+            destination=self._on_validation_failure,
+        )
+
+    def _record_validation_failure(
+        self,
+        ctx: SourceContext,
+        row: Any,
+        error_msg: str,
+    ) -> SourceRow | None:
+        """Record a row-level validation failure unless discard mode."""
+        row_payload = row
+        ctx.record_validation_error(
+            row=row_payload,
+            error=error_msg,
+            schema_mode=self._schema_config.mode,
             destination=self._on_validation_failure,
         )
         if self._on_validation_failure == "discard":

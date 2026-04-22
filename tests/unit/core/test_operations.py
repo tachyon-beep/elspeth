@@ -152,6 +152,62 @@ def test_track_operation_marks_failed_for_base_exception() -> None:
     assert ctx.operation_id is None
 
 
+@pytest.mark.parametrize(
+    ("exc", "expected_error"),
+    [
+        (KeyboardInterrupt(), "KeyboardInterrupt"),
+        (SystemExit(), "SystemExit"),
+    ],
+)
+def test_track_operation_renders_informative_error_for_blank_base_exception_strings(
+    exc: BaseException,
+    expected_error: str,
+) -> None:
+    factory = _FakeFactory()
+    ctx = make_context()
+
+    with (
+        pytest.raises(type(exc)),
+        track_operation(
+            recorder=cast(ExecutionRepository, factory),
+            run_id="run-001",
+            node_id="node-001",
+            operation_type="source_load",
+            ctx=ctx,
+        ),
+    ):
+        raise exc
+
+    assert factory.complete_calls[0]["status"] == "failed"
+    assert factory.complete_calls[0]["error"] == expected_error
+    assert ctx.operation_id is None
+
+
+def test_track_operation_ignores_broken_exception_str_override() -> None:
+    class _BrokenStrError(Exception):
+        def __str__(self) -> str:
+            raise RuntimeError("boom")
+
+    factory = _FakeFactory()
+    ctx = make_context()
+
+    with (
+        pytest.raises(_BrokenStrError),
+        track_operation(
+            recorder=cast(ExecutionRepository, factory),
+            run_id="run-001",
+            node_id="node-001",
+            operation_type="source_load",
+            ctx=ctx,
+        ),
+    ):
+        raise _BrokenStrError("original message")
+
+    assert factory.complete_calls[0]["status"] == "failed"
+    assert factory.complete_calls[0]["error"] == "original message"
+    assert ctx.operation_id is None
+
+
 def test_track_operation_raises_db_error_if_completion_fails_after_success() -> None:
     factory = _FakeFactory(complete_error=RuntimeError("db write failed"))
     ctx = make_context()

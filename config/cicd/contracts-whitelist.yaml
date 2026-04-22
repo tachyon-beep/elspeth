@@ -75,7 +75,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/infrastructure/display_headers.py:apply_display_headers:return (list)"
 
   # Source plugins - row validation
-  - "src/elspeth/plugins/sources/json_source.py:JSONSource._validate_and_yield:row"
   - "src/elspeth/plugins/sources/text_source.py:TextSource._validate_and_yield:row"
 
   # Pooling executor - row processing
@@ -324,7 +323,6 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._strip_odata_metadata:return"
   - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:row"
   - "src/elspeth/plugins/sources/dataverse.py:DataverseSource._normalize_row_fields:return"
-  - "src/elspeth/plugins/sources/json_source.py:JSONSource._normalize_row_keys:row"
   - "src/elspeth/plugins/sources/json_source.py:JSONSource._normalize_row_keys:return"
   - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink.__init__:config"
   - "src/elspeth/plugins/sinks/dataverse.py:DataverseSink._map_row:row"
