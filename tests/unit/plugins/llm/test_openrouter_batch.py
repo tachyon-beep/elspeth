@@ -399,6 +399,31 @@ class TestOpenRouterBatchProcessing:
         assert has_success
         assert has_error
 
+    def test_batch_partial_failure_reports_quarantined_indices(self, chaosllm_server) -> None:
+        """Mixed-success batches must surface failed row indices to the engine."""
+        transform, ctx = _create_transform_with_context({"pool_size": 1})
+        rows = [
+            {"text": "Row 1"},
+            {"text": "Row 2"},
+        ]
+
+        success_response = _create_mock_response(chaosllm_server, content="Success")
+        error_response = _create_mock_response(chaosllm_server, status_code=500)
+
+        with mock_httpx_client(chaosllm_server, [success_response, error_response]):
+            result = transform.process([make_pipeline_row(r) for r in rows], ctx)
+
+        assert result.status == "success"
+        assert result.success_reason is not None
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [1]
+        assert metadata["quarantined_count"] == 1
+        assert len(metadata["row_errors"]) == 1
+        assert metadata["row_errors"][0]["row_index"] == 1
+        assert metadata["row_errors"][0]["reason"] == "api_call_failed"
+        assert metadata["row_errors"][0]["status_code"] == 500
+        assert "500" in metadata["row_errors"][0]["error"]
+
 
 class TestOpenRouterBatchOutputContract:
     """Tests for output schema contract completeness."""
@@ -551,7 +576,8 @@ class TestOpenRouterBatchErrorHandling:
         assert result.status == "success"
         assert result.row is not None
         assert result.row["llm_response"] is None
-        assert result.row["llm_response_error"]["reason"] == "content_filtered"
+        assert result.row["llm_response_error"]["reason"] == "unsupported_finish_reason"
+        assert result.row["llm_response_error"]["finish_reason"] == "tool_calls"
 
     def test_length_finish_reason_returns_failure(self, chaosllm_server) -> None:
         """finish_reason=length (truncated) must produce per-row failure, not success."""
@@ -665,6 +691,22 @@ class TestOpenRouterBatchAuditFields:
         assert "llm_response_variables_hash" in metadata
         assert metadata["llm_response_variables_hash"] is None  # Per-row hashes in calls table
         assert "llm_response_template_source" in metadata
+
+    def test_per_row_variables_hash_is_recorded_in_call_audit(self, chaosllm_server) -> None:
+        """Per-row prompt lineage must persist variables_hash in the call audit record."""
+        transform, ctx = _create_transform_with_context()
+        row = {"text": "Test"}
+        row_input = make_pipeline_row(row)
+        expected_hash = transform._template.render_with_metadata(row_input, contract=row_input.contract).variables_hash
+
+        with mock_httpx_client(chaosllm_server, _create_mock_response(chaosllm_server)):
+            result = transform.process(row_input, ctx)
+
+        assert result.status == "success"
+        recorder = ctx.landscape
+        assert recorder.record_call.call_count == 1
+        request_data = recorder.record_call.call_args.kwargs["request_data"].to_dict()
+        assert request_data["audit_metadata"]["variables_hash"] == expected_hash
 
     def test_custom_response_field(self, chaosllm_server) -> None:
         """Custom response_field is used for all output fields."""

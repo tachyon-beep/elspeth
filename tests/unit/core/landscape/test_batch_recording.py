@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.contracts import BatchStatus, NodeType, TriggerType
+from elspeth.contracts import BatchStatus, NodeType, RowOutcome, TriggerType
+from elspeth.contracts.audit import TokenRef
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape import LandscapeDB
@@ -45,6 +46,54 @@ def _setup_with_sink(
         node_id="sink-0",
         schema_config=_DYNAMIC_SCHEMA,
     )
+    return db, factory
+
+
+def _setup_two_runs_with_batch_integrity_records() -> tuple[LandscapeDB, RecorderFactory]:
+    """Create two runs with tokens and node states for cross-run ownership tests."""
+    db = make_landscape_db()
+    factory = make_factory(db)
+
+    for run_id, suffix in (("run-A", "A"), ("run-B", "B")):
+        factory.run_lifecycle.begin_run(config={}, canonical_version="v1", run_id=run_id)
+        factory.data_flow.register_node(
+            run_id=run_id,
+            plugin_name="csv",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0",
+            config={},
+            node_id="source-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        factory.data_flow.register_node(
+            run_id=run_id,
+            plugin_name="aggregator",
+            node_type=NodeType.AGGREGATION,
+            plugin_version="1.0",
+            config={},
+            node_id="agg-1",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        factory.data_flow.register_node(
+            run_id=run_id,
+            plugin_name="csv_sink",
+            node_type=NodeType.SINK,
+            plugin_version="1.0",
+            config={},
+            node_id="sink-0",
+            schema_config=_DYNAMIC_SCHEMA,
+        )
+        factory.data_flow.create_row(run_id, "source-0", 0, {"run": run_id}, row_id=f"row-{suffix}")
+        factory.data_flow.create_token(f"row-{suffix}", token_id=f"tok-{suffix}")
+        factory.execution.begin_node_state(
+            f"tok-{suffix}",
+            "agg-1",
+            run_id,
+            0,
+            {"run": run_id},
+            state_id=f"state-{suffix}",
+        )
+
     return db, factory
 
 
@@ -173,6 +222,14 @@ class TestAddBatchMember:
         assert members[0].ordinal == 2
         assert members[1].ordinal == 5
 
+    def test_rejects_token_from_different_run(self):
+        """Batch membership must reject tokens owned by another run."""
+        _db, factory = _setup_two_runs_with_batch_integrity_records()
+        factory.execution.create_batch("run-A", "agg-1", batch_id="batch-A")
+
+        with pytest.raises(AuditIntegrityError):
+            factory.execution.add_batch_member("batch-A", "tok-B", ordinal=0)
+
 
 # ---------------------------------------------------------------------------
 # update_batch_status
@@ -268,6 +325,18 @@ class TestUpdateBatchStatus:
 
         updated = factory.execution.get_batch("b-1")
         assert updated.aggregation_state_id == "state-1"
+
+    def test_rejects_state_from_different_run(self):
+        """Batch flush state must belong to the same run as the batch."""
+        _db, factory = _setup_two_runs_with_batch_integrity_records()
+        factory.execution.create_batch("run-A", "agg-1", batch_id="batch-A")
+
+        with pytest.raises(AuditIntegrityError):
+            factory.execution.update_batch_status(
+                "batch-A",
+                BatchStatus.EXECUTING,
+                state_id="state-B",
+            )
 
     def test_rejects_transition_from_completed(self):
         """Terminal status COMPLETED cannot transition to any other status (M2)."""
@@ -769,6 +838,22 @@ class TestGetAllBatchMembersForRun:
         assert run2_members[0].token_id == "tok-2"
 
 
+class TestBatchRunOwnership:
+    """Cross-run batch link prevention for audit integrity."""
+
+    def test_record_token_outcome_rejects_batch_from_different_run(self):
+        """Token outcomes must not point at batches from another run."""
+        _db, factory = _setup_two_runs_with_batch_integrity_records()
+        factory.execution.create_batch("run-A", "agg-1", batch_id="batch-A")
+
+        with pytest.raises(AuditIntegrityError):
+            factory.data_flow.record_token_outcome(
+                ref=TokenRef(token_id="tok-B", run_id="run-B"),
+                outcome=RowOutcome.BUFFERED,
+                batch_id="batch-A",
+            )
+
+
 # ---------------------------------------------------------------------------
 # retry_batch
 # ---------------------------------------------------------------------------
@@ -1051,6 +1136,22 @@ class TestRegisterArtifact:
         )
 
         assert artifact.idempotency_key == "idem-key-1"
+
+    def test_rejects_producer_state_from_different_run(self):
+        """Artifacts must not be attributed to a node state from another run."""
+        _db, factory = _setup_two_runs_with_batch_integrity_records()
+
+        with pytest.raises(AuditIntegrityError):
+            factory.execution.register_artifact(
+                run_id="run-A",
+                state_id="state-B",
+                sink_node_id="sink-0",
+                artifact_type="csv",
+                path="/output/foreign-state.csv",
+                content_hash="sha256:foreign",
+                size_bytes=1,
+                artifact_id="artifact-foreign-state",
+            )
 
 
 # ---------------------------------------------------------------------------

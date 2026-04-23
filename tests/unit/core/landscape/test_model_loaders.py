@@ -1631,6 +1631,7 @@ class TestBatchMemberLoader:
     def test_valid_load(self) -> None:
         sa_row = _make_sa_row(
             batch_id="batch-1",
+            run_id="run-1",
             token_id="tok-1",
             ordinal=0,
         )
@@ -1639,12 +1640,14 @@ class TestBatchMemberLoader:
 
         assert isinstance(result, BatchMember)
         assert result.batch_id == "batch-1"
+        assert result.run_id == "run-1"
         assert result.token_id == "tok-1"
         assert result.ordinal == 0
 
     def test_valid_load_higher_ordinal(self) -> None:
         sa_row = _make_sa_row(
             batch_id="batch-2",
+            run_id="run-2",
             token_id="tok-5",
             ordinal=10,
         )

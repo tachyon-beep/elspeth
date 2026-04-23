@@ -58,6 +58,9 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("runs", "runtime_val_manifest_json"),
     # Quarantine lineage exactness - links validation errors to persisted rows
     ("validation_errors", "row_id"),
+    # Batch membership run ownership - enables composite FK enforcement to both
+    # batches and tokens so cross-run batch contamination fails at the database.
+    ("batch_members", "run_id"),
 )
 
 # Required foreign keys for audit integrity (Tier 1 trust).
@@ -68,6 +71,21 @@ _REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
     ("validation_errors", "row_id", "rows"),
     ("transform_errors", "token_id", "tokens"),
     ("transform_errors", "transform_id", "nodes"),
+)
+
+# Required composite foreign keys for run-scoped audit integrity.
+# Format: (table_name, constrained_columns, referenced_table, referenced_columns)
+_REQUIRED_COMPOSITE_FOREIGN_KEYS: tuple[tuple[str, tuple[str, ...], str, tuple[str, ...]], ...] = (
+    ("token_outcomes", ("token_id", "run_id"), "tokens", ("token_id", "run_id")),
+    ("token_outcomes", ("batch_id", "run_id"), "batches", ("batch_id", "run_id")),
+    ("node_states", ("token_id", "run_id"), "tokens", ("token_id", "run_id")),
+    ("node_states", ("node_id", "run_id"), "nodes", ("node_id", "run_id")),
+    ("artifacts", ("produced_by_state_id", "run_id"), "node_states", ("state_id", "run_id")),
+    ("artifacts", ("sink_node_id", "run_id"), "nodes", ("node_id", "run_id")),
+    ("batches", ("aggregation_node_id", "run_id"), "nodes", ("node_id", "run_id")),
+    ("batches", ("aggregation_state_id", "run_id"), "node_states", ("state_id", "run_id")),
+    ("batch_members", ("batch_id", "run_id"), "batches", ("batch_id", "run_id")),
+    ("batch_members", ("token_id", "run_id"), "tokens", ("token_id", "run_id")),
 )
 
 # Required check constraints for audit integrity.
@@ -442,6 +460,24 @@ class LandscapeDB:
             if not has_correct_fk:
                 missing_fks.append((table_name, column_name, referenced_table))
 
+        # Check for required composite foreign keys (Tier 1 audit integrity)
+        missing_composite_fks: list[tuple[str, tuple[str, ...], str, tuple[str, ...]]] = []
+
+        for table_name, constrained_columns, referenced_table, referenced_columns in _REQUIRED_COMPOSITE_FOREIGN_KEYS:
+            if table_name not in existing_tables:
+                continue
+
+            fks = inspector.get_foreign_keys(table_name)
+            has_correct_fk = any(
+                tuple(fk["constrained_columns"]) == constrained_columns
+                and fk["referred_table"] == referenced_table
+                and tuple(fk["referred_columns"]) == referenced_columns
+                for fk in fks
+            )
+
+            if not has_correct_fk:
+                missing_composite_fks.append((table_name, constrained_columns, referenced_table, referenced_columns))
+
         # Check for required check constraints (Tier 1 audit integrity)
         missing_checks: list[tuple[str, str]] = []
 
@@ -469,7 +505,7 @@ class LandscapeDB:
                 missing_indexes.append((table_name, index_name))
 
         # Raise errors for missing columns, FKs, check constraints, or indexes
-        if missing_tables or missing_columns or missing_fks or missing_checks or missing_indexes:
+        if missing_tables or missing_columns or missing_fks or missing_composite_fks or missing_checks or missing_indexes:
             error_parts = []
 
             if missing_tables:
@@ -483,6 +519,13 @@ class LandscapeDB:
             if missing_fks:
                 missing_fk_str = ", ".join(f"{t}.{c} → {ref}" for t, c, ref in missing_fks)
                 error_parts.append(f"Missing foreign keys: {missing_fk_str}")
+
+            if missing_composite_fks:
+                missing_composite_fk_str = ", ".join(
+                    f"{table}({', '.join(columns)}) → {ref_table}({', '.join(ref_columns)})"
+                    for table, columns, ref_table, ref_columns in missing_composite_fks
+                )
+                error_parts.append(f"Missing composite foreign keys: {missing_composite_fk_str}")
 
             if missing_checks:
                 missing_checks_str = ", ".join(f"{t}.{name}" for t, name in missing_checks)

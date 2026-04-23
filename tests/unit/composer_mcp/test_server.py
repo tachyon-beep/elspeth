@@ -112,7 +112,7 @@ def _connection_valid_field_mapper_state_without_edges() -> CompositionState:
                 on_success="main",
                 on_error="discard",
                 options={
-                    "schema": {"mode": "observed"},
+                    "schema": {"mode": "observed", "guaranteed_fields": ["text"], "required_fields": ["text"]},
                     "mapping": {"text": "body"},
                 },
                 condition=None,

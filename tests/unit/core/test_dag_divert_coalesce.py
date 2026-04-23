@@ -13,10 +13,10 @@ import pytest
 
 from elspeth.contracts import RoutingMode
 from elspeth.contracts.enums import NodeType
-from elspeth.contracts.types import NodeID
+from elspeth.contracts.types import BranchName, CoalesceName, NodeID
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.dag import ExecutionGraph
-from elspeth.core.dag.models import GraphValidationWarning
+from elspeth.core.dag.models import BranchInfo, GraphValidationWarning
 
 
 def _make_coalesce_config(
@@ -193,6 +193,60 @@ class TestDivertCoalesceWarning:
 
         assert len(warnings) == 1
         assert "t_a2" in warnings[0].message
+
+    def test_intermediate_gate_branch_preserves_require_all_warning(self) -> None:
+        """Intermediate gates must not hide upstream DIVERT transforms."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="src", config={})
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork", config={})
+        graph.add_node("t_a1", node_type=NodeType.TRANSFORM, plugin_name="transform-a1", config={})
+        graph.add_node("inner_gate", node_type=NodeType.GATE, plugin_name="route-gate", config={})
+        graph.add_node("t_a2", node_type=NodeType.TRANSFORM, plugin_name="transform-a2", config={})
+        graph.add_node("t_b", node_type=NodeType.TRANSFORM, plugin_name="transform-b", config={})
+        graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="coalesce:merge", config={})
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="sink", config={})
+        graph.add_node("error_sink", node_type=NodeType.SINK, plugin_name="error", config={})
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a1", label="path_a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a1", "inner_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("inner_gate", "t_a2", label="approved", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a2", "coalesce", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_b", label="path_b", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a1", "error_sink", label="__error_t_a1__", mode=RoutingMode.DIVERT)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        graph.set_branch_info(
+            {
+                BranchName("path_a"): BranchInfo(
+                    coalesce_name=CoalesceName("merge"),
+                    gate_node_id=NodeID("gate"),
+                ),
+                BranchName("path_b"): BranchInfo(
+                    coalesce_name=CoalesceName("merge"),
+                    gate_node_id=NodeID("gate"),
+                ),
+            }
+        )
+        graph.set_coalesce_id_map({CoalesceName("merge"): NodeID("coalesce")})
+
+        warnings = graph.warn_divert_coalesce_interactions(
+            {
+                NodeID("coalesce"): CoalesceSettings(
+                    name="merge",
+                    branches={"path_a": "path_a", "path_b": "path_b"},
+                    policy="require_all",
+                    merge="union",
+                )
+            }
+        )
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.code == "DIVERT_COALESCE_REQUIRE_ALL"
+        assert "t_a1" in warning.message
+        assert "t_a1" in warning.node_ids
 
     def test_multiple_branches_only_one_has_divert(self) -> None:
         """Only the branch with DIVERT should produce a warning."""
@@ -472,6 +526,112 @@ class TestDivertCoalesceExclusiveFields:
         codes = {w.code for w in warnings}
         assert "DIVERT_COALESCE_REQUIRE_ALL" in codes
         assert "DIVERT_COALESCE_EXCLUSIVE_FIELDS" in codes
+
+    def test_intermediate_gate_branch_preserves_exclusive_fields_warning(self) -> None:
+        """Intermediate gates must not hide branch-exclusive field warnings."""
+        from elspeth.contracts.schema import FieldDefinition, SchemaConfig
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type=NodeType.SOURCE, plugin_name="src", config={})
+        graph.add_node("gate", node_type=NodeType.GATE, plugin_name="fork", config={})
+        graph.add_node(
+            "t_a1",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform-a1",
+            config={},
+            output_schema_config=SchemaConfig(
+                mode="flexible",
+                fields=(
+                    FieldDefinition("shared", "str", required=True),
+                    FieldDefinition("only_a", "str", required=True),
+                ),
+                guaranteed_fields=("shared", "only_a"),
+            ),
+        )
+        graph.add_node("inner_gate", node_type=NodeType.GATE, plugin_name="route-gate", config={})
+        graph.add_node(
+            "t_a2",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform-a2",
+            config={},
+            output_schema_config=SchemaConfig(
+                mode="flexible",
+                fields=(
+                    FieldDefinition("shared", "str", required=True),
+                    FieldDefinition("only_a", "str", required=True),
+                ),
+                guaranteed_fields=("shared", "only_a"),
+            ),
+        )
+        graph.add_node(
+            "t_b",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="transform-b",
+            config={},
+            output_schema_config=SchemaConfig(
+                mode="flexible",
+                fields=(FieldDefinition("shared", "str", required=True),),
+                guaranteed_fields=("shared",),
+            ),
+        )
+        graph.add_node("coalesce", node_type=NodeType.COALESCE, plugin_name="coalesce:merge", config={})
+        graph.add_node("sink", node_type=NodeType.SINK, plugin_name="sink", config={})
+        graph.add_node("error_sink", node_type=NodeType.SINK, plugin_name="error", config={})
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_a1", label="path_a", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a1", "inner_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("inner_gate", "t_a2", label="approved", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a2", "coalesce", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "t_b", label="path_b", mode=RoutingMode.MOVE)
+        graph.add_edge("t_b", "coalesce", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("t_a1", "error_sink", label="__error_t_a1__", mode=RoutingMode.DIVERT)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        graph.set_branch_info(
+            {
+                BranchName("path_a"): BranchInfo(
+                    coalesce_name=CoalesceName("merge"),
+                    gate_node_id=NodeID("gate"),
+                    schema=SchemaConfig(
+                        mode="flexible",
+                        fields=(
+                            FieldDefinition("shared", "str", required=True),
+                            FieldDefinition("only_a", "str", required=True),
+                        ),
+                        guaranteed_fields=("shared", "only_a"),
+                    ),
+                ),
+                BranchName("path_b"): BranchInfo(
+                    coalesce_name=CoalesceName("merge"),
+                    gate_node_id=NodeID("gate"),
+                    schema=SchemaConfig(
+                        mode="flexible",
+                        fields=(FieldDefinition("shared", "str", required=True),),
+                        guaranteed_fields=("shared",),
+                    ),
+                ),
+            }
+        )
+        graph.set_coalesce_id_map({CoalesceName("merge"): NodeID("coalesce")})
+
+        warnings = graph.warn_divert_coalesce_interactions(
+            {
+                NodeID("coalesce"): CoalesceSettings(
+                    name="merge",
+                    branches={"path_a": "path_a", "path_b": "path_b"},
+                    policy="best_effort",
+                    merge="union",
+                    timeout_seconds=30.0,
+                )
+            }
+        )
+
+        assert len(warnings) == 1
+        warning = warnings[0]
+        assert warning.code == "DIVERT_COALESCE_EXCLUSIVE_FIELDS"
+        assert "only_a" in warning.message
+        assert "t_a1" in warning.message
 
     def test_divert_on_branch_without_exclusive_fields(self) -> None:
         """DIVERT on branch B (no exclusive fields) → no EXCLUSIVE_FIELDS warning."""

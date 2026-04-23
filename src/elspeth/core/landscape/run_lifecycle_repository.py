@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts import (
     ContractAuditRecord,
@@ -29,6 +30,7 @@ from elspeth.core.dependency_config import PreflightResult
 from elspeth.core.landscape._database_ops import DatabaseOps
 from elspeth.core.landscape._helpers import generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.model_loaders import RunLoader
 from elspeth.core.landscape.reproducibility import compute_grade
 from elspeth.core.landscape.schema import (
@@ -84,6 +86,11 @@ class RunLifecycleRepository:
         Returns:
             Run model with generated run_id
         """
+        if status == RunStatus.COMPLETED:
+            raise AuditIntegrityError(
+                "begin_run() cannot create a COMPLETED run. Use complete_run() so completed_at is recorded in the audit trail."
+            )
+
         run_id = run_id or generate_id()
         settings_json = canonical_json(config)
         config_hash = stable_hash(config)
@@ -386,6 +393,21 @@ class RunLifecycleRepository:
 
         return validated_mapping
 
+    def _execute_atomic_inserts(self, *, context: str, statements: list[Any]) -> None:
+        """Execute one or more INSERTs in a single transaction with audit error normalization."""
+        if not statements:
+            return
+        try:
+            with self._db.connection() as conn:
+                for stmt in statements:
+                    result = conn.execute(stmt)
+                    if result.rowcount == 0:
+                        raise LandscapeRecordError(f"{context} — zero rows affected (audit write failure)")
+        except LandscapeRecordError:
+            raise
+        except SQLAlchemyError as exc:
+            raise LandscapeRecordError(f"{context} — database rejected audit write: {type(exc).__name__}: {exc}") from exc
+
     def update_run_status(self, run_id: str, status: RunStatus) -> None:
         """Update run status without setting completed_at.
 
@@ -407,6 +429,11 @@ class RunLifecycleRepository:
             record is final. FAILED and INTERRUPTED runs CAN be transitioned back
             to RUNNING during resume (orchestrator recovery path).
         """
+        if status == RunStatus.COMPLETED:
+            raise AuditIntegrityError(
+                "update_run_status() cannot set status to COMPLETED. Use complete_run() so completed_at is recorded in the audit trail."
+            )
+
         with self._db.connection() as conn:
             # When resuming to RUNNING, clear completed_at atomically.
             # A run cannot be simultaneously RUNNING and completed — that's
@@ -547,25 +574,24 @@ class RunLifecycleRepository:
         """
         if not resolutions:
             return
-        with self._db.connection() as conn:
-            for rec in resolutions:
-                result = conn.execute(
-                    secret_resolutions_table.insert().values(
-                        resolution_id=generate_id(),
-                        run_id=run_id,
-                        timestamp=rec.timestamp,
-                        env_var_name=rec.env_var_name,
-                        source=rec.source,
-                        vault_url=rec.vault_url,
-                        secret_name=rec.secret_name,
-                        fingerprint=rec.fingerprint,
-                        resolution_latency_ms=rec.resolution_latency_ms,
-                    )
-                )
-                if result.rowcount == 0:
-                    raise AuditIntegrityError(
-                        f"Secret resolution insert failed for run {run_id} — zero rows affected (audit write failure)"
-                    )
+        statements = [
+            secret_resolutions_table.insert().values(
+                resolution_id=generate_id(),
+                run_id=run_id,
+                timestamp=rec.timestamp,
+                env_var_name=rec.env_var_name,
+                source=rec.source,
+                vault_url=rec.vault_url,
+                secret_name=rec.secret_name,
+                fingerprint=rec.fingerprint,
+                resolution_latency_ms=rec.resolution_latency_ms,
+            )
+            for rec in resolutions
+        ]
+        self._execute_atomic_inserts(
+            context=f"record_secret_resolutions run_id={run_id}",
+            statements=statements,
+        )
 
     def get_secret_resolutions_for_run(self, run_id: str) -> list[SecretResolution]:
         """Get all secret resolution records for a run.
@@ -659,13 +685,10 @@ class RunLifecycleRepository:
         if not rows_to_insert:
             return
 
-        with self._db.connection() as conn:
-            for row_data in rows_to_insert:
-                result = conn.execute(preflight_results_table.insert().values(**row_data))
-                if result.rowcount == 0:
-                    raise AuditIntegrityError(
-                        f"Pre-flight result insert failed for run {run_id} — zero rows affected (audit write failure)"
-                    )
+        self._execute_atomic_inserts(
+            context=f"record_preflight_results run_id={run_id}",
+            statements=[preflight_results_table.insert().values(**row_data) for row_data in rows_to_insert],
+        )
 
     def record_readiness_check(
         self,
@@ -699,10 +722,10 @@ class RunLifecycleRepository:
             "created_at": now(),
         }
 
-        with self._db.connection() as conn:
-            result = conn.execute(preflight_results_table.insert().values(**row_data))
-            if result.rowcount == 0:
-                raise AuditIntegrityError(f"Readiness check insert failed for run {run_id} — zero rows affected (audit write failure)")
+        self._execute_atomic_inserts(
+            context=f"record_readiness_check run_id={run_id}",
+            statements=[preflight_results_table.insert().values(**row_data)],
+        )
 
     def list_runs(self, *, status: RunStatus | None = None) -> list[Run]:
         """List all runs in the database.
@@ -748,7 +771,10 @@ class RunLifecycleRepository:
                 f"Cannot set export_error with status={status.value}. Error messages are only valid with FAILED status."
             )
 
-        updates: dict[str, Any] = {"export_status": status}
+        updates: dict[str, Any] = {
+            "export_status": status,
+            "exported_at": None,
+        }
 
         if status == ExportStatus.COMPLETED:
             updates["exported_at"] = now()

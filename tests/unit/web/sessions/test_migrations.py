@@ -29,6 +29,7 @@ from typing import Any
 
 import pytest
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, insert, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -84,6 +85,33 @@ def _seed_state(conn, state_id: str, session_id: str) -> None:
     )
 
 
+def _insert_run_pre_009(
+    conn,
+    *,
+    run_id: str,
+    session_id: str,
+    state_id: str,
+    status: str,
+    started_at: datetime,
+) -> None:
+    """Insert a run using the pre-009 schema, before rows_routed exists."""
+    conn.execute(
+        text(
+            "INSERT INTO runs "
+            "(id, session_id, state_id, status, started_at, "
+            "rows_processed, rows_succeeded, rows_failed, rows_quarantined) "
+            "VALUES (:id, :session_id, :state_id, :status, :started_at, 0, 0, 0, 0)"
+        ),
+        {
+            "id": run_id,
+            "session_id": session_id,
+            "state_id": state_id,
+            "status": status,
+            "started_at": started_at,
+        },
+    )
+
+
 def _alembic_config_for(engine) -> Config:
     """Build an alembic Config bound to this engine; does not upgrade.
 
@@ -100,6 +128,14 @@ def _alembic_config_for(engine) -> Config:
         engine.url.render_as_string(hide_password=False).replace("%", "%%"),
     )
     return cfg
+
+
+def _migration_head_for(engine) -> str:
+    """Return the current single Alembic head for the session migrations."""
+    head = ScriptDirectory.from_config(_alembic_config_for(engine)).get_current_head()
+    if head is None:
+        raise AssertionError("Session migration script has no Alembic head")
+    return head
 
 
 def _upgrade_to_006(engine) -> Config:
@@ -152,7 +188,7 @@ class TestRunMigrations:
 
         with engine.connect() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert rev == "008"
+        assert rev == _migration_head_for(engine)
 
     def test_preserves_engine_identity_via_staticpool(self) -> None:
         """Bug 1 regression: the caller's engine must be migrated directly.
@@ -464,14 +500,13 @@ class TestMigration007IntegrityScan:
             _seed_session(conn, sa_id)
             _seed_session(conn, sb_id)
             _seed_state(conn, state_a, sa_id)
-            conn.execute(
-                insert(runs_table).values(
-                    id=str(uuid.uuid4()),
-                    session_id=sb_id,  # different from state_a's owning session
-                    state_id=state_a,
-                    status="pending",
-                    started_at=datetime.now(UTC),
-                )
+            _insert_run_pre_009(
+                conn,
+                run_id=str(uuid.uuid4()),
+                session_id=sb_id,  # different from state_a's owning session
+                state_id=state_a,
+                status="pending",
+                started_at=datetime.now(UTC),
             )
 
         # Scan must detect the runs orphan specifically and refuse 007.
@@ -854,7 +889,7 @@ class TestMigration006RefusesFabrication:
 
         with engine.connect() as conn:
             rev = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        assert rev == "008"
+        assert rev == _migration_head_for(engine)
         cols = {c["name"] for c in inspect(engine).get_columns("user_secrets")}
         assert "auth_provider_type" in cols
 
@@ -1096,25 +1131,23 @@ class TestMigration007PreservesIndexes:
         with engine.begin() as conn:
             _seed_session(conn, session_id)
             _seed_state(conn, state_id, session_id)
-            conn.execute(
-                insert(runs_table).values(
-                    id=str(uuid.uuid4()),
-                    session_id=session_id,
-                    state_id=state_id,
-                    status="pending",
-                    started_at=datetime.now(UTC),
-                )
+            _insert_run_pre_009(
+                conn,
+                run_id=str(uuid.uuid4()),
+                session_id=session_id,
+                state_id=state_id,
+                status="pending",
+                started_at=datetime.now(UTC),
             )
 
         with pytest.raises(IntegrityError, match=r"uq_runs_one_active_per_session|UNIQUE"), engine.begin() as conn:
-            conn.execute(
-                insert(runs_table).values(
-                    id=str(uuid.uuid4()),
-                    session_id=session_id,
-                    state_id=state_id,
-                    status="running",
-                    started_at=datetime.now(UTC),
-                )
+            _insert_run_pre_009(
+                conn,
+                run_id=str(uuid.uuid4()),
+                session_id=session_id,
+                state_id=state_id,
+                status="running",
+                started_at=datetime.now(UTC),
             )
 
     def test_completed_runs_are_not_unique_constrained(self) -> None:

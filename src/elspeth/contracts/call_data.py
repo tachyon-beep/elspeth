@@ -180,6 +180,8 @@ class HTTPCallRequest:
     * **Standard** (``resolved_ip`` is None): includes json/params by method.
     * **SSRF-safe** (``resolved_ip`` set, no hop): includes resolved_ip.
     * **Redirect hop** (``hop_number`` set): includes hop tracking fields.
+    * **Audit-only metadata** (``audit_metadata`` set): includes request-linked
+      provenance that was not sent over the wire.
     """
 
     method: str
@@ -187,12 +189,13 @@ class HTTPCallRequest:
     headers: Mapping[str, str]
     json: Mapping[str, Any] | None = None
     params: Mapping[str, Any] | None = None
+    audit_metadata: Mapping[str, Any] | None = None
     resolved_ip: str | None = None
     hop_number: int | None = None
     redirect_from: str | None = None
 
     def __post_init__(self) -> None:
-        freeze_fields(self, "headers", "json", "params")
+        freeze_fields(self, "headers", "json", "params", "audit_metadata")
         if self.hop_number is not None and self.resolved_ip is None:
             msg = "hop_number requires resolved_ip (redirect hops are always SSRF-safe)"
             raise ValueError(msg)
@@ -224,6 +227,8 @@ class HTTPCallRequest:
             d["json"] = deep_thaw(self.json) if self.json is not None else None
         if self.params is not None or self.method == "GET":
             d["params"] = deep_thaw(self.params) if self.params is not None else None
+        if self.audit_metadata is not None:
+            d["audit_metadata"] = deep_thaw(self.audit_metadata)
         return d
 
 

@@ -270,6 +270,7 @@ _BATCH = Batch(
 
 _BATCH_MEMBER = BatchMember(
     batch_id="batch-1",
+    run_id="run-1",
     token_id="tok-1",
     ordinal=0,
 )

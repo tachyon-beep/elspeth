@@ -355,6 +355,8 @@ class TestDeclarationContractViolationRoundTrip:
         token_id = "tok-roundtrip"
         node_id = "n-roundtrip"
 
+        register_declaration_contract(_RoundTripContract())
+
         setup = _setup_landscape(
             run_id=run_id,
             row_id=row_id,
@@ -362,7 +364,6 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        register_declaration_contract(_RoundTripContract())
         try:
             run_post_emission_checks(
                 inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
@@ -408,6 +409,8 @@ class TestDeclarationContractViolationRoundTrip:
         token_id = "tok-secret"
         node_id = "n-secret"
 
+        register_declaration_contract(_SecretContract())
+
         setup = _setup_landscape(
             run_id=run_id,
             row_id=row_id,
@@ -415,7 +418,6 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        register_declaration_contract(_SecretContract())
         try:
             run_post_emission_checks(
                 inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
@@ -450,6 +452,8 @@ class TestDeclarationContractViolationRoundTrip:
         token_id = "tok-secret-message"
         node_id = "n-secret-message"
 
+        register_declaration_contract(_SecretMessageContract())
+
         setup = _setup_landscape(
             run_id=run_id,
             row_id=row_id,
@@ -457,7 +461,6 @@ class TestDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        register_declaration_contract(_SecretMessageContract())
         try:
             run_post_emission_checks(
                 inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),
@@ -504,6 +507,9 @@ class TestAggregateDeclarationContractViolationRoundTrip:
         token_id = "tok-aggregate"
         node_id = "n-aggregate"
 
+        register_declaration_contract(_AggregateChildContractA())
+        register_declaration_contract(_AggregateChildContractB())
+
         setup = _setup_landscape(
             run_id=run_id,
             row_id=row_id,
@@ -511,8 +517,6 @@ class TestAggregateDeclarationContractViolationRoundTrip:
             node_id=node_id,
         )
 
-        register_declaration_contract(_AggregateChildContractA())
-        register_declaration_contract(_AggregateChildContractB())
         try:
             run_post_emission_checks(
                 inputs=_post_emission_inputs(run_id=run_id, row_id=row_id, token_id=token_id, node_id=node_id),

@@ -27,7 +27,7 @@ import httpx
 import structlog
 from pydantic import Field
 
-from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult, TransformSuccessReason
 from elspeth.contracts.audit_protocols import PluginAuditWriter
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.freeze import freeze_fields
@@ -172,7 +172,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
 
     name = "openrouter_batch_llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:dab97cc7f6ef1c34"
+    source_file_hash: str | None = "sha256:ec55543c0b9c8bae"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = OpenRouterBatchConfig
 
@@ -444,6 +444,8 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         # Every row gets an output (success or with error markers) - no rows are dropped
         output_rows: list[dict[str, Any]] = []
         finish_reason_counts: Counter[str] = Counter()
+        quarantined_indices: list[int] = []
+        row_errors: list[dict[str, Any]] = []
 
         for idx in range(len(rows)):
             if idx not in results:
@@ -457,34 +459,36 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 # trail so the failure is attributable (h27 fix).
                 # NOTE: Not wrapped in AuditIntegrityError — per-row recording in batch
                 # loop. Crashing here would lose all progress for remaining rows.
+                error_payload = {
+                    "reason": "transport_exception",
+                    "error": str(result),
+                    "error_type": type(result).__name__,
+                }
                 ctx.record_call(
                     call_type=CallType.LLM,
                     status=CallStatus.ERROR,
                     request_data={"row_index": idx},
                     response_data=None,
-                    error={
-                        "reason": "transport_exception",
-                        "error": str(result),
-                        "error_type": type(result).__name__,
-                    },
+                    error=error_payload,
                     latency_ms=None,
                     provider="openrouter",
                 )
                 output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = {
-                    "reason": "transport_exception",
-                    "error": str(result),
-                    "error_type": type(result).__name__,
-                }
+                output_row[f"{self._response_field}_error"] = error_payload
                 output_rows.append(output_row)
+                quarantined_indices.append(idx)
+                row_errors.append({"row_index": idx, **error_payload})
 
             elif isinstance(result, _RowFailure):
                 # Row-level error from _process_single_row
+                error_payload = dict(result.error)
                 output_row = rows[idx].to_dict()
                 output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = result.error
+                output_row[f"{self._response_field}_error"] = error_payload
                 output_rows.append(output_row)
+                quarantined_indices.append(idx)
+                row_errors.append({"row_index": idx, **error_payload})
 
             elif isinstance(result, _RowSuccess):
                 # result.row is a MappingProxyType (deep-frozen in _RowSuccess.__post_init__).
@@ -520,28 +524,34 @@ class OpenRouterBatchLLMTransform(BaseTransform):
         output_contract = self._align_output_contract(output_contract)
 
         # Batch-level template provenance — shared across all rows in the batch.
-        # Per-row request/response hashes are in the calls table via record_call().
+        # Per-row request/response hashes are in the call audit trail.
         batch_audit = build_llm_audit_metadata(
             self._response_field,
             template_hash=self._template.template_hash,
-            variables_hash=None,  # Batch-level: per-row hashes recomputable from recorded HTTP request bodies
+            variables_hash=None,  # Batch-level: per-row hashes are recorded in call audit metadata
             template_source=self._template.template_source,
             lookup_hash=self._template.lookup_hash,
             lookup_source=self._template.lookup_source,
             system_prompt_source=self._system_prompt_source,
         )
 
+        success_reason: TransformSuccessReason = {
+            "action": "enriched",
+            "fields_added": [self._response_field],
+            "metadata": {
+                "batch_size": len(output_rows),
+                "finish_reason_summary": finish_reason_counts,
+                **batch_audit,
+            },
+        }
+        if quarantined_indices:
+            success_reason["metadata"]["quarantined_indices"] = quarantined_indices
+            success_reason["metadata"]["quarantined_count"] = len(quarantined_indices)
+            success_reason["metadata"]["row_errors"] = row_errors
+
         return TransformResult.success_multi(
             [PipelineRow(r, output_contract) for r in output_rows],
-            success_reason={
-                "action": "enriched",
-                "fields_added": [self._response_field],
-                "metadata": {
-                    "batch_size": len(output_rows),
-                    "finish_reason_summary": finish_reason_counts,
-                    **batch_audit,
-                },
-            },
+            success_reason=success_reason,
         )
 
     def _get_http_client(self, state_id: str, *, token_id: str | None = None) -> AuditedHTTPClient:
@@ -657,6 +667,7 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 "/chat/completions",
                 json=request_body,
                 headers={"Content-Type": "application/json"},
+                audit_request_metadata={"variables_hash": rendered.variables_hash},
                 token_id=row_token_id,
             )
             response.raise_for_status()
@@ -735,9 +746,20 @@ class OpenRouterBatchLLMTransform(BaseTransform):
                 },
             )
 
+        raw_finish_reason = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
+
         # Null content = content filtered by provider (Tier 3 boundary).
-        # Matches the unified provider pattern in providers/openrouter.py.
+        # Tool-call responses from OpenRouter use content=null, so inspect
+        # finish_reason before collapsing null content into content filtering.
         if content is None:
+            if raw_finish_reason == "tool_calls":
+                return _RowFailure(
+                    error={
+                        "reason": "unsupported_finish_reason",
+                        "finish_reason": "tool_calls",
+                        "error": "LLM returned tool_calls response (not supported by ELSPETH)",
+                    },
+                )
             return _RowFailure(
                 error={
                     "reason": "content_filtered",
@@ -755,8 +777,6 @@ class OpenRouterBatchLLMTransform(BaseTransform):
             )
 
         # Tier 3 boundary: validate finish_reason
-        # Matches the unified provider validation in providers/openrouter.py.
-        raw_finish_reason = choices[0].get("finish_reason") if isinstance(choices[0], dict) else None
         if raw_finish_reason == "tool_calls":
             return _RowFailure(
                 error={

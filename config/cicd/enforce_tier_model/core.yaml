@@ -146,16 +146,12 @@ allow_hits:
   reason: Optional field access at trust boundary
   safety: Code reviewed - legitimate pattern
   expires: '2026-05-02'
-- key: core/dag/graph.py:R6:ExecutionGraph:warn_divert_coalesce_interactions:fp=afbf704f03025e99
+- key: core/dag/graph.py:R6:ExecutionGraph:warn_divert_coalesce_interactions:fp=ea839197606998d2
   owner: architecture
   reason: Silent except in schema lookup — DIVERT edge may target non-existent node (forward reference or optional path)
   safety: Continues to next coalesce point; warning about potential data loss is best-effort
   expires: '2026-05-12'
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=d18462d12dcaf547
-  owner: bugfix
-  reason: Tier-3 boundary - PayloadStore.exists() is external I/O (filesystem/blob storage)
-  safety: Exception caught and logged, ref added to failed_refs, loop continues
-- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=b64335ceb158346f
+- key: core/retention/purge.py:R6:PurgeManager:purge_payloads:fp=0d32fa231299f2d6
   owner: bugfix
   reason: Tier-3 boundary - PayloadStore.delete() is external I/O (filesystem/blob storage)
   safety: Exception caught and logged, ref added to failed_refs, loop continues
@@ -219,7 +215,7 @@ allow_hits:
   owner: bugfix
   reason: Sentinel class definition in except ImportError — not a runtime error handler
   safety: _get_client() raises ImportError before any Azure API call; sentinel class is never caught
-- key: core/retention/purge.py:R4:PurgeManager:purge_payloads:fp=9eae649e78a32371
+- key: core/retention/purge.py:R4:PurgeManager:purge_payloads:fp=ed928398c920ef43
   owner: bugfix
   reason: Post-point-of-no-return recovery — payloads are already irreversibly deleted, so ANY failure in grade updates must not abort the loop for remaining runs
   safety: Exception caught and logged via structlog, run_id added to grade_update_failures in PurgeResult, operator informed via CLI output

@@ -17,9 +17,11 @@ from elspeth.contracts import PipelineRow, RunStatus
 from elspeth.contracts.errors import GracefulShutdownError, OrchestrationInvariantError
 from elspeth.contracts.events import (
     PhaseCompleted,
+    PhaseError,
     PhaseStarted,
     PipelinePhase,
     RunCompletionStatus,
+    RunFinished,
     RunSummary,
 )
 from elspeth.core.landscape.database import LandscapeDB
@@ -28,8 +30,8 @@ from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row
-from tests.fixtures.base_classes import _TestSchema, as_sink, as_source, as_transform
-from tests.fixtures.pipeline import build_linear_pipeline
+from tests.fixtures.base_classes import _TestSchema, _TestSourceBase, as_sink, as_source, as_transform
+from tests.fixtures.pipeline import build_linear_pipeline, build_production_graph
 from tests.fixtures.plugins import CollectSink, ListSource
 from tests.fixtures.stores import MockPayloadStore
 
@@ -49,6 +51,19 @@ class CapturingEventBus:
 
     def emit(self, event: Any) -> None:
         self.events.append(event)
+
+
+class CapturingTelemetryManager:
+    """Minimal telemetry manager double for orchestrator lifecycle tests."""
+
+    def __init__(self) -> None:
+        self.events: list[Any] = []
+
+    def handle_event(self, event: Any) -> None:
+        self.events.append(event)
+
+    def flush(self) -> None:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +137,42 @@ class ShutdownAfterNTransform(BaseTransform):
         )
 
 
+class PreYieldFailureSource(_TestSourceBase):
+    """Generator source that fails before yielding its first row."""
+
+    name = "pre_yield_fail_source"
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.on_success = "default"
+
+    def load(self, ctx: Any) -> Any:
+        raise FileNotFoundError("missing-source-file.csv")
+        yield  # pragma: no cover - keeps this a generator function
+
+
+class FailOnSecondRowTransform(BaseTransform):
+    """Transform that succeeds once, then crashes on the second row."""
+
+    name = "fail_on_second_row"
+    input_schema = _TestSchema
+    output_schema = _TestSchema
+
+    def __init__(self) -> None:
+        super().__init__({"schema": {"mode": "observed"}})
+        self._count = 0
+
+    def process(self, row: PipelineRow, ctx: Any) -> TransformResult:
+        self._count += 1
+        if self._count == 2:
+            raise RuntimeError("boom on second row")
+        return TransformResult.success(
+            make_pipeline_row(dict(row)),
+            success_reason={"action": "passthrough"},
+        )
+
+
 # ===========================================================================
 # Test classes
 # ===========================================================================
@@ -158,6 +209,38 @@ class TestExecutionLoopPhaseEvents:
         assert db_completed_idx < proc_started_idx, (
             f"DATABASE PhaseCompleted (index {db_completed_idx}) must come before PROCESS PhaseStarted (index {proc_started_idx})"
         )
+
+    def test_pre_yield_generator_source_failure_stays_in_source_phase(self) -> None:
+        """A generator startup failure must not be misreported as PROCESS."""
+        db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
+        event_bus = CapturingEventBus()
+
+        source = PreYieldFailureSource()
+        sink = CollectSink(name="default")
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[],
+            sinks={"default": as_sink(sink)},
+        )
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
+
+        with pytest.raises(FileNotFoundError, match=r"missing-source-file\.csv"):
+            orchestrator.run(
+                config,
+                graph=build_production_graph(config),
+                payload_store=payload_store,
+            )
+
+        source_completed = [e for e in event_bus.events if isinstance(e, PhaseCompleted) and e.phase == PipelinePhase.SOURCE]
+        process_started = [e for e in event_bus.events if isinstance(e, PhaseStarted) and e.phase == PipelinePhase.PROCESS]
+        source_errors = [e for e in event_bus.events if isinstance(e, PhaseError) and e.phase == PipelinePhase.SOURCE]
+
+        assert source_completed == []
+        assert process_started == []
+        assert len(source_errors) == 1
+        assert source_errors[0].target == source.name
 
 
 class TestExecutionLoopRowProcessing:
@@ -277,6 +360,46 @@ class TestRunSummaryEmission:
         summaries = [e for e in events if isinstance(e, RunSummary)]
         assert len(summaries) == 1
         assert summaries[0].duration_seconds > 0
+
+    def test_failed_run_summary_and_runfinished_preserve_partial_counts(self) -> None:
+        """Mid-run failure must report real partial counters, not zeros."""
+        db = LandscapeDB.in_memory()
+        payload_store = MockPayloadStore()
+        event_bus = CapturingEventBus()
+        telemetry = CapturingTelemetryManager()
+
+        transform = FailOnSecondRowTransform()
+        source, _tx, sinks, graph = build_linear_pipeline([{"value": 1}, {"value": 2}], transforms=[transform])
+        sink = sinks["default"]
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
+        )
+
+        orchestrator = Orchestrator(db, event_bus=event_bus, telemetry_manager=telemetry)
+
+        with pytest.raises(RuntimeError, match="boom on second row"):
+            orchestrator.run(
+                config,
+                graph=graph,
+                payload_store=payload_store,
+            )
+
+        summaries = [e for e in event_bus.events if isinstance(e, RunSummary)]
+        assert len(summaries) == 1
+        summary = summaries[0]
+        assert summary.status == RunCompletionStatus.FAILED
+        assert summary.total_rows == 2
+        assert summary.succeeded == 1
+        assert summary.failed == 0
+        assert summary.quarantined == 0
+        assert summary.routed == 0
+
+        finished = [e for e in telemetry.events if isinstance(e, RunFinished)]
+        assert len(finished) == 1
+        assert finished[0].status == RunStatus.FAILED
+        assert finished[0].row_count == 2
 
 
 class TestGracefulShutdownIntegration:

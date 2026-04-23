@@ -67,6 +67,35 @@ class FieldMapperConfig(TransformDataConfig):
             raise ValueError(msg)
         return self
 
+    @model_validator(mode="after")
+    def _reject_overlapping_rename_graphs(self) -> FieldMapperConfig:
+        """Reject mappings whose targets are also sources.
+
+        FieldMapper preserves audit lineage for renames. Swaps/chains require
+        target fields to carry metadata from a different source while also
+        existing as source fields themselves, which is ambiguous without a more
+        expressive contract model.
+        """
+        if not self.mapping:
+            return self
+
+        sources = set(self.mapping)
+        overlaps: dict[str, list[str]] = {}
+        for source, target in self.mapping.items():
+            if source != target and target in sources:
+                if target not in overlaps:
+                    overlaps[target] = []
+                overlaps[target].append(source)
+
+        if overlaps:
+            details = ", ".join(f"{target!r} is both target for {srcs} and source" for target, srcs in sorted(overlaps.items()))
+            raise ValueError(
+                "Mapping contains an overlapping rename graph: "
+                f"{details}. Targets that are also sources are order-dependent and can cause silent data loss."
+            )
+
+        return self
+
 
 class FieldMapper(BaseTransform):
     """Map, rename, and select row fields.
@@ -82,7 +111,7 @@ class FieldMapper(BaseTransform):
 
     name = "field_mapper"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:00c77ea8ef276fdc"
+    source_file_hash: str | None = "sha256:9b8ff6b4d0c4c3e9"
     config_model = FieldMapperConfig
 
     @classmethod
@@ -103,14 +132,9 @@ class FieldMapper(BaseTransform):
         self._mapping: dict[str, str] = cfg.mapping
         self._select_only: bool = cfg.select_only
         self._strict: bool = cfg.strict
-
-        # Mapping targets are the fields this transform guarantees in output.
-        # Exclude targets that also appear as sources (identity/rename mappings
-        # like {"score": "score"}) — these fields already exist in input and
-        # would trigger false collision detection in TransformExecutor.
-        self.declared_output_fields = frozenset(cfg.mapping.values()) - frozenset(cfg.mapping.keys())
-
         self._schema_config = cfg.schema_config
+
+        self.declared_output_fields = self._derive_declared_output_fields(cfg)
 
         self.input_schema, self.output_schema = self._create_schemas(
             cfg.schema_config,
@@ -118,6 +142,40 @@ class FieldMapper(BaseTransform):
             adds_fields=True,
         )
         self._output_schema_config = self._build_field_mapper_output_schema_config(cfg)
+
+    @staticmethod
+    def _is_static_normalized_source(source: str) -> bool:
+        """Return True when constructor-time contract math can use source."""
+        return "." not in source and source.isidentifier()
+
+    @staticmethod
+    def _is_unresolved_original_source(source: str) -> bool:
+        """Return True when source may be an original header resolved only at runtime."""
+        return "." not in source and not source.isidentifier()
+
+    @classmethod
+    def _mapping_target_is_guaranteed(
+        cls,
+        cfg: FieldMapperConfig,
+        source: str,
+        base_guaranteed: set[str],
+    ) -> bool:
+        """Whether target exists on every successful row for this mapping."""
+        if cls._is_unresolved_original_source(source):
+            return False
+        if cfg.strict:
+            return True
+        return cls._is_static_normalized_source(source) and source in base_guaranteed
+
+    @classmethod
+    def _derive_declared_output_fields(cls, cfg: FieldMapperConfig) -> frozenset[str]:
+        """Derive targets safe for executor-level declared-output checks."""
+        base_guaranteed = set(cfg.schema_config.guaranteed_fields or ())
+        return frozenset(
+            target
+            for source, target in cfg.mapping.items()
+            if source != target and cls._mapping_target_is_guaranteed(cfg, source, base_guaranteed)
+        )
 
     def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
         """Exercise the real rename/drop path for the backward invariant."""
@@ -141,15 +199,29 @@ class FieldMapper(BaseTransform):
             sources PLUS new targets.
         """
         base_guaranteed = set(cfg.schema_config.guaranteed_fields or ())
+        guaranteed_targets = {
+            target for source, target in cfg.mapping.items() if self._mapping_target_is_guaranteed(cfg, source, base_guaranteed)
+        }
 
         if cfg.select_only:
             # Only mapped targets appear in output
-            output_fields = set(cfg.mapping.values())
+            output_fields = guaranteed_targets
         else:
             # Input fields minus removed sources plus new targets.
             # A source is removed from output when it's renamed to a different target.
-            removed_sources = {source for source, target in cfg.mapping.items() if source != target and "." not in source}
-            output_fields = (base_guaranteed - removed_sources) | set(cfg.mapping.values())
+            has_unresolved_original_removal = any(
+                source != target and self._is_unresolved_original_source(source) for source, target in cfg.mapping.items()
+            )
+            if has_unresolved_original_removal:
+                passthrough_fields: set[str] = set()
+            else:
+                removed_sources = {
+                    source
+                    for source, target in cfg.mapping.items()
+                    if source != target and self._is_static_normalized_source(source) and source in base_guaranteed
+                }
+                passthrough_fields = base_guaranteed - removed_sources
+            output_fields = passthrough_fields | guaranteed_targets
 
         # Always include declared_output_fields (targets that aren't also sources)
         output_fields |= self.declared_output_fields

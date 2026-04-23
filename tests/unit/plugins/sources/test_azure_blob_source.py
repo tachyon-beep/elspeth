@@ -184,11 +184,11 @@ class TestAzureBlobSourceConfig:
         assert contract is not None
         assert contract.locked is True
 
-    def test_observed_schema_defers_contract_for_json(self) -> None:
-        """Observed schema for JSON defers contract to first row."""
+    def test_observed_schema_defers_contract_builder_until_json_field_resolution(self) -> None:
+        """Observed JSON defers contract builder until first-row field resolution."""
         source = _make_source(_base_config(format="json", schema=DYNAMIC_SCHEMA))
-        # Before load(), contract not yet locked
-        assert source._contract_builder is not None
+        assert source.get_schema_contract() is None
+        assert source._contract_builder is None
 
     def test_csv_defers_contract_until_load(self) -> None:
         """CSV format defers contract creation until load() (needs field resolution)."""
@@ -483,6 +483,55 @@ class TestAzureBlobSourceJSON:
         assert rows[0].is_quarantined is True
         assert "decode" in rows[0].quarantine_error.lower()
 
+    @pytest.mark.parametrize(
+        ("source_format", "blob_bytes"),
+        [
+            ("json", json.dumps([{"Customer Name": "Alice", "Order ID": 101}]).encode()),
+            ("jsonl", b'{"Customer Name": "Alice", "Order ID": 101}\n'),
+        ],
+    )
+    def test_json_formats_normalize_keys_and_expose_field_resolution(
+        self,
+        source_format: str,
+        blob_bytes: bytes,
+        ctx: PluginContext,
+    ) -> None:
+        """JSON and JSONL normalize external keys and retain audit mapping."""
+        source = _make_source(_base_config(format=source_format))
+
+        with patch(PATCH_AUTH, return_value=_mock_blob_download(blob_bytes)):
+            rows = list(source.load(ctx))
+
+        assert len(rows) == 1
+        assert rows[0].is_quarantined is False
+        assert rows[0].row == {"customer_name": "Alice", "order_id": 101}
+
+        field_resolution = source.get_field_resolution()
+        assert field_resolution is not None
+        resolution_mapping, normalization_version = field_resolution
+        assert resolution_mapping == {
+            "Customer Name": "customer_name",
+            "Order ID": "order_id",
+        }
+        assert normalization_version == "1.0.0"
+
+    def test_json_field_mapping_overrides_normalized_keys(self, ctx: PluginContext) -> None:
+        """JSON field_mapping can override names after source-boundary normalization."""
+        data = [{"Customer Name": "Alice", "Order ID": 101}]
+        source = _make_source(
+            _base_config(
+                format="json",
+                field_mapping={"customer_name": "display_name"},
+            )
+        )
+
+        with patch(PATCH_AUTH, return_value=_mock_blob_download(json.dumps(data).encode())):
+            rows = list(source.load(ctx))
+
+        assert len(rows) == 1
+        assert rows[0].row == {"display_name": "Alice", "order_id": 101}
+        assert source.get_field_resolution() is not None
+
 
 # ---------------------------------------------------------------------------
 # Task 3: JSONL Loading
@@ -556,7 +605,7 @@ class TestAzureBlobSourceJSONL:
         assert rows[1].is_quarantined is True
 
     def test_encoding_error(self, ctx: PluginContext) -> None:
-        """Encoding error in JSONL quarantines entire file."""
+        """Encoding error in a single-line JSONL blob quarantines that line."""
         bad_bytes = b"\xff\xfe\x00\x01"
         source = _make_source(_base_config(format="jsonl"))
 
@@ -565,7 +614,27 @@ class TestAzureBlobSourceJSONL:
 
         assert len(rows) == 1
         assert rows[0].is_quarantined is True
-        assert "decode" in rows[0].quarantine_error.lower()
+        assert "encoding" in rows[0].quarantine_error.lower()
+
+    def test_invalid_encoding_line_quarantined_and_neighboring_rows_continue(self, ctx: PluginContext) -> None:
+        """A single invalid-encoding line does not drop valid JSONL neighbors."""
+        blob_bytes = b'{"id": 1}\n\xff\xfe\n{"id": 3}\n'
+        source = _make_source(_base_config(format="jsonl"))
+
+        with patch(PATCH_AUTH, return_value=_mock_blob_download(blob_bytes)):
+            rows = list(source.load(ctx))
+
+        assert len(rows) == 3
+        assert rows[0].is_quarantined is False
+        assert rows[0].row == {"id": 1}
+        assert rows[1].is_quarantined is True
+        assert rows[1].quarantine_error is not None
+        assert "line 2" in rows[1].quarantine_error
+        assert "utf-8" in rows[1].quarantine_error.lower()
+        assert rows[1].row["__raw_bytes_hex__"] == "fffe"
+        assert rows[1].row["__line_number__"] == 2
+        assert rows[2].is_quarantined is False
+        assert rows[2].row == {"id": 3}
 
 
 # ---------------------------------------------------------------------------
@@ -744,13 +813,16 @@ class TestAzureBlobSourceAuditAndErrors:
         assert isinstance(resolution_map, Mapping)
         assert len(resolution_map) > 0
 
-    def test_field_resolution_none_for_json(self, ctx: PluginContext) -> None:
-        """get_field_resolution returns None for JSON format."""
-        data = [{"id": 1}]
+    def test_field_resolution_returned_for_json(self, ctx: PluginContext) -> None:
+        """get_field_resolution returns mapping for JSON format after load."""
+        data = [{"Customer Name": "Alice"}]
         blob_bytes = json.dumps(data).encode()
         source = _make_source(_base_config(format="json"))
 
         with patch(PATCH_AUTH, return_value=_mock_blob_download(blob_bytes)):
             list(source.load(ctx))
 
-        assert source.get_field_resolution() is None
+        result = source.get_field_resolution()
+        assert result is not None
+        resolution_map, _version = result
+        assert resolution_map == {"Customer Name": "customer_name"}

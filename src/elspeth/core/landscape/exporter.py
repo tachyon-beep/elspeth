@@ -592,7 +592,7 @@ class LandscapeExporter:
             for member in members_by_batch.get(batch.batch_id, []):
                 batch_member_record: BatchMemberExportRecord = {
                     "record_type": "batch_member",
-                    "run_id": run_id,
+                    "run_id": member.run_id,
                     "batch_id": member.batch_id,
                     "token_id": member.token_id,
                     "ordinal": member.ordinal,

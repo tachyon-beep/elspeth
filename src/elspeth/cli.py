@@ -318,7 +318,13 @@ def _load_settings_with_secrets(
     raw_config = _load_raw_yaml(settings_path)
 
     # Extract and validate secrets config
-    secrets_dict = raw_config.get("secrets", {})
+    secrets_obj = raw_config.get("secrets", {})
+    if secrets_obj is None:
+        secrets_dict: dict[str, Any] = {}
+    else:
+        if not isinstance(secrets_obj, Mapping):
+            raise ValueError(f"'secrets' must be a mapping/object, got {type(secrets_obj).__name__}")
+        secrets_dict = dict(secrets_obj)
     secrets_config = SecretsConfig(**secrets_dict)
 
     # Phase 2: Load secrets from Key Vault if configured
@@ -330,6 +336,17 @@ def _load_settings_with_secrets(
     config = load_settings(settings_path)
 
     return config, secret_resolutions
+
+
+def _execution_sinks_for_graph(
+    config: ElspethSettings,
+    sinks: Mapping[str, SinkProtocol],
+) -> Mapping[str, SinkProtocol]:
+    """Return only sinks that participate in row-flow graph validation/execution."""
+    if config.landscape.export.enabled and config.landscape.export.sink:
+        export_sink_name = config.landscape.export.sink
+        return {name: sink for name, sink in sinks.items() if name != export_sink_name}
+    return sinks
 
 
 @app.command()
@@ -411,10 +428,7 @@ def run(
     # Build and validate graph from plugin instances
     # Exclude export sink from graph - it's used post-run, not during pipeline execution.
     # The export sink receives audit records after the run completes, not pipeline data.
-    execution_sinks = plugins.sinks
-    if config.landscape.export.enabled and config.landscape.export.sink:
-        export_sink_name = config.landscape.export.sink
-        execution_sinks = {k: v for k, v in plugins.sinks.items() if k != export_sink_name}
+    execution_sinks = _execution_sinks_for_graph(config, plugins.sinks)
 
     try:
         graph = ExecutionGraph.from_plugin_instances(
@@ -682,10 +696,10 @@ def explain(
         raise typer.Exit(1) from None
 
     # Resolve SQLCipher passphrase.
-    # When --database is provided, resolve_database_url returns config=None
-    # (the CLI path overrides settings-based URL). But we still need the
-    # settings for passphrase resolution (custom encryption_key_env).
-    # Load settings separately if --settings was provided but config is None.
+    # When --database is provided without --settings, config is None because
+    # the CLI path overrides settings-based URL. If --settings was provided,
+    # resolve_database_url() loads it for passphrase resolution.
+    # Keep the fallback for older callers that may still return config=None.
     from elspeth.cli_helpers import resolve_audit_passphrase
 
     landscape_settings = config.landscape if config else None
@@ -818,7 +832,7 @@ def _orchestrator_context(
     *,
     db: LandscapeDB,
     formatter_prefix: str = "Run",
-    output_format: Literal["console", "json"] = "console",
+    output_format: Literal["console", "json", "none"] = "console",
     checkpoint_always: bool = False,
 ) -> Iterator[_OrchestratorContext]:
     """Shared orchestrator setup and teardown for run/resume CLI paths.
@@ -839,7 +853,7 @@ def _orchestrator_context(
         plugins: Pre-instantiated PluginBundle from instantiate_plugins_from_config()
         db: LandscapeDB connection (caller owns close lifecycle)
         formatter_prefix: Prefix for console formatters ("Run" or "Resume")
-        output_format: 'console' or 'json'
+        output_format: 'console', 'json', or 'none' for programmatic execution
         checkpoint_always: If True, always create CheckpointManager (resume needs it).
             If False, only create when checkpoint config is enabled (normal run).
 
@@ -853,7 +867,7 @@ def _orchestrator_context(
         RuntimeRateLimitConfig,
         RuntimeTelemetryConfig,
     )
-    from elspeth.core import EventBus
+    from elspeth.core import EventBus, EventBusProtocol, NullEventBus
     from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import AggregationSettings
     from elspeth.core.rate_limit import RateLimitRegistry
@@ -887,10 +901,14 @@ def _orchestrator_context(
         aggregation_settings=aggregation_settings,
     )
 
-    # EventBus + formatters
-    event_bus = EventBus()
-    formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix=formatter_prefix)
-    subscribe_formatters(event_bus, formatters)
+    # EventBus + formatters. Programmatic dependency execution uses the
+    # explicit no-output mode so sub-pipelines cannot pollute parent CLI output.
+    if output_format == "none":
+        event_bus: EventBusProtocol = NullEventBus()
+    else:
+        event_bus = EventBus()
+        formatters = create_json_formatters() if output_format == "json" else create_console_formatters(prefix=formatter_prefix)
+        subscribe_formatters(event_bus, formatters)
 
     # Runtime configs
     rate_limit_config = RuntimeRateLimitConfig.from_settings(config.rate_limit)
@@ -1172,12 +1190,13 @@ def validate(
         raise typer.Exit(1) from None
 
     # Build and validate graph from plugin instances
+    execution_sinks = _execution_sinks_for_graph(config, plugins.sinks)
     try:
         graph = ExecutionGraph.from_plugin_instances(
             source=plugins.source,
             source_settings=plugins.source_settings,
             transforms=plugins.transforms,
-            sinks=plugins.sinks,
+            sinks=execution_sinks,
             aggregations=plugins.aggregations,
             gates=list(config.gates),
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
@@ -1440,7 +1459,7 @@ def purge(
     # Initialize database and payload store
     # Note: purge is read-only for audit data, no JSONL journaling needed
     try:
-        db = LandscapeDB.from_url(db_url, passphrase=passphrase)
+        db = LandscapeDB.from_url(db_url, passphrase=passphrase, create_tables=False)
     except Exception as e:
         typer.echo(f"Error connecting to database: {e}", err=True)
         raise typer.Exit(1) from None

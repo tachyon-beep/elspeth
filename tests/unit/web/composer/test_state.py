@@ -2127,6 +2127,7 @@ class TestSchemaContractValidation:
                 options={
                     "schema": {"mode": "observed"},
                     "mapping": {"text": "body"},
+                    "strict": True,
                 },
             )
         )

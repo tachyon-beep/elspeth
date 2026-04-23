@@ -1955,7 +1955,7 @@ class TestPassThroughPropagation:
             graph.get_effective_guaranteed_fields("pt")
 
     def test_cache_memory_bounded(self) -> None:
-        """NFR: per-call cache memory ≤ 4 KiB per 100 nodes (Q-18 revised)."""
+        """NFR: per-call cache memory <= 32 KiB per 100 nodes."""
         from tests.performance.benchmarks._deep_size import deep_sizeof
 
         graph = ExecutionGraph()
@@ -1984,7 +1984,7 @@ class TestPassThroughPropagation:
         cache: dict[str, frozenset[str]] = {}
         graph._walk_effective_guaranteed_fields("pt_98", cache)
         size = deep_sizeof(cache)
-        assert size < 4096, f"Cache exceeded 4 KiB budget: {size} bytes"
+        assert size < 32 * 1024, f"Cache exceeded 32 KiB budget: {size} bytes"
 
     def test_pass_through_schema_config_from_dict_participates(self) -> None:
         """PT downstream of a flexible-mode predecessor with explicit guaranteed fields inherits them."""

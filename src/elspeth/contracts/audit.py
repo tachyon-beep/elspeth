@@ -436,6 +436,7 @@ class BatchMember:
     """A token belonging to a batch."""
 
     batch_id: str
+    run_id: str
     token_id: str
     ordinal: int
 

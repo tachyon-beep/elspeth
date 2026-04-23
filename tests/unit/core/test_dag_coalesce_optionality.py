@@ -828,27 +828,24 @@ class TestCoalesceSinkRequiredFieldValidation:
         graph.add_edge("gate", "sink", label="true", mode=RoutingMode.MOVE)
         graph.add_edge("gate", "sink", label="false", mode=RoutingMode.MOVE)
 
-        # Patch the private walk helper with a counter. The validator must
-        # call it exactly ONCE for the gate predecessor, regardless of how
-        # many parallel edges exist between gate and sink.
+        # Patch the participation-preserving walk helper with a counter. The
+        # validator must call it exactly ONCE for the gate predecessor,
+        # regardless of how many parallel edges exist between gate and sink.
         #
-        # ADR-007: the validator now threads a shared cache through the
-        # private _walk_effective_guaranteed_fields helper (rather than the
-        # public get_effective_guaranteed_fields API which allocates a fresh
-        # per-call cache). Patching the private helper covers both the
+        # The sink validator now needs both effective fields and participation
+        # state, so it goes through the vote helper rather than the older
+        # fields-only helper. Patching the vote helper covers both the
         # deduplication test and the cache-sharing behavior.
         call_counts: dict[str, int] = {}
-        original = ExecutionGraph._walk_effective_guaranteed_fields
+        original = ExecutionGraph._walk_effective_guarantee_vote
 
         def counting_walk(
-            self_inner: ExecutionGraph,
-            node_id: str,
-            cache: dict[str, frozenset[str]],
-        ) -> frozenset[str]:
+            self_inner: ExecutionGraph, node_id: str, cache: dict[str, object], field_cache: dict[str, frozenset[str]] | None = None
+        ) -> object:
             call_counts[node_id] = call_counts.get(node_id, 0) + 1
-            return original(self_inner, node_id, cache)
+            return original(self_inner, node_id, cache, field_cache)
 
-        with patch.object(ExecutionGraph, "_walk_effective_guaranteed_fields", new=counting_walk):
+        with patch.object(ExecutionGraph, "_walk_effective_guarantee_vote", new=counting_walk):
             graph._validate_sink_required_fields()  # Should not raise
 
         assert call_counts.get("gate", 0) == 1, (
@@ -915,16 +912,17 @@ class TestCoalesceSinkRequiredFieldValidation:
         the fix must NOT reject abstaining predecessors. Only explicit-empty
         declarations should trigger rejection.
 
-        A predecessor with fields=(x?) and guaranteed_fields=None is saying
-        "I abstain from the guarantee question" — the static schema can't
-        prove whether x will be produced. The runtime check still applies.
+        A truly abstaining predecessor must have no typed fields and no
+        explicit ``guaranteed_fields`` declaration. The static schema can't
+        prove whether ``x`` will be produced, so the runtime check still
+        applies.
         """
         from elspeth.contracts import RoutingMode
         from elspeth.core.dag.graph import ExecutionGraph
 
         predecessor_schema = SchemaConfig(
-            mode="flexible",
-            fields=(FieldDefinition("x", "int", required=False),),
+            mode="observed",
+            fields=None,
             guaranteed_fields=None,  # ABSTAIN — declares_guaranteed_fields=False
         )
 
@@ -947,6 +945,57 @@ class TestCoalesceSinkRequiredFieldValidation:
 
         # Must NOT raise — predecessor abstains, can't statically validate.
         graph._validate_sink_required_fields()
+
+    def test_pass_through_inheriting_explicit_empty_guarantees_rejects_sink_requirement(self) -> None:
+        """Propagated empty participation must still fail sink validation.
+
+        Regression test for the generated bug triage in
+        ``docs/bugs/generated/core/dag/graph.py.md``. The immediate
+        predecessor of the sink is an observed pass-through transform whose
+        *local* schema abstains from guarantees, but its effective guarantee
+        set is empty because an upstream participating schema contributed an
+        explicit empty vote.
+
+        The bug was that ``_validate_sink_required_fields()`` only looked at
+        the pass-through node's local ``declares_guaranteed_fields`` flag
+        after seeing an empty effective guarantee set, so it misclassified
+        the node as abstaining and skipped validation entirely.
+        """
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag.graph import ExecutionGraph
+
+        upstream_schema = SchemaConfig(
+            mode="fixed",
+            fields=(FieldDefinition("maybe_field", "str", required=False),),
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node(
+            "source",
+            node_type=NodeType.SOURCE,
+            plugin_name="csv",
+            output_schema_config=upstream_schema,
+        )
+        graph.add_node(
+            "passthrough",
+            node_type=NodeType.TRANSFORM,
+            plugin_name="passthrough",
+            config={"schema": {"mode": "observed"}},
+            output_schema_config=None,
+            passes_through_input=True,
+        )
+        graph.add_node(
+            "sink",
+            node_type=NodeType.SINK,
+            plugin_name="csv_sink",
+            declared_required_fields=frozenset({"maybe_field"}),
+        )
+
+        graph.add_edge("source", "passthrough", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("passthrough", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        with pytest.raises(GraphValidationError, match=r"does not guarantee"):
+            graph.validate_edge_compatibility()
 
 
 class _BuilderMockSource:

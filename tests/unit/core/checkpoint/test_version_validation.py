@@ -152,8 +152,11 @@ class TestCheckpointVersionValidation:
         aggregation_settings = {
             node_id: AggregationSettings(name="test_agg", plugin="batch_stats", input="source_out", on_error="discard", trigger=trigger)
         }
+        execution = Mock()
+        execution.get_batch.return_value = Mock(aggregation_node_id=node_id)
+        execution.get_batch_members.return_value = [Mock(token_id="tok-001", ordinal=0)]
         executor = AggregationExecutor(
-            execution=None,  # type: ignore
+            execution=execution,
             span_factory=span_factory,
             step_resolver=lambda node_id: 1,
             run_id="test_run",

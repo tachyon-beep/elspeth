@@ -31,6 +31,7 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+from elspeth.engine.orchestrator.core import _RunFailedWithPartialResultError
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.results import TransformResult
 from elspeth.testing import make_pipeline_row, make_source_row
@@ -368,7 +369,7 @@ class TestT18CharacterizationExecuteRun:
         graph = build_production_graph(config)
         factory, run_id, payload_store = _begin_test_run(db)
 
-        with pytest.raises(RuntimeError, match="deliberate error"):
+        with pytest.raises(_RunFailedWithPartialResultError, match="deliberate error") as exc_info:
             orchestrator._execute_run(
                 factory=factory,
                 run_id=run_id,
@@ -376,6 +377,8 @@ class TestT18CharacterizationExecuteRun:
                 graph=graph,
                 payload_store=payload_store,
             )
+        assert isinstance(exc_info.value.original_error, RuntimeError)
+        assert str(exc_info.value.original_error) == "deliberate error for characterization test"
 
         # Current behavior: _current_graph is NOT cleared on error
         # (the assignment is after the finally block, not inside it)

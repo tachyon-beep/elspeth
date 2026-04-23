@@ -458,6 +458,7 @@ class TransformErrorReason(TypedDict):
 
     Batch processing context:
         batch_id: Azure/OpenRouter batch job ID
+        operation: Computation step that failed within a batch transform
         queries_completed: Number of queries completed before failure
         row_errors: List of per-row error entries
 
@@ -563,6 +564,7 @@ class TransformErrorReason(TypedDict):
 
     # Batch processing context
     batch_id: NotRequired[str]
+    operation: NotRequired[str]
     batch_size: NotRequired[int]  # Total rows in batch
     valid_count: NotRequired[int]  # Rows that passed validation within batch
     queries_completed: NotRequired[int]

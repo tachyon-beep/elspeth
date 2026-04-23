@@ -739,7 +739,9 @@ class TestUnionMergeFieldProvenance:
         # Ensure the underlying cause is CoalesceCollisionError
         exc_chain: list[BaseException] = []
         cur: BaseException | None = excinfo.value
-        while cur is not None:
+        seen_exceptions: set[int] = set()
+        while cur is not None and id(cur) not in seen_exceptions:
+            seen_exceptions.add(id(cur))
             exc_chain.append(cur)
             cur = cur.__cause__ or cur.__context__
         assert any(isinstance(e, CoalesceCollisionError) for e in exc_chain), (

@@ -1060,15 +1060,14 @@ class TestBug4_4_RuntimeErrorOnLoadFailure:
 
 
 class TestBug4_5_UnicodeDecodeErrorInJSONL:
-    """Bug 4.5: UnicodeDecodeError in JSONL quarantines instead of crashing.
+    """Bug 4.5: Invalid JSONL encoding quarantines instead of crashing.
 
-    Previously, _load_jsonl() did not catch UnicodeDecodeError, so invalid
-    encoding in JSONL blob data would crash the pipeline. Now it quarantines
-    the row and continues.
+    Invalid encoding in JSONL blob data is quarantined at line granularity
+    so recoverable neighboring records can continue.
     """
 
     def test_invalid_encoding_quarantines_row(self, mock_blob_client, ctx: PluginContext) -> None:
-        """UnicodeDecodeError in JSONL blob decoding yields quarantined row."""
+        """Invalid JSONL line encoding yields a line-level quarantined row."""
         source = AzureBlobSource(make_config(format="jsonl"))
 
         # Binary data that isn't valid UTF-8
@@ -1082,4 +1081,6 @@ class TestBug4_5_UnicodeDecodeErrorInJSONL:
         quarantined_rows = [r for r in rows if r.is_quarantined]
         assert len(quarantined_rows) == 1
         assert quarantined_rows[0].quarantine_error is not None
-        assert "Failed to decode JSONL blob as" in quarantined_rows[0].quarantine_error
+        assert "line 1" in quarantined_rows[0].quarantine_error
+        assert "invalid utf-8 encoding" in quarantined_rows[0].quarantine_error
+        assert "__raw_bytes_hex__" in quarantined_rows[0].row

@@ -1175,8 +1175,13 @@ class ExecutionRepository:
         Returns:
             BatchMember model
         """
+        batch_row = self._ops.execute_fetchone(select(batches_table.c.run_id).where(batches_table.c.batch_id == batch_id))
+        if batch_row is None:
+            raise AuditIntegrityError(f"Cannot add batch member: batch {batch_id} not found")
+
         member = BatchMember(
             batch_id=batch_id,
+            run_id=batch_row.run_id,
             token_id=token_id,
             ordinal=ordinal,
         )
@@ -1184,9 +1189,11 @@ class ExecutionRepository:
         self._ops.execute_insert(
             batch_members_table.insert().values(
                 batch_id=member.batch_id,
+                run_id=member.run_id,
                 token_id=member.token_id,
                 ordinal=member.ordinal,
-            )
+            ),
+            context="batch_members",
         )
 
         return member
@@ -1227,22 +1234,27 @@ class ExecutionRepository:
         # WHERE clause so the check-and-set is a single statement, eliminating the
         # TOCTOU race between the old get_batch() read and the subsequent update.
         terminal_values = [s.value for s in _TERMINAL_BATCH_STATUSES]
-        with self._db.connection() as conn:
-            result = conn.execute(
-                batches_table.update()
-                .where(batches_table.c.batch_id == batch_id)
-                .where(batches_table.c.status.notin_(terminal_values))
-                .values(**updates)
-            )
-            if result.rowcount == 0:
-                # Distinguish "not found" from "already terminal".
-                existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
-                if existing is not None:
-                    raise AuditIntegrityError(
-                        f"Cannot transition batch {batch_id} from terminal status {existing.status!r} "
-                        f"to {status.value!r}. Terminal batches are immutable."
-                    )
-                raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
+        try:
+            with self._db.connection() as conn:
+                result = conn.execute(
+                    batches_table.update()
+                    .where(batches_table.c.batch_id == batch_id)
+                    .where(batches_table.c.status.notin_(terminal_values))
+                    .values(**updates)
+                )
+                if result.rowcount == 0:
+                    # Distinguish "not found" from "already terminal".
+                    existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
+                    if existing is not None:
+                        raise AuditIntegrityError(
+                            f"Cannot transition batch {batch_id} from terminal status {existing.status!r} "
+                            f"to {status.value!r}. Terminal batches are immutable."
+                        )
+                    raise AuditIntegrityError(f"Cannot update batch status: batch {batch_id} not found")
+        except SQLAlchemyError as exc:
+            raise LandscapeRecordError(
+                f"update_batch_status failed for batch_id={batch_id} — database rejected audit update: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def complete_batch(
         self,
@@ -1279,32 +1291,37 @@ class ExecutionRepository:
         # Atomic conditional UPDATE: guard against already-terminal status in the
         # WHERE clause (same TOCTOU-safe pattern as update_batch_status).
         terminal_values = [s.value for s in _TERMINAL_BATCH_STATUSES]
-        with self._db.connection() as conn:
-            update_result = conn.execute(
-                batches_table.update()
-                .where(batches_table.c.batch_id == batch_id)
-                .where(batches_table.c.status.notin_(terminal_values))
-                .values(
-                    status=status,
-                    trigger_type=trigger_type,
-                    trigger_reason=trigger_reason,
-                    aggregation_state_id=state_id,
-                    completed_at=timestamp,
-                )
-            )
-            if update_result.rowcount == 0:
-                # Distinguish "not found" from "already terminal".
-                existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
-                if existing is not None:
-                    raise AuditIntegrityError(
-                        f"Cannot complete batch {batch_id}: current status {existing.status!r} is already terminal. "
-                        f"Terminal batches are immutable."
+        try:
+            with self._db.connection() as conn:
+                update_result = conn.execute(
+                    batches_table.update()
+                    .where(batches_table.c.batch_id == batch_id)
+                    .where(batches_table.c.status.notin_(terminal_values))
+                    .values(
+                        status=status,
+                        trigger_type=trigger_type,
+                        trigger_reason=trigger_reason,
+                        aggregation_state_id=state_id,
+                        completed_at=timestamp,
                     )
-                raise AuditIntegrityError(
-                    f"complete_batch: zero rows affected for batch_id={batch_id} — target row does not exist (audit data corruption)"
                 )
+                if update_result.rowcount == 0:
+                    # Distinguish "not found" from "already terminal".
+                    existing = conn.execute(select(batches_table.c.status).where(batches_table.c.batch_id == batch_id)).fetchone()
+                    if existing is not None:
+                        raise AuditIntegrityError(
+                            f"Cannot complete batch {batch_id}: current status {existing.status!r} is already terminal. "
+                            f"Terminal batches are immutable."
+                        )
+                    raise AuditIntegrityError(
+                        f"complete_batch: zero rows affected for batch_id={batch_id} — target row does not exist (audit data corruption)"
+                    )
 
-            row = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id)).fetchone()
+                row = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id)).fetchone()
+        except SQLAlchemyError as exc:
+            raise LandscapeRecordError(
+                f"complete_batch failed for batch_id={batch_id} — database rejected audit update: {type(exc).__name__}: {exc}"
+            ) from exc
 
         if row is None:
             raise AuditIntegrityError(f"Batch {batch_id} not found after update — database corruption or transaction failure")
@@ -1406,7 +1423,10 @@ class ExecutionRepository:
         """
         query = (
             select(batch_members_table)
-            .join(batches_table, batch_members_table.c.batch_id == batches_table.c.batch_id)
+            .join(
+                batches_table,
+                (batch_members_table.c.batch_id == batches_table.c.batch_id) & (batch_members_table.c.run_id == batches_table.c.run_id),
+            )
             .where(batches_table.c.run_id == run_id)
             .order_by(batch_members_table.c.batch_id, batch_members_table.c.ordinal)
         )
@@ -1478,6 +1498,7 @@ class ExecutionRepository:
                 member_result = conn.execute(
                     batch_members_table.insert().values(
                         batch_id=new_batch_id,
+                        run_id=original.run_id,
                         token_id=member_row.token_id,
                         ordinal=member_row.ordinal,
                     )

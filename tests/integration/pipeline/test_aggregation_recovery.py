@@ -525,6 +525,13 @@ class TestAggregationRecoveryIntegration:
             tokens.append(token)
             evaluator.record_accept()
 
+        batch = factory.execution.create_batch(
+            run_id=run.run_id,
+            aggregation_node_id="sum_aggregator",
+        )
+        for ordinal, token in enumerate(tokens):
+            factory.execution.add_batch_member(batch.batch_id, token.token_id, ordinal=ordinal)
+
         # Verify initial state: 3 rows accepted, no trigger yet
         assert evaluator.batch_count == 3
         assert evaluator.should_trigger() is False  # Only 0 seconds elapsed so far
@@ -560,7 +567,7 @@ class TestAggregationRecoveryIntegration:
                 )
                 for t in tokens
             ),
-            batch_id="batch-001",
+            batch_id=batch.batch_id,
             elapsed_age_seconds=elapsed,  # Bug #6 fix: store elapsed time
             count_fire_offset=evaluator.get_count_fire_offset(),  # P2-2026-02-01
             condition_fire_offset=evaluator.get_condition_fire_offset(),  # P2-2026-02-01

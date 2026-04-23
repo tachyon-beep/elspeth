@@ -12,6 +12,7 @@ Grades:
   via hashes, but cannot replay the run.
 """
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
@@ -98,7 +99,10 @@ def compute_grade(db: "LandscapeDB", run_id: str) -> ReproducibilityGrade:
         return ReproducibilityGrade.FULL_REPRODUCIBLE
 
 
-def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
+_PURGE_REF_CHUNK_SIZE = 100
+
+
+def update_grade_after_purge(db: "LandscapeDB", run_id: str, deleted_refs: Sequence[str] | None = None) -> None:
     """Degrade reproducibility grade after payload purge.
 
     After payloads are purged, nondeterministic runs can no longer be
@@ -110,11 +114,15 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
     A response payload is replay-critical when:
     - It belongs to a call under a nondeterministic node
     - response_hash proves the payload once existed
-    - response_ref is NULL (payload has been purged)
+    - its retained response_ref was actually deleted by purge
+
+    When ``deleted_refs`` is omitted, this keeps the legacy fallback check for
+    rows where ``response_ref`` has already been nulled.
 
     Args:
         db: LandscapeDB instance
         run_id: Run ID to potentially degrade
+        deleted_refs: Payload refs actually removed by the purge operation.
     """
     with db.connection() as conn:
         # Tier 1 validation: verify audit data integrity before mutation
@@ -146,7 +154,11 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         # Check if any replay-critical payloads have been purged.
         # A response payload is replay-critical when it belongs to a call
         # under a nondeterministic node (the node's calls need replaying).
-        # Purged = response_hash is NOT NULL (data existed) but response_ref IS NULL (purged).
+        # In the real purge path, response_ref is intentionally retained and
+        # the payload store blob is deleted. The deleted_refs argument is the
+        # authoritative evidence of that deletion. The response_ref IS NULL
+        # fallback preserves compatibility with older callers/tests that mark
+        # purged payloads by nulling refs.
         #
         # Non-reproducible determinism values (same set as compute_grade):
         non_reproducible_values = [
@@ -160,7 +172,7 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
         # Performance: relies on ix_calls_state index on calls.state_id (schema.py).
         # Acceptable at current scale; may need a composite index if multi-run
         # databases grow to millions of calls.
-        purged_critical = conn.execute(
+        critical_response_query = (
             select(calls_table.c.call_id)
             .select_from(
                 calls_table.join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id).join(
@@ -171,9 +183,18 @@ def update_grade_after_purge(db: "LandscapeDB", run_id: str) -> None:
             .where(node_states_table.c.run_id == run_id)
             .where(nodes_table.c.determinism.in_([d.value for d in non_reproducible_values]))
             .where(calls_table.c.response_hash.isnot(None))  # Response existed
-            .where(calls_table.c.response_ref.is_(None))  # But has been purged
-            .limit(1)  # Only need to know if at least one exists
-        ).fetchone()
+        )
+
+        purged_critical = None
+        if deleted_refs is None:
+            purged_critical = conn.execute(critical_response_query.where(calls_table.c.response_ref.is_(None)).limit(1)).fetchone()
+        else:
+            unique_deleted_refs = tuple(dict.fromkeys(deleted_refs))
+            for offset in range(0, len(unique_deleted_refs), _PURGE_REF_CHUNK_SIZE):
+                chunk = unique_deleted_refs[offset : offset + _PURGE_REF_CHUNK_SIZE]
+                purged_critical = conn.execute(critical_response_query.where(calls_table.c.response_ref.in_(chunk)).limit(1)).fetchone()
+                if purged_critical is not None:
+                    break
 
         if purged_critical is not None:
             # Atomic conditional update (same compare-and-swap pattern)

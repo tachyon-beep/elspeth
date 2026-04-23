@@ -617,9 +617,16 @@ class TestResumeComprehensive:
 
         # Resume schema matches recovery output types: the recovery system
         # deserializes datetime objects from format: "date-time", not strings.
-        # Schema field specs don't support datetime directly — use 'any'.
-        resume_schema = {"mode": "fixed", "fields": ["id: int", "timestamp: any"]}
-        passthrough = PassThrough({"schema": resume_schema})
+        # Schema field specs don't support datetime directly, so use observed
+        # mode with explicit field guarantees instead of declaring a fake type.
+        resume_schema = {"mode": "observed", "guaranteed_fields": ["id", "timestamp"], "required_fields": ["id", "timestamp"]}
+
+        class DatetimeAssertingPassThrough(PassThrough):
+            def process(self, row: Any, ctx: Any) -> Any:
+                assert isinstance(row["timestamp"], datetime)
+                return super().process(row, ctx)
+
+        passthrough = DatetimeAssertingPassThrough({"schema": resume_schema})
         passthrough.on_error = "discard"
         config = PipelineConfig(
             source=_null_source("default"),

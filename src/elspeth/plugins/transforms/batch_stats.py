@@ -43,6 +43,13 @@ class BatchStatsConfig(TransformDataConfig):
             raise ValueError("value_field must not be empty")
         return v
 
+    @field_validator("group_by")
+    @classmethod
+    def _reject_empty_group_by(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("group_by must not be empty")
+        return v
+
     @model_validator(mode="after")
     def _reject_group_by_collision(self) -> "BatchStatsConfig":
         """Reject group_by names that collide with aggregate output keys.
@@ -95,7 +102,7 @@ class BatchStats(BaseTransform):
 
     name = "batch_stats"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:418cf32faea4be0d"
+    source_file_hash: str | None = "sha256:d22e8793d914b7a5"
     config_model = BatchStatsConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
@@ -199,6 +206,22 @@ class BatchStats(BaseTransform):
                 {"reason": "empty_batch"},
                 retryable=False,
             )
+
+        # group_by is a structural batch invariant: if configured, every row
+        # must belong to the same group before data-dependent error paths fire.
+        group_value: Any = None
+        if self._group_by is not None:
+            group_value = rows[0][self._group_by]
+            for row in rows[1:]:
+                val = row[self._group_by]
+                if val != group_value:
+                    raise ValueError(
+                        f"Heterogeneous '{self._group_by}' values in batch: "
+                        f"first row has {group_value!r}, found {val!r}. "
+                        f"Configure the aggregation trigger to group by "
+                        f"'{self._group_by}' or remove group_by config."
+                    )
+
         # Extract numeric values - enforce type contract
         # Tier 2 pipeline data should already be validated; wrong types = upstream bug
         values: list[int | float] = []
@@ -263,26 +286,27 @@ class BatchStats(BaseTransform):
         }
 
         if self._compute_mean:
-            result["mean"] = total / count
+            try:
+                result["mean"] = total / count
+            except OverflowError:
+                return TransformResult.error(
+                    {
+                        "reason": "float_overflow",
+                        "operation": "mean",
+                        "batch_size": len(rows),
+                        "valid_count": count,
+                    },
+                    retryable=False,
+                )
 
         if skipped_non_finite_indices:
             result["skipped_non_finite"] = len(skipped_non_finite_indices)
             result["skipped_non_finite_indices"] = skipped_non_finite_indices
 
-        # Include group_by field — validate homogeneity across batch.
-        # group_by is configured contract, so missing field is an upstream bug.
+        # Include prevalidated group_by field. Missing fields and heterogeneous
+        # values were checked before data-dependent error paths above.
         # Collision between group_by and output keys is caught at init time.
-        if self._group_by:
-            group_value = rows[0][self._group_by]
-            for row in rows[1:]:
-                val = row[self._group_by]
-                if val != group_value:
-                    raise ValueError(
-                        f"Heterogeneous '{self._group_by}' values in batch: "
-                        f"first row has {group_value!r}, found {val!r}. "
-                        f"Configure the aggregation trigger to group by "
-                        f"'{self._group_by}' or remove group_by config."
-                    )
+        if self._group_by is not None:
             result[self._group_by] = group_value
 
         # Derive fields_added directly from result dict — single source of truth.

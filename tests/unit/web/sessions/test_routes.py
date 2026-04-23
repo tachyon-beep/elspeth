@@ -260,7 +260,7 @@ class TestSessionCRUDRoutes:
         )
         run = await service.create_run(session_id, state.id)
         await service.update_run_status(run.id, "running")
-        await service.update_run_status(run.id, "completed")
+        await service.update_run_status(run.id, "completed", landscape_run_id="lscp-delete-allowed")
 
         del_resp = client.delete(f"/api/sessions/{session_id}")
         assert del_resp.status_code == 204
@@ -1814,7 +1814,7 @@ class TestYamlEndpoint:
                         "on_success": "main",
                         "on_error": "discard",
                         "options": {
-                            "schema": {"mode": "observed"},
+                            "schema": {"mode": "observed", "guaranteed_fields": ["text"], "required_fields": ["text"]},
                             "mapping": {"text": "body"},
                         },
                         "condition": None,

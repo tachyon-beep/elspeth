@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from ipaddress import IPv4Network, IPv6Network
 from typing import TYPE_CHECKING, Any
@@ -266,6 +266,7 @@ class AuditedHTTPClient(AuditedClientBase):
         timeout: float | None,
         json: dict[str, Any] | None = None,
         params: dict[str, str | int | float] | None = None,
+        audit_request_metadata: Mapping[str, Any] | None = None,
         token_id: str | None = None,
     ) -> httpx.Response:
         """Execute an HTTP request with audit recording and telemetry.
@@ -280,6 +281,9 @@ class AuditedHTTPClient(AuditedClientBase):
             timeout: Request timeout override (uses client default if None)
             json: JSON body (POST only)
             params: Query parameters (GET only)
+            audit_request_metadata: Audit-only metadata to include in the
+                recorded request payload without sending it to the remote
+                service.
             token_id: Per-call token_id for telemetry (overrides client default).
                 Used by batch transforms where one client serves multiple tokens.
 
@@ -305,6 +309,7 @@ class AuditedHTTPClient(AuditedClientBase):
             headers=self._filter_request_headers(merged_headers),
             json=json,
             params=params,
+            audit_metadata=audit_request_metadata,
         )
         request_data = request_dto.to_dict()
 
@@ -401,6 +406,7 @@ class AuditedHTTPClient(AuditedClientBase):
         json: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        audit_request_metadata: Mapping[str, Any] | None = None,
         token_id: str | None = None,
     ) -> httpx.Response:
         """Make POST request with automatic audit recording.
@@ -410,6 +416,9 @@ class AuditedHTTPClient(AuditedClientBase):
             json: JSON body to send (optional)
             headers: Additional headers for this request
             timeout: Request timeout in seconds (uses client default if None)
+            audit_request_metadata: Audit-only metadata to include in the
+                recorded request payload without sending it to the remote
+                service.
             token_id: Per-call token_id for telemetry (overrides client default).
                 Used by batch transforms where one client serves multiple tokens.
 
@@ -425,6 +434,7 @@ class AuditedHTTPClient(AuditedClientBase):
             headers=headers,
             timeout=timeout,
             json=json,
+            audit_request_metadata=audit_request_metadata,
             token_id=token_id,
         )
 

@@ -850,6 +850,66 @@ landscape: {}
         with pytest.raises(ValueError, match="Settings YAML root must be a mapping/object, got list"):
             _load_settings_with_secrets(settings_file)
 
+    def test_load_settings_with_secrets_treats_null_section_as_empty_mapping(self, tmp_path: Path) -> None:
+        """secrets: null should behave like an omitted secrets section."""
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+secrets: null
+source:
+  plugin: csv
+  on_success: output
+  options:
+    path: input.csv
+    schema:
+      mode: observed
+sinks:
+  output:
+    plugin: csv
+    on_write_failure: discard
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+
+landscape: {}
+""")
+
+        from elspeth.cli import _load_settings_with_secrets
+
+        config, resolutions = _load_settings_with_secrets(settings_file)
+
+        assert config.source.plugin == "csv"
+        assert resolutions == []
+
+    def test_load_settings_with_secrets_rejects_non_mapping_secrets_section(self, tmp_path: Path) -> None:
+        """Non-mapping secrets sections should raise ValueError, not raw TypeError."""
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text("""
+secrets: []
+source:
+  plugin: csv
+  on_success: output
+  options:
+    path: input.csv
+    schema:
+      mode: observed
+sinks:
+  output:
+    plugin: csv
+    on_write_failure: discard
+    options:
+      path: output.csv
+      schema:
+        mode: observed
+
+landscape: {}
+""")
+
+        from elspeth.cli import _load_settings_with_secrets
+
+        with pytest.raises(ValueError, match="'secrets' must be a mapping/object, got list"):
+            _load_settings_with_secrets(settings_file)
+
 
 class TestFingerprintValueErrorWrapping:
     """ValueError from fingerprint computation must be wrapped as SecretLoadError."""

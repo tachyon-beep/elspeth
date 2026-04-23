@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from datetime import UTC, datetime
+from itertools import chain
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -158,6 +159,16 @@ if TYPE_CHECKING:
     from elspeth.engine.coalesce_executor import CoalesceExecutor
 
 slog = structlog.get_logger(__name__)
+
+
+class _RunFailedWithPartialResultError(Exception):
+    """Internal wrapper used to move partial counters to outer failure handlers."""
+
+    def __init__(self, original_error: Exception, partial_result: RunResult) -> None:
+        super().__init__(str(original_error))
+        self.original_error = original_error
+        self.partial_result = partial_result
+        self.original_traceback = original_error.__traceback__
 
 
 def prepare_for_run() -> None:
@@ -452,15 +463,32 @@ class Orchestrator:
         run_id: str,
         factory: RecorderFactory,
         start_time: float,
+        result: RunResult | None = None,
     ) -> None:
         """Emit telemetry and EventBus events for a failed run.
 
         Finalizes the run as FAILED, emits RunFinished telemetry and RunSummary
-        with zero metrics. Shared between run() (when run_completed=False) and
-        resume().
+        with the best available metrics. Shared between run() (when
+        run_completed=False) and resume().
         """
         from elspeth.telemetry import RunFinished
 
+        failed_result = result or RunResult(
+            run_id=run_id,
+            status=RunStatus.FAILED,
+            rows_processed=0,
+            rows_succeeded=0,
+            rows_failed=0,
+            rows_routed=0,
+            rows_quarantined=0,
+            rows_forked=0,
+            rows_coalesced=0,
+            rows_coalesce_failed=0,
+            rows_expanded=0,
+            rows_buffered=0,
+            rows_diverted=0,
+            routed_destinations={},
+        )
         total_duration = time.perf_counter() - start_time
         factory.run_lifecycle.finalize_run(run_id, status=RunStatus.FAILED)
 
@@ -469,7 +497,7 @@ class Orchestrator:
                 timestamp=datetime.now(UTC),
                 run_id=run_id,
                 status=RunStatus.FAILED,
-                row_count=0,
+                row_count=failed_result.rows_processed,
                 duration_ms=total_duration * 1000,
             )
         )
@@ -478,14 +506,14 @@ class Orchestrator:
             RunSummary(
                 run_id=run_id,
                 status=RunCompletionStatus.FAILED,
-                total_rows=0,
-                succeeded=0,
-                failed=0,
-                quarantined=0,
+                total_rows=failed_result.rows_processed,
+                succeeded=failed_result.rows_succeeded,
+                failed=failed_result.rows_failed,
+                quarantined=failed_result.rows_quarantined,
                 duration_seconds=total_duration,
                 exit_code=2,  # exit_code: 0=success, 1=partial, 2=total failure
-                routed=0,
-                routed_destinations=(),
+                routed=failed_result.rows_routed,
+                routed_destinations=tuple(failed_result.routed_destinations.items()),
             )
         )
 
@@ -1441,6 +1469,37 @@ class Orchestrator:
             except Exception:
                 slog.debug("Interrupted ceremony failed — original exception preserved", run_id=run.run_id)
             raise  # Propagate to CLI
+        except _RunFailedWithPartialResultError as failed_exc:
+            try:
+                if run_completed:
+                    # Export failed after successful run — emit PARTIAL status.
+                    # RunFinished was already emitted before the export attempt,
+                    # so only emit the EventBus RunSummary here.
+                    total_duration = time.perf_counter() - run_start_time
+                    self._events.emit(
+                        RunSummary(
+                            run_id=run.run_id,
+                            status=RunCompletionStatus.PARTIAL,
+                            total_rows=result.rows_processed,
+                            succeeded=result.rows_succeeded,
+                            failed=result.rows_failed,
+                            quarantined=result.rows_quarantined,
+                            duration_seconds=total_duration,
+                            exit_code=1,
+                            routed=result.rows_routed,
+                            routed_destinations=tuple(result.routed_destinations.items()),
+                        )
+                    )
+                else:
+                    self._emit_failed_ceremony(
+                        run.run_id,
+                        factory,
+                        run_start_time,
+                        failed_exc.partial_result,
+                    )
+            except Exception:
+                slog.debug("Failure ceremony failed — original exception preserved", run_id=run.run_id)
+            raise failed_exc.original_error.with_traceback(failed_exc.original_traceback) from None
         except Exception:
             # Emit RunSummary with failure status — best-effort, must not mask
             try:
@@ -2359,13 +2418,18 @@ class Orchestrator:
 
         try:
             with self._span_factory.source_span(config.source.name):
-                source_iterator = config.source.load(ctx)
+                source_iterator = iter(config.source.load(ctx))
+                try:
+                    first_row = next(source_iterator)
+                except StopIteration:
+                    self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
+                    return iter(())
         except Exception as e:
             self._emit_phase_error(PipelinePhase.SOURCE, e, target=config.source.name)
             raise
 
         self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
-        return source_iterator
+        return chain((first_row,), source_iterator)
 
     def _run_main_processing_loop(
         self,
@@ -2786,6 +2850,15 @@ class Orchestrator:
                 )
 
             self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=current_time - loop_result.phase_start))
+        except BatchPendingError:
+            raise
+        except GracefulShutdownError:
+            raise
+        except Exception as exc:
+            raise _RunFailedWithPartialResultError(
+                original_error=exc,
+                partial_result=loop_ctx.counters.to_run_result(run_id, status=RunStatus.FAILED),
+            ) from exc
 
         finally:
             self._cleanup_plugins(config, run_ctx.ctx, include_source=True)
@@ -3066,6 +3139,17 @@ class Orchestrator:
             except Exception:
                 slog.debug("Interrupted ceremony failed — original exception preserved", run_id=run_id)
             raise  # Propagate to CLI
+        except _RunFailedWithPartialResultError as failed_exc:
+            try:
+                self._emit_failed_ceremony(
+                    run_id,
+                    factory,
+                    resume_start_time,
+                    failed_exc.partial_result,
+                )
+            except Exception:
+                slog.debug("Failure ceremony failed — original exception preserved", run_id=run_id)
+            raise failed_exc.original_error.with_traceback(failed_exc.original_traceback) from None
         except Exception:
             # Finalize as FAILED to prevent the run from being stuck in RUNNING
             # permanently (which blocks future resume attempts).
@@ -3165,6 +3249,13 @@ class Orchestrator:
                 on_token_written_factory=self._make_checkpoint_after_sink_factory(run_id, run_ctx.processor),
                 shutdown_checkpoint_source_id=artifacts.source_id,
             )
+        except GracefulShutdownError:
+            raise
+        except Exception as exc:
+            raise _RunFailedWithPartialResultError(
+                original_error=exc,
+                partial_result=loop_ctx.counters.to_run_result(run_id, status=RunStatus.FAILED),
+            ) from exc
 
         finally:
             self._cleanup_plugins(config, run_ctx.ctx, include_source=False)

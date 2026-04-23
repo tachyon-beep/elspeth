@@ -385,6 +385,27 @@ class TestFieldMapperDuplicateTargetRejection:
                 }
             )
 
+    @pytest.mark.parametrize(
+        "mapping",
+        [
+            {"a": "b", "b": "a"},
+            {"a": "b", "b": "c"},
+            {"b": "c", "a": "b"},
+        ],
+    )
+    def test_overlapping_rename_graphs_rejected_at_config_time(self, mapping: dict[str, str]) -> None:
+        """Targets that are also sources are rejected before they can lose data."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        with pytest.raises(PluginConfigError, match="overlapping rename"):
+            FieldMapper(
+                {
+                    "schema": DYNAMIC_SCHEMA,
+                    "mapping": mapping,
+                }
+            )
+
 
 class TestFieldMapperOutputSchema:
     """Tests for output schema behavior of shape-changing transforms.
@@ -589,10 +610,58 @@ class TestOutputSchemaConfig:
             {
                 "mapping": {"old_name": "new_name", "source": "target"},
                 "schema": {"mode": "observed"},
+                "strict": True,
             }
         )
         assert transform._output_schema_config is not None
         assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"new_name", "target"})
+
+    def test_non_strict_optional_mapping_does_not_declare_or_guarantee_target(self) -> None:
+        """A skipped non-strict mapping target is not present on every successful row."""
+        from elspeth.engine.executors.declared_output_fields import verify_declared_output_fields
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"maybe_field": "output"},
+                "schema": {"mode": "observed"},
+                "strict": False,
+            }
+        )
+        assert transform.declared_output_fields == frozenset()
+        assert transform._output_schema_config is not None
+        assert transform._output_schema_config.guaranteed_fields is None
+
+        result = transform.process(make_pipeline_row({"other_field": "value"}), make_context())
+
+        assert result.status == "success"
+        assert result.row is not None
+        assert result.row.to_dict() == {"other_field": "value"}
+        verify_declared_output_fields(
+            declared_output_fields=transform.declared_output_fields,
+            emitted_rows=(result.row,),
+            plugin_name=transform.name,
+            node_id="node",
+            run_id="run",
+            row_id="row",
+            token_id="token",
+        )
+
+    def test_non_strict_mapping_from_guaranteed_source_declares_target(self) -> None:
+        """A non-strict mapping can guarantee its target when the source is guaranteed upstream."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"source": "target"},
+                "schema": {"mode": "observed", "guaranteed_fields": ["source", "kept"]},
+                "strict": False,
+            }
+        )
+
+        assert transform.declared_output_fields == frozenset({"target"})
+        assert transform._output_schema_config is not None
+        assert frozenset(transform._output_schema_config.guaranteed_fields) == frozenset({"target", "kept"})
 
     def test_guaranteed_fields_empty_mapping(self):
         from elspeth.plugins.transforms.field_mapper import FieldMapper
@@ -608,13 +677,14 @@ class TestOutputSchemaConfig:
         assert transform._output_schema_config.guaranteed_fields is None
 
     def test_upstream_none_guaranteed_with_mapping_produces_explicit(self):
-        """Upstream guaranteed_fields=None + non-empty mapping → explicit guarantees."""
+        """Strict mapping with upstream guaranteed_fields=None can declare target guarantees."""
         from elspeth.plugins.transforms.field_mapper import FieldMapper
 
         transform = FieldMapper(
             {
                 "mapping": {"old": "new"},
                 "schema": {"mode": "observed"},
+                "strict": True,
                 # No guaranteed_fields key → upstream is None (abstain)
             }
         )
@@ -652,6 +722,7 @@ class TestOutputSchemaConfig:
             {
                 "mapping": {"a": "b", "c": "d"},
                 "schema": {"mode": "observed"},
+                "strict": True,
             }
         )
         assert transform.declared_output_fields == frozenset({"b", "d"})
@@ -664,10 +735,39 @@ class TestOutputSchemaConfig:
             {
                 "mapping": {"score": "score", "name": "display_name"},
                 "schema": {"mode": "observed"},
+                "strict": True,
             }
         )
         # "score" → "score" is identity (excluded), "name" → "display_name" is a rename (included)
         assert transform.declared_output_fields == frozenset({"display_name"})
+
+    def test_original_header_rename_does_not_retain_unresolved_source_guarantee(self) -> None:
+        """Original-header sources are not treated as normalized guarantee keys."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"Amount USD": "price"},
+                "schema": {"mode": "observed", "guaranteed_fields": ["amount_usd"]},
+            }
+        )
+
+        assert transform.declared_output_fields == frozenset()
+        assert transform._output_schema_config is not None
+        assert transform._output_schema_config.guaranteed_fields == ()
+
+    def test_original_header_identity_mapping_does_not_declare_target_as_new_field(self) -> None:
+        """Original-name identity mappings must not trigger false collision checks."""
+        from elspeth.plugins.transforms.field_mapper import FieldMapper
+
+        transform = FieldMapper(
+            {
+                "mapping": {"Amount USD": "amount_usd"},
+                "schema": {"mode": "observed"},
+            }
+        )
+
+        assert transform.declared_output_fields == frozenset()
 
 
 class TestFieldMapperOutputSchemaContract:

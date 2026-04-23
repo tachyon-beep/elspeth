@@ -39,7 +39,11 @@ metadata = MetaData()
 #        allowing explain() to resolve the exact validation failures for
 #        quarantined tokens even when the stored row payload is normalized
 #        before persistence.
-SQLITE_SCHEMA_EPOCH = 4
+#   5 → batch/artifact audit links are mechanically run-scoped: batch_members
+#        carries run_id, token_outcomes.batch_id is scoped by run_id,
+#        batches.aggregation_state_id is scoped by run_id, and
+#        artifacts.produced_by_state_id is scoped by run_id.
+SQLITE_SCHEMA_EPOCH = 5
 
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.
@@ -186,7 +190,7 @@ token_outcomes_table = Table(
     Column("recorded_at", DateTime(timezone=True), nullable=False),
     # Outcome-specific fields (nullable based on outcome type)
     Column("sink_name", String(128)),
-    Column("batch_id", String(64), ForeignKey("batches.batch_id")),
+    Column("batch_id", String(64)),
     Column("fork_group_id", String(64)),
     Column("join_group_id", String(64)),
     Column("expand_group_id", String(64)),
@@ -195,6 +199,8 @@ token_outcomes_table = Table(
     Column("context_json", Text),
     # Branch contract for FORKED/EXPANDED outcomes (enables recovery validation)
     Column("expected_branches_json", Text),
+    # Composite FK: batch outcomes must point at a batch from the same run.
+    ForeignKeyConstraint(["batch_id", "run_id"], ["batches.batch_id", "batches.run_id"]),
 )
 
 # Partial unique index: exactly one terminal outcome per token
@@ -244,6 +250,8 @@ node_states_table = Table(
     Column("success_reason_json", Text),  # TransformSuccessReason for successful transforms
     Column("started_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
+    # Composite unique target for run-scoped FKs to node_states.
+    UniqueConstraint("state_id", "run_id"),
     UniqueConstraint("token_id", "node_id", "attempt"),
     UniqueConstraint("token_id", "step_index", "attempt"),
     # Composite FK: enforces token_id and run_id belong together (prevents cross-run contamination)
@@ -338,7 +346,6 @@ artifacts_table = Table(
     Column(
         "produced_by_state_id",
         String(64),
-        ForeignKey("node_states.state_id"),
         nullable=False,
     ),
     Column("sink_node_id", String(64), nullable=False),
@@ -348,6 +355,8 @@ artifacts_table = Table(
     Column("size_bytes", Integer, nullable=False),
     Column("idempotency_key", String(256)),  # For retry deduplication
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Composite FK: producer node state must belong to the artifact run.
+    ForeignKeyConstraint(["produced_by_state_id", "run_id"], ["node_states.state_id", "node_states.run_id"]),
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(["sink_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
 )
@@ -377,25 +386,33 @@ batches_table = Table(
     Column("batch_id", String(64), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("aggregation_node_id", String(64), nullable=False),
-    Column("aggregation_state_id", String(64), ForeignKey("node_states.state_id")),
+    Column("aggregation_state_id", String(64)),
     Column("trigger_reason", String(128)),
     Column("trigger_type", String(32)),  # TriggerType enum value
     Column("attempt", Integer, nullable=False, default=0),
     Column("status", String(32), nullable=False),  # draft, executing, completed, failed
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("completed_at", DateTime(timezone=True)),
+    # Composite unique target for run-scoped batch FKs.
+    UniqueConstraint("batch_id", "run_id"),
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(["aggregation_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
+    # Composite FK: aggregation state must belong to the batch run.
+    ForeignKeyConstraint(["aggregation_state_id", "run_id"], ["node_states.state_id", "node_states.run_id"]),
 )
 
 batch_members_table = Table(
     "batch_members",
     metadata,
-    Column("batch_id", String(64), ForeignKey("batches.batch_id"), nullable=False),
-    Column("token_id", String(64), ForeignKey("tokens.token_id"), nullable=False),
+    Column("batch_id", String(64), nullable=False),
+    Column("run_id", String(64), nullable=False),
+    Column("token_id", String(64), nullable=False),
     Column("ordinal", Integer, nullable=False),
     PrimaryKeyConstraint("batch_id", "token_id"),  # Natural key: token belongs to batch once
     UniqueConstraint("batch_id", "ordinal"),  # Ordering uniqueness within a batch
+    # Composite FKs: member token and batch must belong to the same run.
+    ForeignKeyConstraint(["batch_id", "run_id"], ["batches.batch_id", "batches.run_id"]),
+    ForeignKeyConstraint(["token_id", "run_id"], ["tokens.token_id", "tokens.run_id"]),
 )
 
 batch_outputs_table = Table(

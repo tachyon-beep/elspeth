@@ -1014,6 +1014,7 @@ class TestInterruptAndResume:
         from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape.schema import (
+            batch_members_table,
             batches_table,
             edges_table,
             nodes_table,
@@ -1118,6 +1119,15 @@ class TestInterruptAndResume:
                     created_at=now,
                 )
             )
+            for ordinal, token_id in enumerate(("t0", "t1")):
+                conn.execute(
+                    insert(batch_members_table).values(
+                        batch_id="batch-001",
+                        run_id=run_id,
+                        token_id=token_id,
+                        ordinal=ordinal,
+                    )
+                )
 
         checkpoint_mgr.create_checkpoint(
             run_id=run_id,

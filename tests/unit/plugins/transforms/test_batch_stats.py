@@ -306,6 +306,19 @@ class TestBatchStatsFloatOverflow:
         assert result.reason is not None
         assert result.reason["reason"] == "float_overflow"
 
+    def test_mean_overflow_returns_error(self, ctx: PluginContext) -> None:
+        """Huge integer totals that overflow during mean computation return an error."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount"})
+
+        result = transform.process([_make_row({"id": 1, "amount": 10**1000})], ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "float_overflow"
+        assert result.reason["operation"] == "mean"
+
     def test_no_skipped_field_when_all_finite(self, ctx: PluginContext) -> None:
         """skipped_non_finite field is absent when all values are finite."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
@@ -336,6 +349,14 @@ class TestBatchStatsGroupByHomogeneity:
     def ctx(self) -> PluginContext:
         return make_context()
 
+    @pytest.mark.parametrize("blank_group_by", ["", "   "])
+    def test_blank_group_by_rejected_at_config_boundary(self, blank_group_by: str) -> None:
+        """Blank group_by cannot enter declared input/output contracts."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        with pytest.raises(PluginConfigError, match="group_by must not be empty"):
+            BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": blank_group_by})
+
     def test_homogeneous_group_by_included(self, ctx: PluginContext) -> None:
         """All rows same group_by value — included in output."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
@@ -363,6 +384,20 @@ class TestBatchStatsGroupByHomogeneity:
         rows = [
             _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
             _make_row({"id": 2, "amount": 20.0, "category": "returns"}),
+        ]
+
+        with pytest.raises(ValueError, match="Heterogeneous"):
+            transform.process(rows, ctx)
+
+    def test_heterogeneous_group_by_raises_before_all_non_finite_error(self, ctx: PluginContext) -> None:
+        """Grouping invariant failures surface before data-dependent batch errors."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
+
+        rows = [
+            _make_row({"id": 1, "amount": float("nan"), "category": "sales"}),
+            _make_row({"id": 2, "amount": float("inf"), "category": "returns"}),
         ]
 
         with pytest.raises(ValueError, match="Heterogeneous"):

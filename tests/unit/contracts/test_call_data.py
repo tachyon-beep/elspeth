@@ -436,6 +436,18 @@ class TestHTTPCallRequest:
         assert d["resolved_ip"] == "1.2.3.4"
         assert "params" not in d  # POST doesn't emit params unless explicitly set
 
+    def test_audit_metadata_included_when_present(self) -> None:
+        """Audit-only metadata must survive serialization without changing request json."""
+        d = HTTPCallRequest(
+            method="POST",
+            url="https://example.com/api",
+            headers={"Content-Type": "application/json"},
+            json={"query": "test data"},
+            audit_metadata={"variables_hash": "abc123"},
+        ).to_dict()
+        assert d["json"] == {"query": "test data"}
+        assert d["audit_metadata"] == {"variables_hash": "abc123"}
+
     def test_frozen(self) -> None:
         obj = HTTPCallRequest(method="GET", url="https://x.com", headers={})
         with pytest.raises(AttributeError):

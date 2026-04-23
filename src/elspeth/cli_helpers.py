@@ -165,6 +165,10 @@ def resolve_database_url(
         # Fail fast with clear error if file doesn't exist
         if not db_path.exists():
             raise ValueError(f"Database file not found: {db_path}")
+        if settings_path is not None:
+            normalized_settings = settings_path.expanduser().resolve()
+            if not normalized_settings.exists():
+                raise ValueError(f"Settings file not found: {normalized_settings}")
         return f"sqlite:///{db_path}", None
 
     # Try explicit settings file
@@ -174,9 +178,11 @@ def resolve_database_url(
             raise ValueError(f"Settings file not found: {normalized_settings}")
         try:
             config = load_settings(normalized_settings)
-            return config.landscape.url, config
         except Exception as e:
             raise ValueError(f"Error loading settings from {settings_path}: {e}") from e
+
+    if config is not None:
+        return config.landscape.url, config
 
     # Try default settings.yaml - DO NOT silently swallow errors
     default_settings = Path("settings.yaml")
@@ -246,7 +252,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
         Any exception from config loading, plugin instantiation, graph validation,
         or pipeline execution. Caller is responsible for error handling.
     """
-    from elspeth.cli import _load_settings_with_secrets, _orchestrator_context
+    from elspeth.cli import _execution_sinks_for_graph, _load_settings_with_secrets, _orchestrator_context
     from elspeth.core.dag import ExecutionGraph
     from elspeth.core.landscape import LandscapeDB
     from elspeth.core.payload_store import FilesystemPayloadStore
@@ -261,10 +267,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
 
     # Phase 3: Build and validate execution graph
     # Exclude export sink from graph (same logic as CLI)
-    execution_sinks = plugins.sinks
-    if config.landscape.export.enabled and config.landscape.export.sink:
-        export_sink_name = config.landscape.export.sink
-        execution_sinks = {k: v for k, v in plugins.sinks.items() if k != export_sink_name}
+    execution_sinks = _execution_sinks_for_graph(config, plugins.sinks)
 
     graph = ExecutionGraph.from_plugin_instances(
         source=plugins.source,
@@ -325,7 +328,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
             graph,
             plugins,
             db=db,
-            output_format="json",
+            output_format="none",
         ) as ctx:
             return ctx.orchestrator.run(
                 ctx.pipeline_config,
@@ -337,6 +340,9 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
                 sink_factory=_make_sink_factory(config),
             )
     finally:
+        import sys
+
+        pending_exc = sys.exc_info()[1]
         try:
             db.close()
         except contract_errors.TIER_1_ERRORS:
@@ -345,9 +351,7 @@ def bootstrap_and_run(settings_path: Path) -> "RunResult":
             # db.close() failure must not mask the original pipeline exception.
             # The pipeline error is operationally more important than a cleanup
             # failure. If there is no pipeline error, close() failure propagates.
-            import sys
-
-            if sys.exc_info()[1] is not None:
+            if pending_exc is not None:
                 slog.warning(
                     "db.close() failed during exception cleanup — suppressed",
                     close_error=f"{type(close_exc).__name__}: {close_exc}",

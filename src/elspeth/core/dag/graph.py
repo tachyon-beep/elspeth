@@ -10,6 +10,7 @@ from __future__ import annotations
 import itertools
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 import networkx as nx
@@ -62,6 +63,24 @@ _coalesce_schema_counter = itertools.count(1)
 # `frozenset()` literal default-argument anti-pattern, which would be unsafe
 # if the type were ever changed to a mutable container.
 _EMPTY_DECLARED_REQUIRED_FIELDS: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
+class _EffectiveGuaranteeVote:
+    """Propagation result that preserves fields AND participation state.
+
+    ``fields`` alone is not enough for sink validation, because an empty
+    effective guarantee set can mean either:
+
+    - no node participated in the guarantee vote (abstain), or
+    - one or more nodes participated and the result collapsed to empty
+
+    Carrying ``participated`` through the recursive walk keeps that contract
+    mechanical for downstream validators.
+    """
+
+    fields: frozenset[str]
+    participated: bool
 
 
 def _build_coalesce_schema(
@@ -1069,8 +1088,9 @@ class ExecutionGraph:
         """Find DIVERT transforms by walking backwards from a node.
 
         Walks backwards through MOVE edges from the start node, collecting
-        any transforms that have DIVERT edges. Stops when hitting a non-TRANSFORM
-        node (gate/source).
+        any transforms that have DIVERT edges. Intermediate routing gates are
+        part of supported branch topology, so the walk crosses GATE nodes and
+        stops only when the chain leaves the branch-processing path.
 
         Args:
             start_node: The node to start walking backwards from
@@ -1086,11 +1106,11 @@ class ExecutionGraph:
         while current not in visited:
             visited.add(current)
             current_info = self.get_node_info(current)
-            if current_info.node_type != NodeType.TRANSFORM:
+            if current_info.node_type == NodeType.TRANSFORM:
+                if current in divert_transforms:
+                    found.add(current)
+            elif current_info.node_type != NodeType.GATE:
                 break
-
-            if current in divert_transforms:
-                found.add(current)
 
             # Walk backwards via MOVE edge (skip DIVERT edges to stay on main chain)
             predecessor: NodeID | None = None
@@ -1720,7 +1740,7 @@ class ExecutionGraph:
         # Shared cache across all sinks' predecessor walks. Mirrors the
         # schema_cache pattern at validate_edge_compatibility — avoids
         # re-walking common upstream nodes in fan-in topologies.
-        effective_fields_cache: dict[str, frozenset[str]] = {}
+        effective_fields_cache: dict[str, _EffectiveGuaranteeVote] = {}
 
         for node_id, data in self._graph.nodes(data=True):
             info = data["info"]
@@ -1732,27 +1752,10 @@ class ExecutionGraph:
                 continue
 
             for predecessor_id in self._graph.predecessors(node_id):
-                predecessor_info = self.get_node_info(predecessor_id)
-                guaranteed = self._walk_effective_guaranteed_fields(predecessor_id, effective_fields_cache)
-                if not guaranteed:
-                    # Empty guarantees are ambiguous under the abstain-vs-empty
-                    # contract (see SchemaConfig.declares_guaranteed_fields):
-                    #   guaranteed_fields=None  → abstain — can't statically validate,
-                    #                             runtime check still applies
-                    #   guaranteed_fields=()    → explicit empty declaration — the
-                    #                             producer commits to zero guarantees,
-                    #                             so any sink requirement is a
-                    #                             statically-provable mismatch
-                    #
-                    # The coalesce union logic at get_effective_guaranteed_fields()
-                    # already distinguishes these via declares_guaranteed_fields.
-                    # Mirror the distinction here: abstain → skip, explicit empty
-                    # → fall through to the rejection path.
-                    predecessor_schema = predecessor_info.output_schema_config
-                    if predecessor_schema is None or not predecessor_schema.declares_guaranteed_fields:
-                        continue
-                    # Fall through: explicit-empty declaration. missing =
-                    # sink_required (full set) will trigger rejection below.
+                vote = self._walk_effective_guarantee_vote(predecessor_id, effective_fields_cache)
+                guaranteed = vote.fields
+                if not guaranteed and not vote.participated:
+                    continue
 
                 missing = sink_required - guaranteed
                 if not missing:
@@ -1873,6 +1876,53 @@ class ExecutionGraph:
         """
         return self._walk_effective_guaranteed_fields(node_id, {})
 
+    def _walk_effective_guarantee_vote(
+        self,
+        node_id: str,
+        cache: dict[str, _EffectiveGuaranteeVote],
+        field_cache: dict[str, frozenset[str]] | None = None,
+    ) -> _EffectiveGuaranteeVote:
+        """Recursive implementation that preserves participation state.
+
+        Pass-through propagation needs more than the final field set. A sink
+        validator must be able to distinguish "nobody voted" from "the vote
+        participated and collapsed to empty", so this helper carries both.
+        """
+        if node_id in cache:
+            return cache[node_id]
+
+        node_info = self.get_node_info(node_id)
+        own_participates = node_info.output_schema_config is not None and node_info.output_schema_config.participates_in_propagation
+        own_fields = (
+            node_info.output_schema_config.get_effective_guaranteed_fields() if node_info.output_schema_config is not None else frozenset()
+        )
+
+        if node_info.passes_through_input:
+            predecessors = list(self._graph.predecessors(node_id))
+            if not predecessors:
+                raise FrameworkBugError(
+                    f"Pass-through transform {node_id!r} has no predecessors. Builder must wire transforms with at least one upstream edge."
+                )
+            predecessor_votes = [self._walk_effective_guarantee_vote(pred_id, cache, field_cache) for pred_id in predecessors]
+            result_fields = compose_propagation(
+                own_fields,
+                [vote.fields if vote.participated else None for vote in predecessor_votes],
+            )
+            result = _EffectiveGuaranteeVote(
+                fields=result_fields,
+                participated=own_participates or any(vote.participated for vote in predecessor_votes),
+            )
+        else:
+            result = _EffectiveGuaranteeVote(
+                fields=own_fields,
+                participated=own_participates,
+            )
+
+        cache[node_id] = result
+        if field_cache is not None:
+            field_cache[node_id] = result.fields
+        return result
+
     def _walk_effective_guaranteed_fields(
         self,
         node_id: str,
@@ -1900,27 +1950,9 @@ class ExecutionGraph:
         if node_id in cache:
             return cache[node_id]
 
-        node_info = self.get_node_info(node_id)
-        own = (
-            node_info.output_schema_config.get_effective_guaranteed_fields() if node_info.output_schema_config is not None else frozenset()
-        )
-
-        if node_info.passes_through_input:
-            predecessors = list(self._graph.predecessors(node_id))
-            if not predecessors:
-                raise FrameworkBugError(
-                    f"Pass-through transform {node_id!r} has no predecessors. Builder must wire transforms with at least one upstream edge."
-                )
-            pred_guarantees: list[frozenset[str] | None] = [
-                self._walk_effective_guaranteed_fields(pred_id, cache) if self._predecessor_participates(pred_id) else None
-                for pred_id in predecessors
-            ]
-            result = compose_propagation(own, pred_guarantees)
-        else:
-            result = own
-
-        cache[node_id] = result
-        return result
+        result = self._walk_effective_guarantee_vote(node_id, {}, cache)
+        cache[node_id] = result.fields
+        return result.fields
 
     def _predecessor_participates(self, node_id: str) -> bool:
         """Whether a predecessor participates in pass-through intersection.

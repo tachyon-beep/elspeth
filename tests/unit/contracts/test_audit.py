@@ -378,19 +378,21 @@ class TestBatchMember:
         """Can create BatchMember with all fields."""
         member = BatchMember(
             batch_id="batch-123",
+            run_id="run-789",
             token_id="token-456",
             ordinal=0,
         )
 
         assert member.batch_id == "batch-123"
+        assert member.run_id == "run-789"
         assert member.token_id == "token-456"
         assert member.ordinal == 0
 
     def test_batch_member_ordinals(self) -> None:
         """Ordinal tracks member order in batch."""
-        member1 = BatchMember(batch_id="batch-1", token_id="tok-a", ordinal=0)
-        member2 = BatchMember(batch_id="batch-1", token_id="tok-b", ordinal=1)
-        member3 = BatchMember(batch_id="batch-1", token_id="tok-c", ordinal=2)
+        member1 = BatchMember(batch_id="batch-1", run_id="run-1", token_id="tok-a", ordinal=0)
+        member2 = BatchMember(batch_id="batch-1", run_id="run-1", token_id="tok-b", ordinal=1)
+        member3 = BatchMember(batch_id="batch-1", run_id="run-1", token_id="tok-c", ordinal=2)
 
         assert member1.ordinal == 0
         assert member2.ordinal == 1

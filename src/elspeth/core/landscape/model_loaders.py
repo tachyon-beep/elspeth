@@ -650,6 +650,7 @@ class BatchMemberLoader:
         """
         return BatchMember(
             batch_id=row.batch_id,
+            run_id=row.run_id,
             token_id=row.token_id,
             ordinal=row.ordinal,
         )

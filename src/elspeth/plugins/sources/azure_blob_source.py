@@ -29,8 +29,12 @@ from elspeth.plugins.infrastructure.azure_auth import AzureAuthConfig
 from elspeth.plugins.infrastructure.base import BaseSource
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
-from elspeth.plugins.sources.field_normalization import FieldResolution, resolve_field_names
-from elspeth.plugins.sources.json_source import _reject_nonfinite_constant
+from elspeth.plugins.sources.field_normalization import FieldResolution, normalize_field_name, resolve_field_names
+from elspeth.plugins.sources.json_source import (
+    _contains_surrogateescape_chars,
+    _reject_nonfinite_constant,
+    _surrogateescape_line_to_bytes,
+)
 
 if TYPE_CHECKING:
     from azure.storage.blob import BlobClient
@@ -223,16 +227,15 @@ class AzureBlobSourceConfig(DataPluginConfig):
 
     @model_validator(mode="after")
     def validate_field_normalization_options(self) -> Self:
-        """Validate field normalization options for CSV format."""
+        """Validate source-boundary field normalization options."""
         if self.format != "csv":
-            if self.columns is not None or self.field_mapping is not None:
-                raise ValueError("columns and field_mapping are only supported for CSV format")
-            return self
+            if self.columns is not None:
+                raise ValueError("columns is only supported for CSV format")
+        else:
+            if self.csv_options.has_header and self.columns is not None:
+                raise ValueError("columns requires csv_options.has_header: false for headerless CSV blobs.")
 
-        if self.csv_options.has_header and self.columns is not None:
-            raise ValueError("columns requires csv_options.has_header: false for headerless CSV blobs.")
-
-        if self.columns is not None:
+        if self.format == "csv" and self.columns is not None:
             validate_field_names(self.columns, "columns")
 
         if self.field_mapping is not None and self.field_mapping:
@@ -318,7 +321,7 @@ class AzureBlobSource(BaseSource):
 
     name = "azure_blob"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:268b97f2a370881b"
+    source_file_hash: str | None = "sha256:525397539f159571"
     config_model = AzureBlobSourceConfig
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -335,6 +338,7 @@ class AzureBlobSource(BaseSource):
         self._columns = cfg.columns
         self._field_mapping = cfg.field_mapping
         self._field_resolution: FieldResolution | None = None
+        self._contract_builder: ContractBuilder | None = None
 
         # Store schema config for audit trail
         # DataPluginConfig ensures schema_config is not None
@@ -355,24 +359,20 @@ class AzureBlobSource(BaseSource):
         # Set output_schema for protocol compliance
         self.output_schema = self._schema_class
 
-        # Create schema contract for PipelineRow support
-        # Strategy depends on format and schema mode:
-        # - CSV: needs field_resolution, so ContractBuilder created during load()
-        # - JSON/JSONL with FIXED: contract locked immediately
-        # - JSON/JSONL with FLEXIBLE/OBSERVED: ContractBuilder for first-row inference
+        # Create schema contract for PipelineRow support.
+        # CSV and JSON/JSONL need source-boundary field_resolution before
+        # unlocked contracts can infer fields, so those builders are created
+        # during load() once the first valid row establishes the mapping.
         if self._format == "csv":
             # CSV needs field_resolution from headers - defer contract creation to load()
-            self._contract_builder = None
+            pass
         else:
-            # JSON/JSONL - no field normalization, identity mapping
+            # JSON/JSONL normalize row keys when the first row is processed.
+            # FIXED schemas can be locked immediately; FLEXIBLE/OBSERVED defer
+            # builder creation until field_resolution is known.
             initial_contract = create_contract_from_config(self._schema_config)
             if initial_contract.locked:
-                # FIXED - contract ready immediately
                 self.set_schema_contract(initial_contract)
-                self._contract_builder = None
-            else:
-                # FLEXIBLE/OBSERVED - will lock after first valid row
-                self._contract_builder = ContractBuilder(initial_contract)
 
         # Lazy-loaded blob client
         self._blob_client: BlobClient | None = None
@@ -497,8 +497,11 @@ class AzureBlobSource(BaseSource):
 
         # CRITICAL: keep contract state consistent when no valid rows were seen.
         # Mirrors CSVSource behavior for all-invalid/empty inputs.
-        if not self._first_valid_row_processed and self._contract_builder is not None:
-            self.set_schema_contract(self._contract_builder.contract.with_locked())
+        if not self._first_valid_row_processed:
+            if self._contract_builder is not None:
+                self.set_schema_contract(self._contract_builder.contract.with_locked())
+            elif self.get_schema_contract() is None:
+                self.set_schema_contract(create_contract_from_config(self._schema_config).with_locked())
 
     def _load_csv(self, blob_data: bytes, ctx: SourceContext) -> Iterator[SourceRow]:
         """Load rows from CSV blob data.
@@ -800,15 +803,77 @@ class AzureBlobSource(BaseSource):
         # Access typed config field directly - it has a default from JSONOptions
         encoding = self._json_options.encoding
 
-        # THEIR DATA: Decoding blob content - wrap operations
+        non_empty_count = 0
+        line_num = 0
         try:
-            text_data = blob_data.decode(encoding)
+            text_stream = io.TextIOWrapper(
+                io.BytesIO(blob_data),
+                encoding=encoding,
+                errors="surrogateescape",
+                newline="",
+            )
+            for line_num, raw_line in enumerate(text_stream, start=1):
+                line = raw_line.strip()
+                if not line:  # Skip empty lines
+                    continue
+
+                non_empty_count += 1
+
+                if _contains_surrogateescape_chars(raw_line):
+                    raw_bytes = _surrogateescape_line_to_bytes(raw_line.rstrip("\r\n"), encoding)
+                    raw_row = {
+                        "__raw_bytes_hex__": raw_bytes.hex(),
+                        "__line_number__": line_num,
+                    }
+                    error_msg = f"JSON parse error at line {line_num}: invalid {encoding} encoding"
+                    ctx.record_validation_error(
+                        row=raw_row,
+                        error=error_msg,
+                        schema_mode="parse",
+                        destination=self._on_validation_failure,
+                    )
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=raw_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    continue
+
+                # Catch JSON parse errors at the trust boundary
+                try:
+                    row = json.loads(line, parse_constant=_reject_nonfinite_constant)
+                except (json.JSONDecodeError, ValueError) as e:
+                    # External data parse failure - quarantine, don't crash
+                    # Store raw line + metadata for audit traceability
+                    raw_row = {"__raw_line__": line, "__line_number__": str(line_num)}
+                    error_msg = f"JSON parse error at line {line_num}: {e}"
+
+                    ctx.record_validation_error(
+                        row=raw_row,
+                        error=error_msg,
+                        schema_mode="parse",  # Distinct from schema validation
+                        destination=self._on_validation_failure,
+                    )
+
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=raw_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    continue
+
+                yield from self._validate_and_yield(row, ctx)
         except UnicodeDecodeError as e:
-            error_msg = f"Failed to decode JSONL blob as {encoding}: {e}"
+            # Some codecs can still raise on truncated byte sequences while
+            # reading. Treat that as a line-level external parse failure.
+            error_line = line_num + 1
+            error_msg = f"JSON parse error at line {error_line}: invalid {encoding} encoding ({e})"
             raw_row = {
                 "container": self._container,
                 "blob_path": self._blob_path,
-                "error": error_msg,
+                "__line_number__": error_line,
             }
             ctx.record_validation_error(
                 row=raw_row,
@@ -824,41 +889,49 @@ class AzureBlobSource(BaseSource):
                 )
             return
 
-        # Split lines and count non-empty for logging
-        lines = text_data.splitlines()
-        non_empty_count = sum(1 for line in lines if line.strip())
         logger.info("jsonl_blob_parsed", line_count=non_empty_count, blob_path=self._blob_path)
 
-        for line_num, line in enumerate(lines, start=1):
-            line = line.strip()
-            if not line:  # Skip empty lines
-                continue
+    def _normalize_row_keys(self, row: Any) -> Mapping[str, Any]:
+        """Normalize JSON/JSONL object keys at the source boundary."""
+        try:
+            row_items = list(row.items())
+        except AttributeError:
+            raise ValueError(f"Expected JSON object, got {type(row).__name__}") from None
 
-            # Catch JSON parse errors at the trust boundary
-            try:
-                row = json.loads(line, parse_constant=_reject_nonfinite_constant)
-            except (json.JSONDecodeError, ValueError) as e:
-                # External data parse failure - quarantine, don't crash
-                # Store raw line + metadata for audit traceability
-                raw_row = {"__raw_line__": line, "__line_number__": str(line_num)}
-                error_msg = f"JSON parse error at line {line_num}: {e}"
+        raw_keys = [key for key, _ in row_items]
 
-                ctx.record_validation_error(
-                    row=raw_row,
-                    error=error_msg,
-                    schema_mode="parse",  # Distinct from schema validation
-                    destination=self._on_validation_failure,
+        if self._field_resolution is None:
+            self._field_resolution = resolve_field_names(
+                raw_headers=raw_keys,
+                field_mapping=self._field_mapping,
+                columns=None,
+            )
+
+            if self._contract_builder is None and self.get_schema_contract() is None:
+                initial_contract = create_contract_from_config(
+                    self._schema_config,
+                    field_resolution=self._field_resolution.resolution_mapping,
                 )
+                self._contract_builder = ContractBuilder(initial_contract)
 
-                if self._on_validation_failure != "discard":
-                    yield SourceRow.quarantined(
-                        row=raw_row,
-                        error=error_msg,
-                        destination=self._on_validation_failure,
-                    )
-                continue
+        mapping = self._field_resolution.resolution_mapping
+        normalized: dict[str, Any] = {}
+        has_unmapped_fields = False
+        for key, value in row_items:
+            if key in mapping:
+                normalized[mapping[key]] = value
+            else:
+                normalized[normalize_field_name(key)] = value
+                has_unmapped_fields = True
 
-            yield from self._validate_and_yield(row, ctx)
+        if has_unmapped_fields:
+            self._field_resolution = resolve_field_names(
+                raw_headers=list(row.keys()),
+                field_mapping=self._field_mapping,
+                columns=None,
+            )
+
+        return normalized
 
     def _validate_and_yield(self, row: Any, ctx: SourceContext) -> Iterator[SourceRow]:
         """Validate a row and yield if valid, otherwise quarantine.
@@ -875,18 +948,36 @@ class AzureBlobSource(BaseSource):
             SourceRow.valid() if valid, SourceRow.quarantined() if invalid.
         """
         try:
+            row_to_validate = self._normalize_row_keys(row) if self._format in ("json", "jsonl") else row
+        except ValueError as e:
+            error_msg = f"Field normalization failed: {e}"
+            ctx.record_validation_error(
+                row=row,
+                error=error_msg,
+                schema_mode="field_normalization",
+                destination=self._on_validation_failure,
+            )
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return
+
+        try:
             # Validate and potentially coerce row data
-            validated = self._schema_class.model_validate(row)
+            validated = self._schema_class.model_validate(row_to_validate)
             validated_row = validated.to_row()
 
             # For FLEXIBLE/OBSERVED schemas, process first valid row to lock contract
             if self._contract_builder is not None and not self._first_valid_row_processed:
-                # Use field_resolution from CSV if available, else identity mapping for JSON/JSONL
-                if self._field_resolution is not None:
-                    field_resolution_map: Mapping[str, str] = self._field_resolution.resolution_mapping
+                if self._field_resolution is None:
+                    if self._format in ("json", "jsonl"):
+                        raise ValueError("field_resolution must be established before first-row contract inference")
+                    field_resolution_map: Mapping[str, str] = {k: k for k in validated_row}
                 else:
-                    # JSON/JSONL without normalization - identity mapping
-                    field_resolution_map = {k: k for k in validated_row}
+                    field_resolution_map = self._field_resolution.resolution_mapping
 
                 self._contract_builder.process_first_row(validated_row, field_resolution_map)
                 self.set_schema_contract(self._contract_builder.contract)
@@ -919,7 +1010,7 @@ class AzureBlobSource(BaseSource):
             # Record validation failure in audit trail
             # This is a trust boundary: external data may be invalid
             ctx.record_validation_error(
-                row=row,
+                row=row_to_validate,
                 error=str(e),
                 schema_mode=self._schema_config.mode,
                 destination=self._on_validation_failure,
@@ -929,7 +1020,7 @@ class AzureBlobSource(BaseSource):
             # If "discard", don't yield - row is intentionally dropped
             if self._on_validation_failure != "discard":
                 yield SourceRow.quarantined(
-                    row=row,
+                    row=row_to_validate,
                     error=str(e),
                     destination=self._on_validation_failure,
                 )
@@ -939,7 +1030,7 @@ class AzureBlobSource(BaseSource):
         self._blob_client = None
 
     def get_field_resolution(self) -> tuple[Mapping[str, str], str | None] | None:
-        """Return field resolution mapping for audit trail (CSV only)."""
+        """Return field resolution mapping for audit trail."""
         if self._field_resolution is None:
             return None
 
