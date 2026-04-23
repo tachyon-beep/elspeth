@@ -14,11 +14,13 @@ import httpx
 import pytest
 import respx
 
-from elspeth.contracts import CallStatus, CallType
+from elspeth.contracts import CallStatus, CallType, check_compatibility
 from elspeth.contracts.audit import Call
 from elspeth.contracts.plugin_context import PluginContext
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
 from elspeth.plugins.transforms.web_scrape_errors import (
     NetworkError,
@@ -1348,6 +1350,54 @@ class TestParseAllowedRanges:
 
 
 class TestOutputSchemaConfig:
+    def test_fixed_input_output_schema_exposes_enriched_fields_for_type_validation(self):
+        transform = WebScrapeTransform(
+            {
+                "schema": {"mode": "fixed", "fields": ["url: str"]},
+                "url_field": "url",
+                "content_field": "page_content",
+                "fingerprint_field": "page_hash",
+                "http": {
+                    "abuse_contact": "test@example.com",
+                    "scraping_reason": "Unit testing output schema config",
+                },
+            }
+        )
+        consumer_schema = create_schema_from_config(
+            SchemaConfig.from_dict(
+                {
+                    "mode": "flexible",
+                    "fields": [
+                        "page_content: str",
+                        "page_hash: str",
+                        "fetch_status: int",
+                        "fetch_url_final: str",
+                        "fetch_url_final_ip: str",
+                    ],
+                }
+            ),
+            "WebScrapeDownstreamConsumer",
+            allow_coercion=False,
+        )
+
+        result = check_compatibility(transform.output_schema, consumer_schema)
+
+        assert result.compatible, result.error_message
+        output_fields = transform.output_schema.model_fields
+        assert output_fields["page_content"].annotation is str
+        assert output_fields["page_hash"].annotation is str
+        assert output_fields["fetch_status"].annotation is int
+        assert output_fields["fetch_url_final"].annotation is str
+        assert output_fields["fetch_url_final_ip"].annotation is str
+
+        assert transform._output_schema_config is not None
+        config_field_types = {field.name: field.field_type for field in transform._output_schema_config.fields or ()}
+        assert config_field_types["page_content"] == "str"
+        assert config_field_types["page_hash"] == "str"
+        assert config_field_types["fetch_status"] == "int"
+        assert config_field_types["fetch_url_final"] == "str"
+        assert config_field_types["fetch_url_final_ip"] == "str"
+
     def test_guaranteed_fields(self):
         transform = WebScrapeTransform(
             {

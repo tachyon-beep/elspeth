@@ -909,7 +909,7 @@ class TestComposerRuntimeAgreement:
                 node_type="coalesce",
                 plugin=None,
                 input="path_a",
-                on_success="merge_results",
+                on_success=None,
                 on_error=None,
                 options={},
                 condition=None,

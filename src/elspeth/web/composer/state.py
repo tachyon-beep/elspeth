@@ -326,7 +326,9 @@ def _runtime_connection_targets(
     if source is not None:
         targets.add(source.on_success)
     for node in nodes:
-        if node.on_success is not None:
+        if node.node_type == "coalesce" and node.on_success is None:
+            targets.add(node.id)
+        elif node.on_success is not None:
             targets.add(node.on_success)
         if node.on_error is not None and node.on_error != "discard":
             targets.add(node.on_error)
@@ -335,6 +337,92 @@ def _runtime_connection_targets(
         if node.fork_to is not None:
             targets.update(node.fork_to)
     return targets
+
+
+def _runtime_consumer_connections(nodes: tuple[NodeSpec, ...]) -> set[str]:
+    """Return connection names runtime can resolve to processing nodes."""
+    consumers = {node.input for node in nodes if node.node_type != "coalesce"}
+    for node in nodes:
+        if node.node_type == "coalesce" and node.branches is not None:
+            consumers.update(node.branches)
+    return consumers
+
+
+def _validate_runtime_route_destinations(
+    source: SourceSpec | None,
+    nodes: tuple[NodeSpec, ...],
+    outputs: tuple[OutputSpec, ...],
+) -> tuple[ValidationEntry, ...]:
+    """Mirror runtime DAG routing destination checks for terminal fields."""
+    errors: list[ValidationEntry] = []
+    output_names = {output.name for output in outputs}
+    consumer_connections = _runtime_consumer_connections(nodes)
+    _err = ValidationEntry
+
+    if source is not None:
+        target = source.on_success
+        if target not in output_names and target not in consumer_connections:
+            errors.append(
+                _err(
+                    "source",
+                    f"Source on_success '{target}' is neither a sink nor a known connection.",
+                    "high",
+                )
+            )
+
+    for node in nodes:
+        if node.node_type == "transform":
+            if node.on_success is not None and node.on_success not in output_names and node.on_success not in consumer_connections:
+                errors.append(
+                    _err(
+                        f"node:{node.id}",
+                        f"Transform '{node.id}' on_success '{node.on_success}' is neither a sink nor a known connection.",
+                        "high",
+                    )
+                )
+            if node.on_error is not None and node.on_error != "discard" and node.on_error not in output_names:
+                errors.append(
+                    _err(
+                        f"node:{node.id}",
+                        f"Transform '{node.id}' on_error '{node.on_error}' references unknown sink.",
+                        "high",
+                    )
+                )
+            continue
+
+        if node.node_type == "aggregation":
+            if node.on_success is not None and node.on_success not in output_names and node.on_success not in consumer_connections:
+                errors.append(
+                    _err(
+                        f"node:{node.id}",
+                        f"Aggregation '{node.id}' on_success '{node.on_success}' is neither a sink nor a known connection.",
+                        "high",
+                    )
+                )
+            continue
+
+        if node.node_type == "coalesce":
+            if node.on_success is None:
+                continue
+            if node.on_success in consumer_connections:
+                errors.append(
+                    _err(
+                        f"node:{node.id}",
+                        f"Coalesce '{node.id}' has on_success='{node.on_success}'. "
+                        "Coalesce on_success must point to a sink when configured.",
+                        "high",
+                    )
+                )
+            elif node.on_success not in output_names:
+                errors.append(
+                    _err(
+                        f"node:{node.id}",
+                        f"Coalesce '{node.id}' on_success references unknown sink '{node.on_success}'.",
+                        "high",
+                    )
+                )
+
+    return tuple(errors)
 
 
 def _validate_gate_expression(condition: str) -> str | None:
@@ -450,7 +538,15 @@ def _check_schema_contracts(
             )
 
     for node in nodes:
-        if node.on_success is not None:
+        if node.node_type == "coalesce" and node.on_success is None:
+            _register_producer(
+                node.id,
+                node.id,
+                node.plugin,
+                node.options,
+                f"coalesce '{node.id}'",
+            )
+        elif node.on_success is not None:
             if node.on_success in sink_names:
                 _register_direct_sink_producer(
                     node.on_success,
@@ -637,6 +733,17 @@ def _check_schema_contracts(
         transforms = get_shared_plugin_manager().get_transforms()
         return frozenset(cls.name for cls in transforms if cls.passes_through_input)
 
+    def _is_config_probe_exception(exc: Exception) -> bool:
+        """Return True only for expected draft/config failures from probe construction."""
+        from elspeth.plugins.infrastructure.config_base import PluginConfigError
+        from elspeth.plugins.infrastructure.manager import PluginNotFoundError
+        from elspeth.plugins.infrastructure.templates import TemplateError
+        from elspeth.plugins.infrastructure.validation import UnknownPluginTypeError
+
+        if isinstance(exc, (PluginConfigError, PluginNotFoundError, TemplateError, UnknownPluginTypeError)):
+            return True
+        return type(exc) is ValueError and str(exc).startswith("Invalid configuration for transform ")
+
     def _effective_producer_vote(producer: _ProducerEntry) -> tuple[bool, frozenset[str]]:
         """Return (participates, guarantees) for preview propagation.
 
@@ -689,6 +796,8 @@ def _check_schema_contracts(
             is_pass_through_instance = transform.passes_through_input
             output_schema_config = transform._output_schema_config
         except Exception as exc:
+            if not _is_config_probe_exception(exc):
+                raise
             # Keep Stage 1 tolerant of partially configured draft nodes for
             # non-pass-through transforms — constructor-time errors must not
             # crash preview/export endpoints. For known pass-through plugins
@@ -1277,6 +1386,8 @@ class CompositionState:
                             "high",
                         )
                     )
+
+        errors.extend(_validate_runtime_route_destinations(self.source, self.nodes, self.outputs))
 
         # 8. Connection completeness
         source_on_success = self.source.on_success if self.source else None

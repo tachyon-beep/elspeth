@@ -27,6 +27,7 @@ from elspeth.contracts.audit import Call
 from elspeth.contracts.contexts import LifecycleContext, TransformContext
 from elspeth.contracts.contract_propagation import narrow_contract_to_output
 from elspeth.contracts.errors import FrameworkBugError
+from elspeth.contracts.schema import FieldDefinition, SchemaConfig
 from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.core.security.web import (
     NetworkError as SSRFNetworkError,
@@ -152,6 +153,65 @@ def _parse_allowed_ranges(entries: list[str]) -> tuple[IPv4Network | IPv6Network
     return tuple(networks)
 
 
+def _web_scrape_added_output_fields(content_field: str, fingerprint_field: str) -> tuple[FieldDefinition, ...]:
+    """Return the typed fields WebScrape guarantees on successful output rows."""
+    return (
+        FieldDefinition(name=content_field, field_type="str", required=True),
+        FieldDefinition(name=fingerprint_field, field_type="str", required=True),
+        FieldDefinition(name="fetch_status", field_type="int", required=True),
+        FieldDefinition(name="fetch_url_final", field_type="str", required=True),
+        FieldDefinition(name="fetch_url_final_ip", field_type="str", required=True),
+    )
+
+
+def _build_web_scrape_output_schema_config(
+    schema_config: SchemaConfig,
+    *,
+    content_field: str,
+    fingerprint_field: str,
+) -> SchemaConfig:
+    """Build the typed output contract for WebScrape's pass-through enrichment."""
+    field_by_name: dict[str, FieldDefinition] = {}
+    if schema_config.fields is not None:
+        field_by_name.update((field.name, field) for field in schema_config.fields)
+
+    added_fields = _web_scrape_added_output_fields(content_field, fingerprint_field)
+    field_by_name.update((field.name, field) for field in added_fields)
+
+    base_guaranteed = set(schema_config.guaranteed_fields or ())
+    output_guaranteed = base_guaranteed | {field.name for field in added_fields}
+
+    return SchemaConfig(
+        # Observed input still has a known output minimum after enrichment.
+        mode=schema_config.mode if schema_config.fields is not None else "flexible",
+        fields=tuple(field_by_name.values()),
+        guaranteed_fields=tuple(sorted(output_guaranteed)),
+        audit_fields=schema_config.audit_fields,
+        required_fields=schema_config.required_fields,
+    )
+
+
+def _final_response_ip(response: httpx.Response) -> str:
+    """Extract the final IP-pinned destination from an SSRF-safe response."""
+    try:
+        final_host = response.request.url.host
+    except RuntimeError as e:
+        raise FrameworkBugError("SSRF-safe HTTP response has no request; cannot record final resolved IP.") from e
+
+    if final_host is None:
+        raise FrameworkBugError("SSRF-safe HTTP response request URL has no host; cannot record final resolved IP.")
+
+    try:
+        ipaddress.ip_address(final_host)
+    except ValueError as e:
+        raise FrameworkBugError(
+            f"SSRF-safe HTTP response request host {final_host!r} is not an IP address; "
+            "AuditedHTTPClient must return the IP-pinned final request."
+        ) from e
+
+    return final_host
+
+
 class WebScrapeTransform(BaseTransform):
     """Fetch webpages, extract content, generate fingerprints.
 
@@ -194,7 +254,7 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:b8290a8b47488ee1"
+    source_file_hash: str | None = "sha256:37d3848364e5c88f"
     config_model = WebScrapeConfig
     passes_through_input = True
 
@@ -269,14 +329,21 @@ class WebScrapeTransform(BaseTransform):
         # Schema
         if cfg.schema_config is None:
             raise RuntimeError("WebScrapeTransform requires schema_config")
-        schema = create_schema_from_config(
+        self.input_schema = create_schema_from_config(
             cfg.schema_config,
-            "WebScrapeSchema",
+            "WebScrapeInput",
             allow_coercion=False,
         )
-        self.input_schema = schema
-        self.output_schema = schema
-        self._output_schema_config = self._build_output_schema_config(cfg.schema_config)
+        self._output_schema_config = _build_web_scrape_output_schema_config(
+            cfg.schema_config,
+            content_field=cfg.content_field,
+            fingerprint_field=cfg.fingerprint_field,
+        )
+        self.output_schema = create_schema_from_config(
+            self._output_schema_config,
+            "WebScrapeOutput",
+            allow_coercion=False,
+        )
 
     def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
         """Inject a deterministic public-IP URL for invariant probing."""
@@ -312,6 +379,7 @@ class WebScrapeTransform(BaseTransform):
                 httpx.Response(
                     200,
                     text="<html><body><h1>Probe</h1><p>safe</p></body></html>",
+                    request=httpx.Request("GET", safe_request.connection_url),
                 ),
                 safe_request.original_url,
                 _InvariantCall(),
@@ -385,6 +453,7 @@ class WebScrapeTransform(BaseTransform):
         # Fetch URL using pinned IP (prevents DNS rebinding between validation and fetch)
         try:
             response, final_hostname_url, call = self._fetch_url(safe_request, ctx)
+            final_resolved_ip = _final_response_ip(response)
         except WebScrapeError as e:
             if e.retryable:
                 # Re-raise retryable errors for engine RetryManager
@@ -442,7 +511,7 @@ class WebScrapeTransform(BaseTransform):
         output[self._fingerprint_field] = fingerprint
         output["fetch_status"] = response.status_code
         output["fetch_url_final"] = final_hostname_url
-        output["fetch_url_final_ip"] = safe_request.resolved_ip
+        output["fetch_url_final_ip"] = final_resolved_ip
 
         # Propagate contract so FIXED schemas can access fields added during enrichment
         output_contract = narrow_contract_to_output(

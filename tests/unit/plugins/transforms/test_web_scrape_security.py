@@ -426,6 +426,8 @@ class TestRedirectAllowedRangesBehavior:
             ),
             patch("httpx.Client") as MockClient,
         ):
+            shared_client = Mock()
+            shared_client.close = Mock()
             initial_client = Mock()
             initial_client.__enter__ = Mock(return_value=initial_client)
             initial_client.__exit__ = Mock(return_value=False)
@@ -442,11 +444,13 @@ class TestRedirectAllowedRangesBehavior:
                 text="<html>Local content</html>",
                 request=httpx.Request("GET", "http://127.0.0.1:80/redirected"),
             )
-            MockClient.side_effect = [initial_client, hop_client]
+            MockClient.side_effect = [shared_client, initial_client, hop_client]
 
             result = allowed_loopback_transform.process(make_pipeline_row({"url": "http://example.com/start"}), mock_ctx)
 
         assert result.status == "success"
+        assert result.row["fetch_url_final"] == "http://localhost/redirected"
+        assert result.row["fetch_url_final_ip"] == "127.0.0.1"
 
     def test_redirect_to_non_allowed_private_ip_blocked(self, allowed_loopback_transform, mock_ctx):
         """Redirect chain where hop targets a non-allowed private IP — must block."""

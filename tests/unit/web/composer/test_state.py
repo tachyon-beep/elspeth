@@ -785,6 +785,45 @@ class TestStage1Validation:
     ) -> EdgeSpec:
         return EdgeSpec(id=id, from_node=from_node, to_node=to_node, edge_type=edge_type, label=None)
 
+    def _coalesce_route_state(self, *, on_success: str | None) -> CompositionState:
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="gate_in"))
+        state = state.with_node(
+            NodeSpec(
+                id="fork_gate",
+                node_type="gate",
+                plugin=None,
+                input="gate_in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={"true": "fork", "false": "fork"},
+                fork_to=("path_a", "path_b"),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="merge_point",
+                node_type="coalesce",
+                plugin=None,
+                input="join",
+                on_success=on_success,
+                on_error=None,
+                options={},
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=("path_a", "path_b"),
+                policy="require_all",
+                merge="nested",
+            )
+        )
+        return state.with_output(self._make_output("main"))
+
     def test_empty_state_has_errors(self) -> None:
         result = self._empty_state().validate()
         assert not result.is_valid
@@ -1226,6 +1265,88 @@ class TestStage1Validation:
 
         assert not result.is_valid
         assert any("runtime connection" in e.message for e in result.errors)
+
+    @pytest.mark.parametrize(
+        ("case_name", "expected_message"),
+        [
+            (
+                "source_on_success",
+                "Source on_success 'dangling' is neither a sink nor a known connection",
+            ),
+            (
+                "transform_on_success",
+                "Transform 't1' on_success 'dangling' is neither a sink nor a known connection",
+            ),
+            (
+                "aggregation_on_success",
+                "Aggregation 'agg1' on_success 'dangling' is neither a sink nor a known connection",
+            ),
+            (
+                "coalesce_unknown_sink",
+                "Coalesce 'merge_point' on_success references unknown sink 'dangling'",
+            ),
+            (
+                "coalesce_connection_target",
+                "Coalesce 'merge_point' has on_success='next_step'. Coalesce on_success must point to a sink when configured.",
+            ),
+            (
+                "transform_on_error",
+                "Transform 't1' on_error 'missing_error_sink' references unknown sink",
+            ),
+        ],
+    )
+    def test_validate_rejects_runtime_unresolvable_route_destinations(
+        self,
+        case_name: str,
+        expected_message: str,
+    ) -> None:
+        """Stage 1 rejects terminal routes that the runtime DAG builder rejects."""
+        if case_name == "source_on_success":
+            state = self._empty_state().with_source(self._make_source(on_success="dangling")).with_output(self._make_output("main"))
+        elif case_name == "transform_on_success":
+            state = self._empty_state()
+            state = state.with_source(self._make_source(on_success="t1"))
+            state = state.with_node(self._make_transform("t1", "t1", "dangling"))
+            state = state.with_output(self._make_output("main"))
+        elif case_name == "aggregation_on_success":
+            state = self._empty_state()
+            state = state.with_source(self._make_source(on_success="agg1"))
+            state = state.with_node(
+                NodeSpec(
+                    id="agg1",
+                    node_type="aggregation",
+                    plugin="batch_counter",
+                    input="agg1",
+                    on_success="dangling",
+                    on_error="discard",
+                    options={},
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                    trigger={"count": 1},
+                )
+            )
+            state = state.with_output(self._make_output("main"))
+        elif case_name == "coalesce_unknown_sink":
+            state = self._coalesce_route_state(on_success="dangling")
+        elif case_name == "coalesce_connection_target":
+            state = self._coalesce_route_state(on_success="next_step")
+            state = state.with_node(self._make_transform("after_merge", "next_step", "main"))
+        elif case_name == "transform_on_error":
+            state = self._empty_state()
+            state = state.with_source(self._make_source(on_success="t1"))
+            state = state.with_node(self._make_transform("t1", "t1", "main", on_error="missing_error_sink"))
+            state = state.with_output(self._make_output("main"))
+        else:
+            raise AssertionError(f"Unhandled route validation case: {case_name}")
+
+        result = state.validate()
+
+        assert not result.is_valid, case_name
+        assert any(expected_message in error.message for error in result.errors), (case_name, result.errors)
 
     # --- Warning rules (W1-W4) ---
 
@@ -2027,7 +2148,7 @@ class TestSchemaContractValidation:
         self,
         id: str,
         input: str,
-        on_success: str,
+        on_success: str | None,
         branches: tuple[str, ...] | None = None,
     ) -> NodeSpec:
         return NodeSpec(
@@ -2216,6 +2337,57 @@ class TestSchemaContractValidation:
         assert sink_contract.consumer_requires == ("body",)
         assert sink_contract.satisfied is False
 
+    def test_contract_probe_unexpected_constructor_exception_propagates(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Framework bugs in transform constructors must not be certified by raw fallback."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="mapper_in",
+                plugin="text",
+                options={"schema": {"mode": "observed"}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "map_body",
+                "mapper_in",
+                "main",
+                plugin="field_mapper",
+                options={
+                    "schema": {"mode": "fixed", "fields": ["body: str"]},
+                    "mapping": {"text": "body"},
+                },
+            )
+        )
+        state = state.with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={
+                    "path": "outputs/main.csv",
+                    "schema": {"mode": "fixed", "fields": ["body: str"]},
+                },
+                on_write_failure="discard",
+            )
+        )
+        state = state.with_edge(self._make_edge("e1", "source", "map_body"))
+        state = state.with_edge(self._make_edge("e2", "map_body", "main"))
+
+        class _BrokenManager:
+            def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
+                raise RuntimeError("framework bug inside transform __init__")
+
+            def get_transforms(self) -> list[type]:
+                return []
+
+        monkeypatch.setattr(
+            "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
+            lambda: _BrokenManager(),
+        )
+
+        with pytest.raises(RuntimeError, match="framework bug inside transform __init__"):
+            state.validate()
+
     def test_contract_probe_redacts_exception_detail_from_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Regression (P2c): the constructor-time exception message is the
         plugin author's free-form text (plugin options, DSN fragments,
@@ -2271,7 +2443,7 @@ class TestSchemaContractValidation:
 
         class _LeakyManager:
             def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
-                raise RuntimeError(f"plugin '{plugin_name}' failed to initialize: " + " | ".join(leaked_substrings))
+                raise TemplateError(f"plugin '{plugin_name}' failed to initialize: " + " | ".join(leaked_substrings))
 
             def get_transforms(self) -> list[type]:
                 # ADR-007: composer now queries the plugin registry for the
@@ -2298,7 +2470,7 @@ class TestSchemaContractValidation:
                     f"contained {leak!r}. str(exc) must be replaced with type(exc).__name__."
                 )
             # And the class name IS present (triage surface intact).
-            assert "RuntimeError" in warning.message
+            assert "TemplateError" in warning.message
 
     def test_text_heuristic_rescues_original_bug_scenario(self) -> None:
         """Reported text-source scenario passes via the shared observed-text rule."""
@@ -2759,7 +2931,7 @@ class TestSchemaContractValidation:
                 condition=None,
                 routes=None,
                 fork_to=None,
-                branches=("branch_a", "branch_b"),
+                branches=("a_out", "b_out"),
                 policy="require_all",
                 merge="nested",
             )
@@ -3285,9 +3457,9 @@ class TestSchemaContractValidation:
         )
         state = state.with_node(
             self._make_coalesce(
-                "c1",
-                "branch_a",
                 "after_merge",
+                "branch_a",
+                None,
             )
         )
         state = state.with_node(
@@ -3299,8 +3471,8 @@ class TestSchemaContractValidation:
             )
         )
         state = state.with_output(self._make_output())
-        state = state.with_edge(self._make_edge("e1", "source", "c1"))
-        state = state.with_edge(self._make_edge("e2", "c1", "t1"))
+        state = state.with_edge(self._make_edge("e1", "source", "after_merge"))
+        state = state.with_edge(self._make_edge("e2", "after_merge", "t1"))
 
         result = state.validate()
 
@@ -3777,7 +3949,7 @@ class TestPassThroughComposerParity:
                 return [_StubPassThrough]
 
             def create_transform(self, plugin_name: str, options: dict[str, Any]) -> object:
-                raise RuntimeError("intentional probe failure")
+                raise TemplateError("intentional probe failure")
 
         monkeypatch.setattr(
             "elspeth.plugins.infrastructure.manager.get_shared_plugin_manager",
