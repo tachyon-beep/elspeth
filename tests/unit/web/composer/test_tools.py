@@ -17,6 +17,7 @@ from elspeth.web.catalog.schemas import (
 )
 from elspeth.web.composer.state import (
     CompositionState,
+    NodeSpec,
     PipelineMetadata,
     SourceSpec,
     ValidationEntry,
@@ -690,6 +691,142 @@ class TestUpsertEdge:
         assert r3.success is True
         node = next(n for n in r3.updated_state.nodes if n.id == "t1")
         assert node.on_error == "err_out"
+
+    @pytest.mark.parametrize(
+        ("edge_type", "expected_routes"),
+        [
+            ("route_true", {"true": "main", "false": "old_false"}),
+            ("route_false", {"true": "old_true", "false": "main"}),
+        ],
+    )
+    def test_gate_route_edge_to_output_syncs_gate_routes(
+        self,
+        edge_type: str,
+        expected_routes: dict[str, str],
+    ) -> None:
+        """Gate route edges to sinks must update the gate's runtime routes."""
+        state = _empty_state().with_node(
+            NodeSpec(
+                id="g1",
+                node_type="gate",
+                plugin=None,
+                input="in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="row['flag']",
+                routes={"true": "old_true", "false": "old_false"},
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        catalog = _mock_catalog()
+        with_output = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+
+        result = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "g1", "to_node": "main", "edge_type": edge_type},
+            with_output.updated_state,
+            catalog,
+        )
+
+        assert result.success is True
+        gate = next(n for n in result.updated_state.nodes if n.id == "g1")
+        assert dict(gate.routes or {}) == expected_routes
+
+    def test_gate_fork_edge_to_output_syncs_gate_fork_to(self) -> None:
+        """Fork edges to sinks must update the gate's runtime fork destinations."""
+        state = _empty_state().with_node(
+            NodeSpec(
+                id="g1",
+                node_type="gate",
+                plugin=None,
+                input="in",
+                on_success=None,
+                on_error=None,
+                options={},
+                condition="True",
+                routes={"true": "fork", "false": "fork"},
+                fork_to=("existing",),
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        catalog = _mock_catalog()
+        with_output = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+        )
+
+        result = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "g1", "to_node": "main", "edge_type": "fork"},
+            with_output.updated_state,
+            catalog,
+        )
+
+        assert result.success is True
+        gate = next(n for n in result.updated_state.nodes if n.id == "g1")
+        assert gate.fork_to == ("existing", "main")
+
+    def test_route_edge_from_transform_to_output_is_rejected(self) -> None:
+        """Only gates can use route_true/route_false/fork sink edges."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        with_node = execute_tool(
+            "upsert_node",
+            {
+                "id": "t1",
+                "node_type": "transform",
+                "plugin": "uppercase",
+                "input": "in",
+                "on_success": "out",
+                "options": {},
+            },
+            state,
+            catalog,
+        )
+        with_output = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            with_node.updated_state,
+            catalog,
+        )
+
+        result = execute_tool(
+            "upsert_edge",
+            {"id": "e1", "from_node": "t1", "to_node": "main", "edge_type": "route_true"},
+            with_output.updated_state,
+            catalog,
+        )
+
+        assert result.success is False
+        assert "gate" in result.data["error"].lower()
 
     def test_edge_to_output_syncs_source_on_success(self) -> None:
         """Edge from source to output updates source's on_success."""
@@ -2088,6 +2225,49 @@ class TestBlobTools:
         )
         assert result.success is False
 
+    def _tamper_blob_row(self, **values: Any) -> None:
+        """Bypass CHECK constraints so defensive read guards can be tested."""
+        from sqlalchemy import text
+
+        from elspeth.web.sessions.models import blobs_table
+
+        with self.engine.begin() as conn:
+            conn.execute(text("PRAGMA ignore_check_constraints = 1"))
+            conn.execute(blobs_table.update().where(blobs_table.c.id == self.blob_id).values(**values))
+            conn.execute(text("PRAGMA ignore_check_constraints = 0"))
+
+    def test_get_blob_metadata_tampered_status_raises_audit_integrity_error(self) -> None:
+        """Corrupted blob status must crash instead of leaking to the LLM."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        self._tamper_blob_row(status="corrupted")
+
+        with pytest.raises(AuditIntegrityError, match=r"blobs\.status"):
+            execute_tool(
+                "get_blob_metadata",
+                {"blob_id": self.blob_id},
+                _empty_state(),
+                _mock_catalog(),
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
+    def test_list_blobs_tampered_mime_type_raises_audit_integrity_error(self) -> None:
+        """Corrupted MIME allowlist values must crash instead of being listed."""
+        from elspeth.contracts.errors import AuditIntegrityError
+
+        self._tamper_blob_row(mime_type="TEXT/CSV")
+
+        with pytest.raises(AuditIntegrityError, match=r"blobs\.mime_type"):
+            execute_tool(
+                "list_blobs",
+                {},
+                _empty_state(),
+                _mock_catalog(),
+                session_engine=self.engine,
+                session_id=self.session_id,
+            )
+
     def test_set_source_from_blob_rejects_non_ready(self) -> None:
         """Cannot wire a pending blob as source — content doesn't exist yet."""
         state = _empty_state()
@@ -2778,6 +2958,50 @@ class TestDeleteBlobActiveRunGuard:
         )
         assert result.success is True
         assert not self.storage_path.exists()
+
+    def test_delete_restores_file_when_db_delete_fails_after_filesystem_mutation(self) -> None:
+        """DB failure after the filesystem step must not leave a stale row/missing-file split."""
+        from contextlib import contextmanager
+
+        from sqlalchemy import select
+
+        from elspeth.web.sessions.models import blobs_table
+
+        real_begin = self.engine.begin
+
+        @contextmanager
+        def failing_begin():
+            with real_begin() as real_conn:
+
+                class Proxy:
+                    def __getattr__(self, name: str) -> Any:
+                        return getattr(real_conn, name)
+
+                    def execute(self, stmt, *args, **kwargs):
+                        if str(stmt).lstrip().upper().startswith("DELETE FROM BLOBS"):
+                            raise RuntimeError("simulated delete failure")
+                        return real_conn.execute(stmt, *args, **kwargs)
+
+                yield Proxy()
+
+        self.engine.begin = failing_begin  # type: ignore[method-assign]
+        try:
+            with pytest.raises(RuntimeError, match="simulated delete failure"):
+                execute_tool(
+                    "delete_blob",
+                    {"blob_id": self.blob_id},
+                    _empty_state(),
+                    _mock_catalog(),
+                    session_engine=self.engine,
+                    session_id=self.session_id,
+                )
+        finally:
+            self.engine.begin = real_begin  # type: ignore[method-assign]
+
+        assert self.storage_path.exists(), "Rollback must restore the backing file"
+        with self.engine.connect() as conn:
+            row = conn.execute(select(blobs_table.c.id).where(blobs_table.c.id == self.blob_id)).first()
+        assert row is not None, "The blob row should still exist after the failed delete"
 
 
 # ---------------------------------------------------------------------------

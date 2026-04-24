@@ -31,6 +31,8 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("tokens", "run_id"),
     # Added for composite FK to nodes (node_id, run_id) - enables run-isolated queries
     ("node_states", "run_id"),
+    # Source schema persists typed resume metadata; runtime always writes this on new runs
+    ("runs", "source_schema_json"),
     # Field resolution audit trail - captures original→final header mapping
     ("runs", "source_field_resolution_json"),
     # Fork/expand branch contract - enables recovery validation
@@ -50,6 +52,8 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("operations", "output_data_hash"),
     # Coalesce state for checkpoint recovery - serialized pending merge state
     ("checkpoints", "coalesce_state_json"),
+    # Checkpoint compatibility gate - runtime always stamps the checkpoint format version
+    ("checkpoints", "format_version"),
     # Mechanical change detection — hash of plugin source file at registration
     ("nodes", "source_file_hash"),
     # ADR-010 §Decision 3 M3: runtime VAL manifest — set of
@@ -65,13 +69,9 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
 
 # Required foreign keys for audit integrity (Tier 1 trust).
 # Format: (table_name, column_name, referenced_table)
-# Bug fix: error tables were missing foreign keys to nodes/tokens
-_REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (
-    ("validation_errors", "node_id", "nodes"),
-    ("validation_errors", "row_id", "rows"),
-    ("transform_errors", "token_id", "tokens"),
-    ("transform_errors", "transform_id", "nodes"),
-)
+# Use this only for exact single-column contracts. Run-scoped contracts belong in
+# _REQUIRED_COMPOSITE_FOREIGN_KEYS so stale single-column FKs cannot satisfy them.
+_REQUIRED_FOREIGN_KEYS: tuple[tuple[str, str, str], ...] = (("validation_errors", "row_id", "rows"),)
 
 # Required composite foreign keys for run-scoped audit integrity.
 # Format: (table_name, constrained_columns, referenced_table, referenced_columns)
@@ -80,6 +80,9 @@ _REQUIRED_COMPOSITE_FOREIGN_KEYS: tuple[tuple[str, tuple[str, ...], str, tuple[s
     ("token_outcomes", ("batch_id", "run_id"), "batches", ("batch_id", "run_id")),
     ("node_states", ("token_id", "run_id"), "tokens", ("token_id", "run_id")),
     ("node_states", ("node_id", "run_id"), "nodes", ("node_id", "run_id")),
+    ("validation_errors", ("node_id", "run_id"), "nodes", ("node_id", "run_id")),
+    ("transform_errors", ("token_id", "run_id"), "tokens", ("token_id", "run_id")),
+    ("transform_errors", ("transform_id", "run_id"), "nodes", ("node_id", "run_id")),
     ("artifacts", ("produced_by_state_id", "run_id"), "node_states", ("state_id", "run_id")),
     ("artifacts", ("sink_node_id", "run_id"), "nodes", ("node_id", "run_id")),
     ("batches", ("aggregation_node_id", "run_id"), "nodes", ("node_id", "run_id")),
@@ -705,19 +708,22 @@ class LandscapeDB:
         """Get a database connection that rejects all write operations.
 
         Defense-in-depth for untrusted SQL execution (e.g., MCP query tool).
-        For SQLite, sets PRAGMA query_only = ON at the connection level
-        and resets it to OFF in the finally block so the pooled DBAPI
-        connection is returned in a writable state.
-
-        For other backends, falls back to the standard connection (the
-        analyzer-level blocklist is the only guard).
+        For SQLite, sets PRAGMA query_only = ON at the connection level and
+        resets it to OFF in the finally block so the pooled DBAPI connection
+        is returned in a writable state. For PostgreSQL, marks the current
+        transaction READ ONLY. Unsupported backends fail closed instead of
+        yielding a writable transaction.
         """
-        is_sqlite = self.connection_string.startswith("sqlite")
+        dialect_name = self.engine.dialect.name
         with self.engine.begin() as conn:
-            if is_sqlite:
+            if dialect_name == "sqlite":
                 conn.execute(text("PRAGMA query_only = ON"))
+            elif dialect_name == "postgresql":
+                conn.execute(text("SET TRANSACTION READ ONLY"))
+            else:
+                raise RuntimeError(f"read_only_connection is unsupported for backend '{dialect_name}'")
             try:
                 yield conn
             finally:
-                if is_sqlite:
+                if dialect_name == "sqlite":
                     conn.execute(text("PRAGMA query_only = OFF"))

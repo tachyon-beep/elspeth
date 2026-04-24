@@ -813,6 +813,23 @@ class TestAzureBatchLLMTransformResume:
         assert error.batch_id == "batch-456"
         assert error.status == "in_progress"
 
+    def test_retrieve_failure_raises_batch_pending_error(
+        self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform
+    ) -> None:
+        """Transient status-check failures stay on the pending control-flow path."""
+        mock_client = Mock()
+        mock_client.batches.retrieve.side_effect = ConnectionError("temporary retrieve failure")
+
+        transform._client = mock_client
+
+        with pytest.raises(BatchPendingError) as exc_info:
+            transform.process([make_pipeline_row({"text": "hello"})], ctx_with_checkpoint)
+
+        assert exc_info.value.batch_id == "batch-456"
+        assert exc_info.value.checkpoint == ctx_with_checkpoint.get_checkpoint()
+        assert exc_info.value.node_id == transform.node_id
+        assert ctx_with_checkpoint.get_checkpoint() is not None
+
     def test_completed_batch_downloads_results(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
         """Completed batch downloads and returns results."""
         mock_client = Mock()
@@ -849,6 +866,29 @@ class TestAzureBatchLLMTransformResume:
         assert len(result.rows) == 1
         assert result.rows[0]["llm_response"] == "Analysis result"
         assert result.rows[0]["llm_response_usage"]["prompt_tokens"] == 10
+
+    def test_download_failure_raises_batch_pending_error(
+        self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform
+    ) -> None:
+        """Transient post-completion download failures stay pending for resume."""
+        mock_client = Mock()
+        mock_batch = Mock()
+        mock_batch.id = "batch-456"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "output-file-789"
+        mock_batch.error_file_id = None
+        mock_client.batches.retrieve.return_value = mock_batch
+        mock_client.files.content.side_effect = ConnectionError("temporary download failure")
+
+        transform._client = mock_client
+
+        with pytest.raises(BatchPendingError) as exc_info:
+            transform.process([make_pipeline_row({"text": "hello"})], ctx_with_checkpoint)
+
+        assert exc_info.value.batch_id == "batch-456"
+        assert exc_info.value.checkpoint == ctx_with_checkpoint.get_checkpoint()
+        assert exc_info.value.node_id == transform.node_id
+        assert ctx_with_checkpoint.get_checkpoint() is not None
 
     def test_failed_batch_returns_error(self, ctx_with_checkpoint: PluginContext, transform: AzureBatchLLMTransform) -> None:
         """Failed batch returns TransformResult.error()."""
@@ -1208,7 +1248,7 @@ class TestAzureBatchLLMTransformResultAssembly:
         assert result.rows[2]["llm_response"] == "C"
 
     def test_api_error_per_row_handled(self, transform: AzureBatchLLMTransform) -> None:
-        """API errors for individual rows are handled gracefully."""
+        """API-error rows are quarantined without becoming emitted child rows."""
         from datetime import UTC, datetime
 
         ctx = _make_batch_ctx()
@@ -1271,10 +1311,18 @@ class TestAzureBatchLLMTransformResultAssembly:
 
         assert result.status == "success"
         assert result.rows is not None
-        assert len(result.rows) == 2
+        assert len(result.rows) == 1
         assert result.rows[0]["llm_response"] == "Success"
-        assert result.rows[1]["llm_response"] is None
-        assert result.rows[1]["llm_response_error"]["reason"] == "api_error"
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [1]
+        assert metadata["quarantined_count"] == 1
+        assert metadata["row_errors"] == [
+            {
+                "row_index": 1,
+                "reason": "api_error",
+                "error": {"code": "content_filter", "message": "Content blocked"},
+            }
+        ]
 
 
 class TestAzureBatchLLMTransformAuditRecording:
@@ -1603,14 +1651,14 @@ class TestAzureBatchLLMTransformMissingResults:
         # Result should succeed (partial results are allowed)
         assert result.status == "success"
         assert result.rows is not None
-        assert len(result.rows) == 2
+        assert len(result.rows) == 1
 
         # First row should have response
         assert result.rows[0]["llm_response"] == "Analysis result"
-
-        # Second row should have error
-        assert result.rows[1]["llm_response"] is None
-        assert result.rows[1]["llm_response_error"]["reason"] == "result_not_found"
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [1]
+        assert metadata["quarantined_count"] == 1
+        assert metadata["row_errors"] == [{"row_index": 1, "reason": "result_not_found"}]
 
         # CRITICAL: Verify record_call was called for BOTH rows
         # The fix adds a record_call for the missing result
@@ -1634,6 +1682,62 @@ class TestAzureBatchLLMTransformMissingResults:
         assert error_call.kwargs["request_data"].to_dict()["custom_id"] == "row-1-def"
         assert error_call.kwargs["request_data"].to_dict()["row_index"] == 1
         assert error_call.kwargs["error"].to_dict()["reason"] == "result_not_found"
+
+    def test_all_malformed_output_records_error_calls_before_returning_error(self, transform: AzureBatchLLMTransform) -> None:
+        """Submitted requests keep per-row LLM lineage when every output line is malformed."""
+        mock_landscape = MagicMock()
+        call_index_counter = iter(range(100))
+        mock_landscape.allocate_call_index.side_effect = lambda _: next(call_index_counter)
+
+        ctx = PluginContext(run_id="test-run", config={}, landscape=mock_landscape)
+        ctx.state_id = "test-state-malformed"
+
+        ctx.set_checkpoint(
+            BatchCheckpointState(
+                batch_id="batch-malformed",
+                input_file_id="file-input",
+                row_mapping={
+                    "row-0-abc": RowMappingEntry(index=0, variables_hash="hash0"),
+                    "row-1-def": RowMappingEntry(index=1, variables_hash="hash1"),
+                },
+                template_errors=[],
+                submitted_at="2026-04-24T12:00:00Z",
+                row_count=2,
+                requests={
+                    "row-0-abc": {"model": "my-gpt4o-batch", "messages": [{"role": "user", "content": "Analyze: Hello"}]},
+                    "row-1-def": {"model": "my-gpt4o-batch", "messages": [{"role": "user", "content": "Analyze: World"}]},
+                },
+            )
+        )
+
+        mock_batch = Mock()
+        mock_batch.id = "batch-malformed"
+        mock_batch.status = "completed"
+        mock_batch.output_file_id = "file-output"
+        mock_batch.error_file_id = None
+
+        mock_file_content = Mock()
+        mock_file_content.text = '{"bad":\nnot-json'
+
+        mock_client = Mock()
+        mock_client.batches.retrieve.return_value = mock_batch
+        mock_client.files.content.return_value = mock_file_content
+
+        transform._client = mock_client
+
+        result = transform.process([make_pipeline_row({"text": "Hello"}), make_pipeline_row({"text": "World"})], ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "all_output_lines_malformed"
+
+        from elspeth.contracts import CallStatus, CallType
+
+        llm_calls = [call for call in mock_landscape.record_call.call_args_list if call.kwargs.get("call_type") == CallType.LLM]
+        assert len(llm_calls) == 2
+        for llm_call in llm_calls:
+            assert llm_call.kwargs["status"] == CallStatus.ERROR
+            assert llm_call.kwargs["error"].to_dict()["reason"] == "all_output_lines_malformed"
 
     def test_all_results_present_no_error_calls(self, transform: AzureBatchLLMTransform) -> None:
         """When all results are present, only SUCCESS calls are recorded."""
@@ -1996,12 +2100,10 @@ class TestAzureBatchContentFabrication:
         rows = [{"text": "test"}]
         result = transform.process([make_pipeline_row(d) for d in rows], ctx)
 
-        assert result.status == "success"
-        assert result.rows is not None
-        assert len(result.rows) == 1
-        # Must be None (error), NOT "" (fabrication)
-        assert result.rows[0]["llm_response"] is None
-        assert result.rows[0]["llm_response_error"]["reason"] == "content_filtered"
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "all_rows_failed"
+        assert result.reason["row_errors"] == [{"row_index": 0, "reason": "content_filtered"}]
 
     def test_null_usage_produces_unknown_not_fabricated_empty(self, transform: AzureBatchLLMTransform) -> None:
         """usage=null must produce TokenUsage.unknown(), not fabricated from {}."""
@@ -2598,17 +2700,24 @@ class TestErrorFileDownloadPath:
 
         assert result.status == "success"
         assert result.rows is not None
-        assert len(result.rows) == 2
+        assert len(result.rows) == 1
 
         # Verify error file was actually downloaded (2 files.content calls)
         assert client.files.content.call_count == 2
         client.files.content.assert_any_call("error-file-001")
 
-        # Verify row-1 got the error from the error file
-        row1_dict = result.rows[1].to_dict()
-        assert row1_dict["llm_response"] is None
-        assert row1_dict["llm_response_error"]["reason"] == "api_error"
-        assert row1_dict["llm_response_error"]["error"]["code"] == "content_filter"
+        row0_dict = result.rows[0].to_dict()
+        assert row0_dict["llm_response"] == "Result 0"
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [1]
+        assert metadata["quarantined_count"] == 1
+        assert metadata["row_errors"] == [
+            {
+                "row_index": 1,
+                "reason": "api_error",
+                "error": {"code": "content_filter", "message": "Filtered"},
+            }
+        ]
 
     def test_error_file_download_failure_sets_flag(self, transform: AzureBatchLLMTransform) -> None:
         """When error file download fails, rows missing from output get error_details_unavailable."""
@@ -2656,12 +2765,14 @@ class TestErrorFileDownloadPath:
 
         assert result.status == "success"
         assert result.rows is not None
-        assert len(result.rows) == 2
+        assert len(result.rows) == 1
 
-        # Row 1 should have error_details_unavailable (not result_not_found)
-        row1_dict = result.rows[1].to_dict()
-        assert row1_dict["llm_response"] is None
-        assert row1_dict["llm_response_error"]["reason"] == "error_details_unavailable"
+        row0_dict = result.rows[0].to_dict()
+        assert row0_dict["llm_response"] == "Result 0"
+        metadata = result.success_reason["metadata"]
+        assert metadata["quarantined_indices"] == [1]
+        assert metadata["quarantined_count"] == 1
+        assert metadata["row_errors"] == [{"row_index": 1, "reason": "error_details_unavailable"}]
 
     def test_error_file_malformed_jsonl_records_malformed_lines(self, transform: AzureBatchLLMTransform) -> None:
         """Malformed lines in the error file are tracked but don't crash."""

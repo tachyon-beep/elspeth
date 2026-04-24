@@ -145,6 +145,46 @@ def _assert_blob_run_same_session(
         )
 
 
+def _guard_blob_row_literals(row: Any) -> None:
+    """Validate closed-set blob row fields at the DB read boundary."""
+    # Tier 1 read guards — BlobRecord's fields are declared as closed
+    # Literal types, but the DB can be tampered with via direct SQL
+    # or a migration bug. Crash on any value outside the enum so the
+    # audit trail never silently returns a record whose static type
+    # is a lie. Aligns with the frozenset CHECK constraints in
+    # web/sessions/models.py (ck_blobs_status, ck_blobs_created_by)
+    # and the MIME allowlist enforced at create_blob().
+    #
+    # Explicit raise (not ``assert``): ``python -O`` strips asserts,
+    # so an optimised interpreter would silently pass a tampered row
+    # through these guards. AuditIntegrityError is the contract for
+    # Tier 1 DB-corruption conditions and survives ``-O`` execution.
+    if row.status not in BLOB_STATUSES:
+        raise AuditIntegrityError(f"Tier 1: blobs.status is {row.status!r}, expected one of {sorted(BLOB_STATUSES)}")
+    if row.created_by not in BLOB_CREATORS:
+        raise AuditIntegrityError(f"Tier 1: blobs.created_by is {row.created_by!r}, expected one of {sorted(BLOB_CREATORS)}")
+    if row.mime_type not in ALLOWED_MIME_TYPES:
+        raise AuditIntegrityError(f"Tier 1: blobs.mime_type is {row.mime_type!r}, not in the allowed MIME set")
+
+
+def _row_to_blob_record(row: Any) -> BlobRecord:
+    """Convert a blobs row into a guarded BlobRecord."""
+    _guard_blob_row_literals(row)
+    return BlobRecord(
+        id=UUID(row.id),
+        session_id=UUID(row.session_id),
+        filename=row.filename,
+        mime_type=row.mime_type,
+        size_bytes=row.size_bytes,
+        content_hash=row.content_hash,
+        storage_path=row.storage_path,
+        created_at=row.created_at,
+        created_by=row.created_by,
+        source_description=row.source_description,
+        status=row.status,
+    )
+
+
 class BlobServiceImpl:
     """Filesystem-backed blob service.
 
@@ -172,37 +212,7 @@ class BlobServiceImpl:
         return self._blob_dir(session_id) / f"{blob_id}_{filename}"
 
     def _row_to_record(self, row: Any) -> BlobRecord:
-        # Tier 1 read guards — BlobRecord's fields are declared as closed
-        # Literal types, but the DB can be tampered with via direct SQL
-        # or a migration bug.  Crash on any value outside the enum so the
-        # audit trail never silently returns a record whose static type
-        # is a lie.  Aligns with the frozenset CHECK constraints in
-        # web/sessions/models.py (ck_blobs_status, ck_blobs_created_by)
-        # and the MIME allowlist enforced at create_blob().
-        #
-        # Explicit raise (not ``assert``): ``python -O`` strips asserts,
-        # so an optimised interpreter would silently pass a tampered row
-        # through these guards. AuditIntegrityError is the contract for
-        # Tier 1 DB-corruption conditions and survives ``-O`` execution.
-        if row.status not in BLOB_STATUSES:
-            raise AuditIntegrityError(f"Tier 1: blobs.status is {row.status!r}, expected one of {sorted(BLOB_STATUSES)}")
-        if row.created_by not in BLOB_CREATORS:
-            raise AuditIntegrityError(f"Tier 1: blobs.created_by is {row.created_by!r}, expected one of {sorted(BLOB_CREATORS)}")
-        if row.mime_type not in ALLOWED_MIME_TYPES:
-            raise AuditIntegrityError(f"Tier 1: blobs.mime_type is {row.mime_type!r}, not in the allowed MIME set")
-        return BlobRecord(
-            id=UUID(row.id),
-            session_id=UUID(row.session_id),
-            filename=row.filename,
-            mime_type=row.mime_type,
-            size_bytes=row.size_bytes,
-            content_hash=row.content_hash,
-            storage_path=row.storage_path,
-            created_at=row.created_at,
-            created_by=row.created_by,
-            source_description=row.source_description,
-            status=row.status,
-        )
+        return _row_to_blob_record(row)
 
     def _row_to_link_record(self, row: Any) -> BlobRunLinkRecord:
         # Tier 1 read guard — mirrors the ck_blob_run_links_direction
@@ -257,9 +267,10 @@ class BlobServiceImpl:
                     current_total = conn.execute(
                         select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == session_id_str)
                     ).scalar()
-                    # COALESCE guarantees an int; non-int = Tier 1 anomaly.
-                    # Explicit raise (not assert) so the guard survives -O.
-                    if not isinstance(current_total, int):
+                    # COALESCE guarantees an exact int; bool/subclasses or any
+                    # other type are Tier 1 anomalies. Explicit raise (not
+                    # assert) so the guard survives -O.
+                    if type(current_total) is not int:
                         raise AuditIntegrityError(f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int")
                     if current_total + len(content) > self._max_storage_per_session:
                         raise BlobQuotaExceededError(
@@ -757,9 +768,10 @@ class BlobServiceImpl:
                 current = conn.execute(
                     select(func.coalesce(func.sum(blobs_table.c.size_bytes), 0)).where(blobs_table.c.session_id == target_session_id_str)
                 ).scalar()
-                # COALESCE guarantees an int; non-int = Tier 1 anomaly.
-                # Explicit raise so the guard survives ``python -O``.
-                if not isinstance(current, int):
+                # COALESCE guarantees an exact int; bool/subclasses or any
+                # other type are Tier 1 anomalies. Explicit raise so the
+                # guard survives ``python -O``.
+                if type(current) is not int:
                     raise AuditIntegrityError(f"Tier 1: COALESCE(SUM) returned {type(current).__name__}, expected int")
                 return current
 
@@ -873,9 +885,10 @@ class BlobServiceImpl:
                         blobs_table.c.id != blob_id_str,
                     )
                 ).scalar()
-                # COALESCE guarantees an int; non-int = Tier 1 anomaly.
-                # Explicit raise so the guard survives ``python -O``.
-                if not isinstance(current_total, int):
+                # COALESCE guarantees an exact int; bool/subclasses or any
+                # other type are Tier 1 anomalies. Explicit raise so the
+                # guard survives ``python -O``.
+                if type(current_total) is not int:
                     raise AuditIntegrityError(f"Tier 1: COALESCE(SUM) returned {type(current_total).__name__}, expected int")
                 if current_total + size_bytes > self._max_storage_per_session:
                     raise BlobQuotaExceededError(

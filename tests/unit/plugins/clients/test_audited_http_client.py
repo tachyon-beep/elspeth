@@ -121,6 +121,34 @@ class TestAuditedHTTPClient:
         assert call_kwargs["error"].type == "ConnectError"
         assert "Connection refused" in call_kwargs["error"].message
 
+    def test_internal_success_path_bug_crashes_without_recording_synthetic_http_error(self) -> None:
+        """ELSPETH success-path bugs must not be misclassified as provider failures."""
+        mock_execution = self._create_mock_execution()
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = b'{"ok": true}'
+        mock_response.text = '{"ok": true}'
+
+        with patch("httpx.Client") as mock_client_class:
+            client = AuditedHTTPClient(
+                execution=mock_execution,
+                state_id="state_123",
+                run_id="run_abc",
+                telemetry_emit=lambda event: None,
+            )
+            mock_client = mock_client_class.return_value
+            mock_client.post.return_value = mock_response
+
+            with (
+                patch.object(client, "_filter_response_headers", side_effect=TypeError("header filter bug")),
+                pytest.raises(TypeError, match="header filter bug"),
+            ):
+                client.post("https://api.example.com/v1/process")
+
+        mock_execution.record_call.assert_not_called()
+
     def test_auth_headers_fingerprinted_in_recorded_request(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Auth headers are fingerprinted (not removed) so different credentials produce different hashes.
 

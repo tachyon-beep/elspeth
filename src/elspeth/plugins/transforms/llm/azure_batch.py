@@ -156,7 +156,7 @@ class AzureBatchLLMTransform(BaseTransform):
 
     name = "azure_batch_llm"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:c3124a85317d1ad7"
+    source_file_hash: str | None = "sha256:e274cc41ca477f7d"
     is_batch_aware = True  # Engine passes list[dict] for batch processing
     config_model = AzureBatchConfig
 
@@ -715,6 +715,8 @@ class AzureBatchLLMTransform(BaseTransform):
         ctx: TransformContext,
         terminal_status: str,
         error_detail: str | None = None,
+        *,
+        reason_prefix: str = "batch_",
     ) -> None:
         """Record per-row LLM call records for terminal batch failure paths.
 
@@ -728,8 +730,11 @@ class AzureBatchLLMTransform(BaseTransform):
             checkpoint: Typed checkpoint state with requests and row_mapping.
             ctx: Plugin context for record_call.
             terminal_status: The batch terminal status (failed, cancelled, expired, timeout).
-                Prefixed with "batch_" to produce the audit reason (e.g., "timeout" → "batch_timeout").
+                Prefixed with ``reason_prefix`` to produce the audit reason
+                (e.g. ``reason_prefix="batch_", terminal_status="timeout"`` →
+                ``"batch_timeout"``).
             error_detail: Optional extra error detail string.
+            reason_prefix: Prefix for the structured error reason.
         """
         if not checkpoint.requests and not checkpoint.row_mapping:
             return  # No requests were submitted (e.g., all templates failed)
@@ -745,7 +750,7 @@ class AzureBatchLLMTransform(BaseTransform):
             mapping_entry = checkpoint.row_mapping[custom_id]
             row_index = mapping_entry.index
             error_info: dict[str, Any] = {
-                "reason": f"batch_{terminal_status}",
+                "reason": f"{reason_prefix}{terminal_status}",
                 "batch_id": checkpoint.batch_id,
                 "custom_id": custom_id,
             }
@@ -810,7 +815,9 @@ class AzureBatchLLMTransform(BaseTransform):
         except (TypeError, AttributeError, KeyError, NameError):
             raise  # Programming errors — crash to surface the bug
         except Exception as e:
-            # External API failure — record and return structured error
+            # External API failure after submission — keep the checkpoint and
+            # resume via the pending control-flow path instead of finalizing
+            # the batch locally as FAILED.
             retrieve_latency = (time.perf_counter() - start) * 1000
             ctx.record_call(
                 call_type=CallType.HTTP,
@@ -820,16 +827,13 @@ class AzureBatchLLMTransform(BaseTransform):
                 latency_ms=retrieve_latency,
                 provider="azure",
             )
-            # DON'T clear checkpoint - batch exists on Azure, retry should resume checking
-            return TransformResult.error(
-                {
-                    "reason": "batch_retrieve_failed",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "batch_id": batch_id,
-                },
-                retryable=True,  # Transient failure - retry status check
-            )
+            raise BatchPendingError(
+                batch_id,
+                "status_check_retry",
+                check_after_seconds=self._poll_interval,
+                checkpoint=checkpoint,
+                node_id=self.node_id,
+            ) from e
         retrieve_latency = (time.perf_counter() - start) * 1000
 
         # Record successful retrieve in audit trail. Tier 3 boundary: SDK response
@@ -1026,7 +1030,9 @@ class AzureBatchLLMTransform(BaseTransform):
         except (TypeError, AttributeError, KeyError, NameError):
             raise  # Programming errors — crash to surface the bug
         except Exception as e:
-            # External API failure — record and return structured error
+            # Azure already completed the batch; preserve the checkpoint and
+            # retry the download instead of converting this to a terminal batch
+            # failure locally.
             download_latency = (time.perf_counter() - start) * 1000
             ctx.record_call(
                 call_type=CallType.HTTP,
@@ -1036,16 +1042,13 @@ class AzureBatchLLMTransform(BaseTransform):
                 latency_ms=download_latency,
                 provider="azure",
             )
-            # DON'T clear checkpoint - batch completed on Azure, retry should re-attempt download
-            return TransformResult.error(
-                {
-                    "reason": "file_download_failed",
-                    "error": str(e),
-                    "error_type": type(e).__name__,
-                    "output_file_id": output_file_id,
-                },
-                retryable=True,  # Transient failure - retry download
-            )
+            raise BatchPendingError(
+                checkpoint.batch_id,
+                "download_retry",
+                check_after_seconds=self._poll_interval,
+                checkpoint=checkpoint,
+                node_id=self.node_id,
+            ) from e
         download_latency = (time.perf_counter() - start) * 1000
 
         # Record successful download in audit trail.
@@ -1238,6 +1241,13 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # If ALL lines are malformed, fail the entire batch
         if not results_by_id and malformed_lines:
+            self._record_per_row_failure_calls(
+                checkpoint,
+                ctx,
+                "all_output_lines_malformed",
+                error_detail=f"{len(malformed_lines)} malformed output line(s)",
+                reason_prefix="",
+            )
             self._clear_checkpoint(ctx)
             return TransformResult.error(
                 {
@@ -1280,15 +1290,20 @@ class AzureBatchLLMTransform(BaseTransform):
 
         for idx, row in enumerate(rows):
             if idx in template_error_indices:
-                # Row had template error - include original row with error field
+                # Template-render failures are quarantined metadata, not emitted
+                # child rows. Emitting them via success_multi() would route them
+                # downstream despite the parent token being quarantined.
                 error_msg = next((err for i, err in template_errors if i == idx), "Unknown error")
-                output_row = row.to_dict()
-                output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = {
-                    "reason": "template_rendering_failed",
-                    "error": error_msg,
-                }
-                output_rows.append(output_row)
+                row_errors.append(
+                    {
+                        "row_index": idx,
+                        "reason": "template_rendering_failed",
+                        "error": {
+                            "reason": "template_rendering_failed",
+                            "error": error_msg,
+                        },
+                    }
+                )
                 continue
 
             # Find result by custom_id using pre-built reverse mapping
@@ -1313,16 +1328,6 @@ class AzureBatchLLMTransform(BaseTransform):
                     error_reason = "result_not_found"
                     error_detail = None
 
-                output_row = row.to_dict()
-                output_row[self._response_field] = None
-                error_info: dict[str, Any] = {
-                    "reason": error_reason,
-                    "custom_id": custom_id,
-                }
-                if error_detail is not None:
-                    error_info["detail"] = error_detail
-                output_row[f"{self._response_field}_error"] = error_info
-                output_rows.append(output_row)
                 row_errors.append({"row_index": idx, "reason": error_reason})
 
                 # Record Call for audit trail completeness - request WAS made but no response
@@ -1331,6 +1336,12 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Audit completeness is non-negotiable (Tier 1 trust model). If we
                 # cannot record the per-row call, the audit trail is compromised.
                 original_request = checkpoint.requests[custom_id]
+                error_payload: dict[str, Any] = {
+                    "reason": error_reason,
+                    "custom_id": custom_id,
+                }
+                if error_detail is not None:
+                    error_payload["detail"] = error_detail
                 try:
                     ctx.record_call(
                         call_type=CallType.LLM,
@@ -1342,7 +1353,7 @@ class AzureBatchLLMTransform(BaseTransform):
                             **original_request,
                         },
                         response_data=None,
-                        error={"reason": error_reason, "custom_id": custom_id},
+                        error=error_payload,
                         provider="azure",
                     )
                 except Exception as exc:
@@ -1356,14 +1367,8 @@ class AzureBatchLLMTransform(BaseTransform):
             result = results_by_id[custom_id]
 
             if "error" in result:
-                # API error for this row
-                output_row = row.to_dict()
-                output_row[self._response_field] = None
-                output_row[f"{self._response_field}_error"] = {
-                    "reason": "api_error",
-                    "error": result["error"],
-                }
-                output_rows.append(output_row)
+                # API error for this row. Keep the failure in metadata only so
+                # the engine does not expand it into a downstream child token.
                 row_errors.append({"row_index": idx, "reason": "api_error", "error": result["error"]})
             else:
                 # Success - extract response
@@ -1374,53 +1379,42 @@ class AzureBatchLLMTransform(BaseTransform):
                 # Validate expected fields exist with correct types before accessing
                 choices = body.get("choices")
                 if not isinstance(choices, list) or len(choices) == 0:
-                    # Missing or empty choices - record as validation error
-                    output_row = row.to_dict()
-                    output_row[self._response_field] = None
-                    output_row[f"{self._response_field}_error"] = {
-                        "reason": "invalid_response_structure",
-                        "error": "Azure API response missing 'choices' array",
-                    }
-                    output_rows.append(output_row)
-                    row_errors.append({"row_index": idx, "reason": "no_choices_in_response"})
+                    row_errors.append(
+                        {
+                            "row_index": idx,
+                            "reason": "no_choices_in_response",
+                            "error": "Azure API response missing 'choices' array",
+                        }
+                    )
                     continue
 
                 first_choice = choices[0]
                 if not isinstance(first_choice, dict):
-                    output_row = row.to_dict()
-                    output_row[self._response_field] = None
-                    output_row[f"{self._response_field}_error"] = {
-                        "reason": "invalid_response_structure",
-                        "error": f"choices[0] is not a dict, got {type(first_choice).__name__}",
-                    }
-                    output_rows.append(output_row)
-                    row_errors.append({"row_index": idx, "reason": "invalid_choice_structure"})
+                    row_errors.append(
+                        {
+                            "row_index": idx,
+                            "reason": "invalid_choice_structure",
+                            "error": f"choices[0] is not a dict, got {type(first_choice).__name__}",
+                        }
+                    )
                     continue
 
                 message = first_choice.get("message")
                 if not isinstance(message, dict):
-                    output_row = row.to_dict()
-                    output_row[self._response_field] = None
-                    output_row[f"{self._response_field}_error"] = {
-                        "reason": "invalid_response_structure",
-                        "error": f"choices[0].message is not a dict, got {type(message).__name__}",
-                    }
-                    output_rows.append(output_row)
-                    row_errors.append({"row_index": idx, "reason": "invalid_message_structure"})
+                    row_errors.append(
+                        {
+                            "row_index": idx,
+                            "reason": "invalid_message_structure",
+                            "error": f"choices[0].message is not a dict, got {type(message).__name__}",
+                        }
+                    )
                     continue
 
                 # Boundary validation passed — check content at Tier 3 boundary
                 content = message.get("content")
                 if content is None:
                     # Null content = content filtered by provider (Tier 3 boundary)
-                    # Matches the openrouter_batch pattern
-                    output_row = row.to_dict()
-                    output_row[self._response_field] = None
-                    output_row[f"{self._response_field}_error"] = {
-                        "reason": "content_filtered",
-                        "error": "LLM returned null content (likely content-filtered by provider)",
-                    }
-                    output_rows.append(output_row)
+                    # Matches the openrouter_batch pattern.
                     row_errors.append({"row_index": idx, "reason": "content_filtered"})
                     continue
 
@@ -1496,12 +1490,11 @@ class AzureBatchLLMTransform(BaseTransform):
                     f"Audit trail integrity compromised."
                 ) from exc
 
-        # Clear checkpoint after successful completion
+        # The batch is terminal at this point regardless of whether any valid
+        # rows survived. Clear the checkpoint before returning.
         self._clear_checkpoint(ctx)
 
-        # Return results
         if not output_rows:
-            # All rows failed - return error
             return TransformResult.error(
                 {
                     "reason": "all_rows_failed",
@@ -1549,13 +1542,13 @@ class AzureBatchLLMTransform(BaseTransform):
         # Collect all quarantined row indices for engine visibility.
         # Without quarantined_indices in metadata, the engine marks ALL rows as
         # CONSUMED_IN_BATCH — error rows silently pass as successfully processed.
-        quarantined_indices = sorted(template_error_indices | {e["row_index"] for e in row_errors})
+        quarantined_indices = sorted({e["row_index"] for e in row_errors})
 
         success_reason: TransformSuccessReason = {
             "action": "enriched",
             "fields_added": [self._response_field],
             "metadata": {
-                "batch_size": len(output_rows),
+                "batch_size": len(rows),
                 "finish_reason_summary": finish_reason_counts,
                 **batch_audit,
             },

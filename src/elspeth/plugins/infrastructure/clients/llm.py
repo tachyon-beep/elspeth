@@ -15,7 +15,7 @@ import structlog
 
 import elspeth.contracts.errors as contract_errors
 from elspeth.contracts import CallStatus, CallType
-from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse
+from elspeth.contracts.call_data import LLMCallError, LLMCallRequest, LLMCallResponse, RawCallPayload
 from elspeth.contracts.errors import PluginRetryableError
 from elspeth.contracts.events import ExternalCallCompleted
 from elspeth.contracts.freeze import deep_freeze
@@ -193,6 +193,41 @@ def _classify_llm_error(exception: Exception) -> str:
     return "unknown"
 
 
+def _extract_usage_from_provider_response(usage: Any) -> TokenUsage:
+    """Normalize provider usage objects at the Tier 3 boundary.
+
+    Providers may return usage as an SDK object with attributes, a mapping, or
+    a partial aggregate-only payload. Reconstruct through ``TokenUsage.from_dict``
+    so missing and non-int fields become explicit ``None`` rather than raising.
+    """
+    if usage is None:
+        return TokenUsage.unknown()
+
+    if isinstance(usage, Mapping):
+        usage_data = {
+            "prompt_tokens": usage.get("prompt_tokens"),
+            "completion_tokens": usage.get("completion_tokens"),
+            "total_tokens": usage.get("total_tokens"),
+        }
+    else:
+        usage_data = {
+            "prompt_tokens": getattr(usage, "prompt_tokens", None),
+            "completion_tokens": getattr(usage, "completion_tokens", None),
+            "total_tokens": getattr(usage, "total_tokens", None),
+        }
+
+    return TokenUsage.from_dict(usage_data)
+
+
+def _validate_provider_response_model(model: Any) -> str:
+    """Require provider model metadata to be a non-empty string."""
+    if not isinstance(model, str):
+        raise ValueError(f"LLM response model is {type(model).__name__}, expected non-empty str")
+    if not model.strip():
+        raise ValueError("LLM response model must be non-empty")
+    return model
+
+
 class AuditedLLMClient(AuditedClientBase):
     """LLM client that automatically records all calls to audit trail.
 
@@ -354,9 +389,9 @@ class AuditedLLMClient(AuditedClientBase):
                 )
             except contract_errors.TIER_1_ERRORS:
                 raise  # System bugs and audit integrity violations must crash
+            except (TypeError, AttributeError, KeyError, NameError):
+                raise  # Programming errors must crash
             except Exception as tel_err:
-                if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
-                    raise  # Programming errors must crash
                 # Telemetry failure must not corrupt the error handling flow
                 logger.warning(
                     "telemetry_emit_failed",
@@ -387,250 +422,10 @@ class AuditedLLMClient(AuditedClientBase):
         # instead of being misclassified as LLM errors
         latency_ms = (time.perf_counter() - start) * 1000
 
-        # Tier 3 boundary: validate LLM response structure immediately
-        if not response.choices:
-            error_msg = "LLM returned empty choices array — abnormal response"
-            # The LLM call happened — record it before raising so the audit
-            # trail reflects the consumed call_index. Without this, empty-choices
-            # responses create unexplained audit gaps.
-            try:
-                raw_response = response.model_dump()
-            except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
-                # model_dump() failed on Tier 3 data — still record the call
-                # to prevent call-index gaps, then re-raise.
-                self._execution.record_call(
-                    state_id=self._state_id,
-                    call_index=call_index,
-                    call_type=CallType.LLM,
-                    status=CallStatus.ERROR,
-                    request_data=request_dto,
-                    error=LLMCallError(
-                        type="ResponseProcessingError",
-                        message=f"model_dump() failed in empty-choices path: {dump_exc}",
-                        retryable=False,
-                    ),
-                    latency_ms=latency_ms,
-                )
-                raise LLMClientError(
-                    f"Failed to serialize LLM response in empty-choices path: {dump_exc}",
-                    retryable=False,
-                ) from dump_exc
-            usage = (
-                TokenUsage.from_dict({"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens})
-                if response.usage is not None
-                else TokenUsage.unknown()
-            )
-            response_dto = LLMCallResponse(
-                content="",  # No content available
-                model=response.model,
-                usage=usage,
-                raw_response=raw_response,
-            )
-            self._execution.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data=request_dto,
-                response_data=response_dto,
-                error=LLMCallError(
-                    type="EmptyChoicesError",
-                    message=error_msg,
-                    retryable=False,
-                ),
-                latency_ms=latency_ms,
-            )
-            raise LLMClientError(error_msg, retryable=False)
-        content = response.choices[0].message.content
-        finish_reason = response.choices[0].finish_reason
-        if content is None:
-            # Tool call responses have no text content — ELSPETH does not support
-            # tool_calls, so this is an error (not a fabrication opportunity).
-            # Record the call as ERROR with raw response preserved, then raise.
-            if finish_reason == "tool_calls":
-                error_msg = "LLM returned tool_calls response (not supported by ELSPETH)"
-                try:
-                    raw_response = response.model_dump()
-                except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
-                    # model_dump() failed on Tier 3 data — still record the call
-                    # to prevent call-index gaps, then re-raise.
-                    self._execution.record_call(
-                        state_id=self._state_id,
-                        call_index=call_index,
-                        call_type=CallType.LLM,
-                        status=CallStatus.ERROR,
-                        request_data=request_dto,
-                        error=LLMCallError(
-                            type="ResponseProcessingError",
-                            message=f"model_dump() failed in tool-calls path: {dump_exc}",
-                            retryable=False,
-                        ),
-                        latency_ms=latency_ms,
-                    )
-                    raise LLMClientError(
-                        f"Failed to serialize LLM response in tool-calls path: {dump_exc}",
-                        retryable=False,
-                    ) from dump_exc
-                usage = (
-                    TokenUsage.from_dict(
-                        {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
-                    )
-                    if response.usage is not None
-                    else TokenUsage.unknown()
-                )
-                response_dto = LLMCallResponse(
-                    content="",  # No text content available
-                    model=response.model,
-                    usage=usage,
-                    raw_response=raw_response,
-                )
-                self._execution.record_call(
-                    state_id=self._state_id,
-                    call_index=call_index,
-                    call_type=CallType.LLM,
-                    status=CallStatus.ERROR,
-                    request_data=request_dto,
-                    response_data=response_dto,
-                    error=LLMCallError(
-                        type="UnsupportedResponseError",
-                        message=error_msg,
-                        retryable=False,
-                    ),
-                    latency_ms=latency_ms,
-                )
-                raise LLMClientError(error_msg, retryable=False)
-            else:
-                # Record the call BEFORE raising — the LLM call happened and must
-                # appear in the audit trail even though the response is unusable.
-                # Without this, content-filtered calls vanish from the audit trail
-                # and create unexplained call-index gaps.
-                error_msg = "LLM returned null content (likely content-filtered by provider)"
-                try:
-                    raw_response = response.model_dump()
-                except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
-                    # model_dump() failed — still record the call to prevent
-                    # call-index gaps, then re-raise.
-                    self._execution.record_call(
-                        state_id=self._state_id,
-                        call_index=call_index,
-                        call_type=CallType.LLM,
-                        status=CallStatus.ERROR,
-                        request_data=request_dto,
-                        error=LLMCallError(
-                            type="ResponseProcessingError",
-                            message=f"model_dump() failed in null-content path: {dump_exc}",
-                            retryable=False,
-                        ),
-                        latency_ms=latency_ms,
-                    )
-                    raise LLMClientError(
-                        f"Failed to serialize LLM response in null-content path: {dump_exc}",
-                        retryable=False,
-                    ) from dump_exc
-                usage = (
-                    TokenUsage.from_dict(
-                        {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
-                    )
-                    if response.usage is not None
-                    else TokenUsage.unknown()
-                )
-                response_dto = LLMCallResponse(
-                    content="",  # Null content normalized for DTO
-                    model=response.model,
-                    usage=usage,
-                    raw_response=raw_response,
-                )
-                self._execution.record_call(
-                    state_id=self._state_id,
-                    call_index=call_index,
-                    call_type=CallType.LLM,
-                    status=CallStatus.ERROR,
-                    request_data=request_dto,
-                    response_data=response_dto,
-                    error=LLMCallError(
-                        type="ContentPolicyError",
-                        message=error_msg,
-                        retryable=False,
-                    ),
-                    latency_ms=latency_ms,
-                )
-
-                # Telemetry emitted AFTER successful Landscape recording (even for null-content errors)
-                # Unlike SDK errors, we have response data here — the HTTP call succeeded
-                response_data = response_dto.to_dict()
-                try:
-                    self._telemetry_emit(
-                        ExternalCallCompleted(
-                            timestamp=datetime.now(UTC),
-                            run_id=self._run_id,
-                            call_type=CallType.LLM,
-                            provider=self._provider,
-                            status=CallStatus.ERROR,
-                            latency_ms=latency_ms,
-                            state_id=self._state_id,
-                            operation_id=None,
-                            token_id=self._telemetry_token_id(),
-                            request_hash=stable_hash(request_data),
-                            response_hash=stable_hash(response_data),
-                            request_payload=request_dto,
-                            response_payload=response_dto,
-                            token_usage=usage if usage.has_data else None,
-                        )
-                    )
-                except contract_errors.TIER_1_ERRORS:
-                    raise  # System bugs and audit integrity violations must crash
-                except Exception as tel_err:
-                    if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
-                        raise  # Programming errors must crash
-                    # Telemetry failure must not corrupt the error handling flow
-                    logger.warning(
-                        "telemetry_emit_failed",
-                        error=str(tel_err),
-                        error_type=type(tel_err).__name__,
-                        run_id=self._run_id,
-                        state_id=self._state_id,
-                        call_type="llm",
-                        exc_info=True,
-                    )
-
-                raise ContentPolicyError(error_msg)
-
-        # Tier 3 boundary: validate content is actually str.
-        # Provider bugs or SDK schema drift could return non-str content
-        # (e.g., list for multi-part, int, dict). Recording non-str as SUCCESS
-        # would violate the response contract and crash downstream .strip() calls.
-        if not isinstance(content, str):
-            error_msg = (
-                f"LLM response content is {type(content).__name__}, expected str. Provider returned malformed data at Tier 3 boundary."
-            )
-            self._execution.record_call(
-                state_id=self._state_id,
-                call_index=call_index,
-                call_type=CallType.LLM,
-                status=CallStatus.ERROR,
-                request_data=request_dto,
-                error=LLMCallError(
-                    type="MalformedResponseError",
-                    message=error_msg,
-                    retryable=False,
-                ),
-                latency_ms=latency_ms,
-            )
-            raise LLMClientError(error_msg, retryable=False)
-
-        # Guard against providers that omit usage data (streaming, certain configs).
-        # Tier 3 boundary: use from_dict() to coerce non-int values (float, bool, etc.)
-        # rather than known() which trusts values implicitly.
-        if response.usage is not None:
-            usage = TokenUsage.from_dict(
-                {"prompt_tokens": response.usage.prompt_tokens, "completion_tokens": response.usage.completion_tokens}
-            )
-        else:
-            usage = TokenUsage.unknown()
-
-        # Capture full raw response for audit completeness
-        # raw_response includes: all choices, finish_reason, tool_calls, logprobs, etc.
-        # NOTE: model_dump() is guaranteed present - we require openai>=2.15 in pyproject.toml
+        # Capture the provider response once, then validate/normalize the Tier 3
+        # fields from that snapshot. This keeps malformed responses on the
+        # audited path instead of letting them leak into success handling.
+        usage = _extract_usage_from_provider_response(response.usage)
         try:
             raw_response = response.model_dump()
         except (TypeError, ValueError, RecursionError, AttributeError) as dump_exc:
@@ -655,9 +450,212 @@ class AuditedLLMClient(AuditedClientBase):
                 retryable=False,
             ) from dump_exc
 
+        try:
+            response_model = _validate_provider_response_model(response.model)
+        except ValueError as model_exc:
+            error_msg = f"{model_exc}. Provider returned malformed data at Tier 3 boundary."
+            response_payload = RawCallPayload(raw_response)
+            self._execution.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                response_data=response_payload,
+                error=LLMCallError(
+                    type="MalformedResponseError",
+                    message=error_msg,
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+
+            response_data = response_payload.to_dict()
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.LLM,
+                        provider=self._provider,
+                        status=CallStatus.ERROR,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,
+                        operation_id=None,
+                        token_id=self._telemetry_token_id(),
+                        request_hash=stable_hash(request_data),
+                        response_hash=stable_hash(response_data),
+                        request_payload=request_dto,
+                        response_payload=response_payload,
+                        token_usage=usage if usage.has_data else None,
+                    )
+                )
+            except contract_errors.TIER_1_ERRORS:
+                raise  # System bugs and audit integrity violations must crash
+            except (TypeError, AttributeError, KeyError, NameError):
+                raise  # Programming errors must crash
+            except Exception as tel_err:
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="llm",
+                    exc_info=True,
+                )
+
+            raise LLMClientError(error_msg, retryable=False) from model_exc
+
+        # Tier 3 boundary: validate LLM response structure immediately.
+        if not response.choices:
+            error_msg = "LLM returned empty choices array — abnormal response"
+            response_dto = LLMCallResponse(
+                content="",  # No content available
+                model=response_model,
+                usage=usage,
+                raw_response=raw_response,
+            )
+            self._execution.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                response_data=response_dto,
+                error=LLMCallError(
+                    type="EmptyChoicesError",
+                    message=error_msg,
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+            raise LLMClientError(error_msg, retryable=False)
+
+        content = response.choices[0].message.content
+        finish_reason = response.choices[0].finish_reason
+        if content is None:
+            # Tool call responses have no text content — ELSPETH does not support
+            # tool_calls, so this is an error (not a fabrication opportunity).
+            # Record the call as ERROR with raw response preserved, then raise.
+            if finish_reason == "tool_calls":
+                error_msg = "LLM returned tool_calls response (not supported by ELSPETH)"
+                response_dto = LLMCallResponse(
+                    content="",  # No text content available
+                    model=response_model,
+                    usage=usage,
+                    raw_response=raw_response,
+                )
+                self._execution.record_call(
+                    state_id=self._state_id,
+                    call_index=call_index,
+                    call_type=CallType.LLM,
+                    status=CallStatus.ERROR,
+                    request_data=request_dto,
+                    response_data=response_dto,
+                    error=LLMCallError(
+                        type="UnsupportedResponseError",
+                        message=error_msg,
+                        retryable=False,
+                    ),
+                    latency_ms=latency_ms,
+                )
+                raise LLMClientError(error_msg, retryable=False)
+
+            # Record the call BEFORE raising — the LLM call happened and must
+            # appear in the audit trail even though the response is unusable.
+            # Without this, content-filtered calls vanish from the audit trail
+            # and create unexplained call-index gaps.
+            error_msg = "LLM returned null content (likely content-filtered by provider)"
+            response_dto = LLMCallResponse(
+                content="",  # Null content normalized for DTO
+                model=response_model,
+                usage=usage,
+                raw_response=raw_response,
+            )
+            self._execution.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                response_data=response_dto,
+                error=LLMCallError(
+                    type="ContentPolicyError",
+                    message=error_msg,
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+
+            # Telemetry emitted AFTER successful Landscape recording (even for null-content errors)
+            # Unlike SDK errors, we have response data here — the HTTP call succeeded
+            response_data = response_dto.to_dict()
+            try:
+                self._telemetry_emit(
+                    ExternalCallCompleted(
+                        timestamp=datetime.now(UTC),
+                        run_id=self._run_id,
+                        call_type=CallType.LLM,
+                        provider=self._provider,
+                        status=CallStatus.ERROR,
+                        latency_ms=latency_ms,
+                        state_id=self._state_id,
+                        operation_id=None,
+                        token_id=self._telemetry_token_id(),
+                        request_hash=stable_hash(request_data),
+                        response_hash=stable_hash(response_data),
+                        request_payload=request_dto,
+                        response_payload=response_dto,
+                        token_usage=usage if usage.has_data else None,
+                    )
+                )
+            except contract_errors.TIER_1_ERRORS:
+                raise  # System bugs and audit integrity violations must crash
+            except (TypeError, AttributeError, KeyError, NameError):
+                raise  # Programming errors must crash
+            except Exception as tel_err:
+                # Telemetry failure must not corrupt the error handling flow
+                logger.warning(
+                    "telemetry_emit_failed",
+                    error=str(tel_err),
+                    error_type=type(tel_err).__name__,
+                    run_id=self._run_id,
+                    state_id=self._state_id,
+                    call_type="llm",
+                    exc_info=True,
+                )
+
+            raise ContentPolicyError(error_msg)
+
+        # Tier 3 boundary: validate content is actually str.
+        # Provider bugs or SDK schema drift could return non-str content
+        # (e.g., list for multi-part, int, dict). Recording non-str as SUCCESS
+        # would violate the response contract and crash downstream .strip() calls.
+        if not isinstance(content, str):
+            error_msg = (
+                f"LLM response content is {type(content).__name__}, expected str. Provider returned malformed data at Tier 3 boundary."
+            )
+            response_payload = RawCallPayload(raw_response)
+            self._execution.record_call(
+                state_id=self._state_id,
+                call_index=call_index,
+                call_type=CallType.LLM,
+                status=CallStatus.ERROR,
+                request_data=request_dto,
+                response_data=response_payload,
+                error=LLMCallError(
+                    type="MalformedResponseError",
+                    message=error_msg,
+                    retryable=False,
+                ),
+                latency_ms=latency_ms,
+            )
+            raise LLMClientError(error_msg, retryable=False)
+
         response_dto = LLMCallResponse(
             content=content,
-            model=response.model,
+            model=response_model,
             usage=usage,
             raw_response=raw_response,
         )
@@ -697,9 +695,9 @@ class AuditedLLMClient(AuditedClientBase):
             )
         except contract_errors.TIER_1_ERRORS:
             raise  # System bugs and audit integrity violations must crash
+        except (TypeError, AttributeError, KeyError, NameError):
+            raise  # Programming errors must crash
         except Exception as tel_err:
-            if isinstance(tel_err, (TypeError, AttributeError, KeyError, NameError)):
-                raise  # Programming errors must crash
             # Telemetry failure must not corrupt the successful call
             # Landscape has the record - telemetry is operational visibility only
             logger.warning(
@@ -714,7 +712,7 @@ class AuditedLLMClient(AuditedClientBase):
 
         return LLMResponse(
             content=content,
-            model=response.model,
+            model=response_model,
             usage=usage,
             latency_ms=latency_ms,
             raw_response=raw_response,  # Reuse captured response from audit recording

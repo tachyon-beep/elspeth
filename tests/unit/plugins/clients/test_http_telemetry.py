@@ -294,6 +294,38 @@ class TestHTTPClientTelemetry:
         call_kwargs = execution.record_call.call_args.kwargs
         assert call_kwargs["status"] == CallStatus.SUCCESS
 
+    def test_programmer_bug_in_telemetry_callback_crashes_after_audit_recording(self) -> None:
+        """TypeError/KeyError-style telemetry bugs must crash instead of being downgraded to warnings."""
+        execution = self._create_mock_execution()
+
+        def failing_telemetry_emit(event: ExternalCallCompleted) -> None:
+            raise TypeError("telemetry bug")
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"result": "success"}
+        mock_response.text = '{"result": "success"}'
+        mock_response.content = b'{"result": "success"}'
+        mock_response.headers = {"content-type": "application/json"}
+
+        with patch("httpx.Client") as mock_client_class:
+            client = AuditedHTTPClient(
+                execution=execution,
+                state_id="state_123",
+                base_url="https://api.example.com",
+                run_id="run_abc",
+                telemetry_emit=failing_telemetry_emit,
+            )
+            mock_client_instance = mock_client_class.return_value
+            mock_client_instance.post.return_value = mock_response
+
+            with pytest.raises(TypeError, match="telemetry bug"):
+                client.post("/endpoint", json={"input": "test"})
+
+        execution.record_call.assert_called_once()
+        call_kwargs = execution.record_call.call_args.kwargs
+        assert call_kwargs["status"] == CallStatus.SUCCESS
+
     def test_http_error_response_emits_telemetry(self) -> None:
         """4xx/5xx response emits telemetry with ERROR status."""
         execution = self._create_mock_execution()

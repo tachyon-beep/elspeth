@@ -150,6 +150,17 @@ class TestDataverseSourceStructuredQuery:
 
         # Mock the client to return a canned response
         mock_client = MagicMock(spec=DataverseClient)
+        mock_client.get_page.return_value = DataversePageResponse(
+            status_code=200,
+            rows=[{"LogicalName": "contact"}],
+            latency_ms=5.0,
+            headers={"content-type": "application/json"},
+            request_headers={"Authorization": "Bearer fake"},
+            request_url="https://testorg.crm.dynamics.com/api/data/v9.2/EntityDefinitions(LogicalName='contact')?$select=LogicalName",
+            next_link=None,
+            paging_cookie=None,
+            more_records=None,
+        )
         mock_client.paginate_odata.return_value = iter(
             [
                 DataversePageResponse(
@@ -188,13 +199,24 @@ class TestDataverseSourceStructuredQuery:
 
         # Verify audit recording
         success_calls = [c for c in ctx.calls if c.get("status") == CallStatus.SUCCESS]
-        assert len(success_calls) == 1  # One page = one call
+        assert len(success_calls) == 2  # Metadata probe + one page fetch
 
     def test_multi_page_pagination(self) -> None:
         """Load rows across multiple pages with @odata.nextLink."""
         source = DataverseSource(_make_source_config())
 
         mock_client = MagicMock(spec=DataverseClient)
+        mock_client.get_page.return_value = DataversePageResponse(
+            status_code=200,
+            rows=[{"LogicalName": "contact"}],
+            latency_ms=5.0,
+            headers={"content-type": "application/json"},
+            request_headers={"Authorization": "Bearer fake"},
+            request_url="https://testorg.crm.dynamics.com/api/data/v9.2/EntityDefinitions(LogicalName='contact')?$select=LogicalName",
+            next_link=None,
+            paging_cookie=None,
+            more_records=None,
+        )
         mock_client.paginate_odata.return_value = iter(
             [
                 DataversePageResponse(
@@ -234,9 +256,9 @@ class TestDataverseSourceStructuredQuery:
         rows = list(source.load(ctx))  # type: ignore[arg-type]  # test fake context
 
         assert len(rows) == 2
-        # Two pages = two audit call records
+        # Metadata probe + two pages = three audit call records
         success_calls = [c for c in ctx.calls if c.get("status") == CallStatus.SUCCESS]
-        assert len(success_calls) == 2
+        assert len(success_calls) == 3
 
 
 class TestDataverseSourceFetchXML:

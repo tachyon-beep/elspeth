@@ -178,6 +178,100 @@ class TestSchemaCompatibilityGuards:
         assert "To fix this, either:" in msg
         instance.close()
 
+    def test_validate_schema_rejects_stale_single_column_foreign_keys_for_run_scoped_error_tables(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Run-scoped error tables must require exact composite FK shapes."""
+        import sqlalchemy
+
+        instance = _make_instance(f"sqlite:///{tmp_path / 'stale_fk_shapes.db'}")
+
+        mock_inspector = Mock()
+        mock_inspector.get_table_names.return_value = ["transform_errors", "tokens", "nodes"]
+        mock_inspector.get_columns.side_effect = lambda table_name: [
+            {"name": column_name}
+            for column_name in {
+                "transform_errors": ("run_id", "token_id", "transform_id"),
+                "tokens": ("token_id", "run_id"),
+                "nodes": ("node_id", "run_id"),
+            }[table_name]
+        ]
+        mock_inspector.get_foreign_keys.return_value = [
+            {
+                "constrained_columns": ["token_id"],
+                "referred_table": "tokens",
+                "referred_columns": ["token_id"],
+            },
+            {
+                "constrained_columns": ["transform_id"],
+                "referred_table": "nodes",
+                "referred_columns": ["node_id"],
+            },
+        ]
+
+        monkeypatch.setattr(sqlalchemy, "inspect", lambda engine: mock_inspector)
+        monkeypatch.setattr(
+            database_module,
+            "metadata",
+            SimpleNamespace(
+                tables={
+                    "transform_errors": object(),
+                    "tokens": object(),
+                    "nodes": object(),
+                }
+            ),
+        )
+        monkeypatch.setattr(database_module, "_REQUIRED_COLUMNS", ())
+        monkeypatch.setattr(database_module, "_REQUIRED_CHECK_CONSTRAINTS", ())
+        monkeypatch.setattr(database_module, "_REQUIRED_INDEXES", ())
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "Missing composite foreign keys:" in msg
+        assert "transform_errors(token_id, run_id) → tokens(token_id, run_id)" in msg
+        assert "transform_errors(transform_id, run_id) → nodes(node_id, run_id)" in msg
+        instance.close()
+
+    def test_validate_schema_rejects_missing_runtime_required_columns(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Runtime write paths must not pass compatibility checks without their physical columns."""
+        db_path = tmp_path / "missing_runtime_required_columns.db"
+        engine = create_engine(f"sqlite:///{db_path}")
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE runs ("
+                    "run_id TEXT PRIMARY KEY, "
+                    "source_field_resolution_json TEXT, "
+                    "schema_contract_json TEXT, "
+                    "schema_contract_hash TEXT, "
+                    "runtime_val_manifest_json TEXT)"
+                )
+            )
+            conn.execute(text("CREATE TABLE checkpoints (checkpoint_id TEXT PRIMARY KEY, coalesce_state_json TEXT)"))
+        engine.dispose()
+
+        instance = _make_instance(f"sqlite:///{db_path}")
+        monkeypatch.setattr(
+            database_module,
+            "metadata",
+            SimpleNamespace(tables={"runs": object(), "checkpoints": object()}),
+        )
+        monkeypatch.setattr(database_module, "_REQUIRED_FOREIGN_KEYS", ())
+        monkeypatch.setattr(database_module, "_REQUIRED_COMPOSITE_FOREIGN_KEYS", ())
+        monkeypatch.setattr(database_module, "_REQUIRED_CHECK_CONSTRAINTS", ())
+        monkeypatch.setattr(database_module, "_REQUIRED_INDEXES", ())
+
+        with pytest.raises(SchemaCompatibilityError) as exc_info:
+            instance._validate_schema()
+
+        msg = str(exc_info.value)
+        assert "Missing columns:" in msg
+        assert "runs.source_schema_json" in msg
+        assert "checkpoints.format_version" in msg
+        instance.close()
+
     def test_missing_check_constraint_raises_compatibility_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Missing required check constraints must be listed in the error."""
         db_path = tmp_path / "missing_check.db"

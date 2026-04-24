@@ -70,6 +70,81 @@ def _route_to_sink(
     pending_tokens[sink_name].append((token, PendingOutcome(pending_outcome)))
 
 
+def reconcile_sink_write_diversions(
+    counters: ExecutionCounters,
+    *,
+    sink_name: str,
+    pending_outcome: PendingOutcome | None,
+    diversion_count: int,
+) -> None:
+    """Reconcile provisional counters after sink write reveals diversions.
+
+    The processing loop counts sink-bound outcomes before durability is known so
+    progress can remain responsive. Once SinkExecutor.write() partitions the
+    batch into primary vs diverted rows, the final counters must remove the
+    diverted rows from any provisional success/routing/quarantine totals.
+    """
+    if diversion_count == 0 or pending_outcome is None:
+        return
+
+    def _decrement_counter(field_name: str) -> None:
+        current = getattr(counters, field_name)
+        if current < diversion_count:
+            raise OrchestrationInvariantError(
+                f"Cannot subtract {diversion_count} diverted rows from {field_name}={current} "
+                f"for sink '{sink_name}' and pending outcome {pending_outcome.outcome.value!r}. "
+                "This indicates counter drift between processing and sink-write phases."
+            )
+        setattr(counters, field_name, current - diversion_count)
+
+    if pending_outcome.outcome == RowOutcome.COMPLETED:
+        _decrement_counter("rows_succeeded")
+        return
+
+    if pending_outcome.outcome == RowOutcome.ROUTED:
+        _decrement_counter("rows_routed")
+        current_destination_count = counters.routed_destinations[sink_name]
+        if current_destination_count < diversion_count:
+            raise OrchestrationInvariantError(
+                f"Cannot subtract {diversion_count} diverted routed rows from "
+                f"routed_destinations[{sink_name!r}]={current_destination_count}. "
+                "This indicates counter drift between processing and sink-write phases."
+            )
+        remaining = current_destination_count - diversion_count
+        if remaining == 0:
+            del counters.routed_destinations[sink_name]
+        else:
+            counters.routed_destinations[sink_name] = remaining
+        return
+
+    if pending_outcome.outcome == RowOutcome.QUARANTINED:
+        _decrement_counter("rows_quarantined")
+
+
+def _emit_failed_token_completed(ctx: PluginContext, token: TokenInfo) -> None:
+    """Emit TokenCompleted(FAILED) after audit recording succeeds."""
+    from datetime import UTC, datetime
+
+    from elspeth.contracts import TokenCompleted
+
+    ctx.telemetry_emit(
+        TokenCompleted(
+            timestamp=datetime.now(UTC),
+            run_id=ctx.run_id,
+            row_id=token.row_id,
+            token_id=token.token_id,
+            outcome=RowOutcome.FAILED,
+            sink_name=None,
+        )
+    )
+
+
+def _emit_failed_coalesce_telemetry(ctx: PluginContext, tokens: tuple[TokenInfo, ...]) -> None:
+    """Emit failure telemetry for coalesce branches already failed in audit."""
+    for token in tokens:
+        _emit_failed_token_completed(ctx, token)
+
+
 def accumulate_row_outcomes(
     results: Iterable[RowResult],
     counters: ExecutionCounters,
@@ -242,6 +317,7 @@ def handle_coalesce_timeouts(
             else:
                 counters.rows_coalesce_failed += 1
                 counters.rows_failed += len(outcome.consumed_tokens)
+                _emit_failed_coalesce_telemetry(ctx, outcome.consumed_tokens)
 
 
 def flush_coalesce_pending(
@@ -289,3 +365,4 @@ def flush_coalesce_pending(
         else:
             counters.rows_coalesce_failed += 1
             counters.rows_failed += len(outcome.consumed_tokens)
+            _emit_failed_coalesce_telemetry(ctx, outcome.consumed_tokens)

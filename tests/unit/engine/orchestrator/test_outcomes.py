@@ -20,6 +20,7 @@ from elspeth.engine.orchestrator.outcomes import (
     accumulate_row_outcomes,
     flush_coalesce_pending,
     handle_coalesce_timeouts,
+    reconcile_sink_write_diversions,
 )
 from elspeth.engine.orchestrator.types import ExecutionCounters
 from elspeth.testing import make_row, make_token_info
@@ -559,6 +560,44 @@ class TestAccumulateRowOutcomesMixed:
         assert counters.rows_failed == 0
 
 
+class TestReconcileSinkWriteDiversions:
+    """Tests for post-sink durable counter reconciliation."""
+
+    def test_routed_diversion_decrements_routed_counters(self) -> None:
+        counters = _make_counters()
+        counters.rows_routed = 1
+        counters.routed_destinations["risk_sink"] = 1
+
+        reconcile_sink_write_diversions(
+            counters,
+            sink_name="risk_sink",
+            pending_outcome=PendingOutcome(RowOutcome.ROUTED),
+            diversion_count=1,
+        )
+
+        assert counters.rows_routed == 0
+        assert counters.routed_destinations == {}
+
+    def test_terminal_coalesced_diversion_preserves_coalesced_but_not_success(self) -> None:
+        counters = _make_counters()
+        pending = _make_pending()
+        accumulate_row_outcomes(
+            [_make_result(RowOutcome.COALESCED, sink_name="output")],
+            counters,
+            pending,
+        )
+
+        reconcile_sink_write_diversions(
+            counters,
+            sink_name="output",
+            pending_outcome=PendingOutcome(RowOutcome.COMPLETED),
+            diversion_count=1,
+        )
+
+        assert counters.rows_coalesced == 1
+        assert counters.rows_succeeded == 0
+
+
 # =============================================================================
 # handle_coalesce_timeouts
 # =============================================================================
@@ -712,6 +751,40 @@ class TestHandleCoalesceTimeouts:
         assert counters.rows_failed == 3  # one per consumed token
         assert counters.rows_coalesced == 0
 
+    def test_failure_emits_token_completed_telemetry_for_each_consumed_token(self) -> None:
+        """Timeout-driven coalesce failures must surface in telemetry once per token."""
+        tokens = (
+            make_token_info(row_id="row-1", token_id="token-1"),
+            make_token_info(row_id="row-2", token_id="token-2"),
+        )
+        outcome = Mock()
+        outcome.merged_token = None
+        outcome.failure_reason = "quorum_not_met"
+        outcome.consumed_tokens = tokens
+
+        executor, processor, counters, pending, node_map = self._setup(
+            timed_out_outcomes=[outcome],
+        )
+
+        ctx = Mock()
+        ctx.run_id = "run-1"
+        ctx.telemetry_emit = Mock()
+
+        handle_coalesce_timeouts(
+            coalesce_executor=executor,
+            coalesce_node_map=node_map,
+            processor=processor,
+            ctx=ctx,
+            counters=counters,
+            pending_tokens=pending,
+        )
+
+        assert ctx.telemetry_emit.call_count == 2
+        emitted = [call.args[0] for call in ctx.telemetry_emit.call_args_list]
+        assert [event.token_id for event in emitted] == ["token-1", "token-2"]
+        assert all(event.run_id == "run-1" for event in emitted)
+        assert all(event.outcome == RowOutcome.FAILED for event in emitted)
+
 
 # =============================================================================
 # flush_coalesce_pending
@@ -831,6 +904,42 @@ class TestFlushCoalescePending:
 
         assert counters.rows_coalesce_failed == 1
         assert counters.rows_failed == 2
+
+    def test_failure_emits_token_completed_telemetry_for_each_consumed_token(self) -> None:
+        """Flush-driven coalesce failures must surface in telemetry once per token."""
+        tokens = (
+            make_token_info(row_id="row-1", token_id="token-1"),
+            make_token_info(row_id="row-2", token_id="token-2"),
+        )
+        outcome = Mock()
+        outcome.merged_token = None
+        outcome.failure_reason = "incomplete_branches"
+        outcome.coalesce_name = None
+        outcome.consumed_tokens = tokens
+
+        coalesce_executor = Mock()
+        coalesce_executor.flush_pending.return_value = [outcome]
+
+        counters = _make_counters()
+        pending = _make_pending()
+        ctx = Mock()
+        ctx.run_id = "run-1"
+        ctx.telemetry_emit = Mock()
+
+        flush_coalesce_pending(
+            coalesce_executor=coalesce_executor,
+            coalesce_node_map={},
+            processor=Mock(),
+            ctx=ctx,
+            counters=counters,
+            pending_tokens=pending,
+        )
+
+        assert ctx.telemetry_emit.call_count == 2
+        emitted = [call.args[0] for call in ctx.telemetry_emit.call_args_list]
+        assert [event.token_id for event in emitted] == ["token-1", "token-2"]
+        assert all(event.run_id == "run-1" for event in emitted)
+        assert all(event.outcome == RowOutcome.FAILED for event in emitted)
 
     def test_empty_flush_is_noop(self) -> None:
         """No pending coalesces means nothing happens."""

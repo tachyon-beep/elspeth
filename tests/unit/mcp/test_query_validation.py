@@ -19,7 +19,10 @@ Bug ref: docs/bugs/open/mcp/P1-2026-02-05-query-read-only-guard-allows-non-selec
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -319,3 +322,27 @@ class TestReadOnlyConnectionDefenseInDepth:
             assert count_row is not None
             assert count_row[0] == 2
         db.close()
+
+    def test_read_only_connection_marks_postgresql_transactions_read_only(self) -> None:
+        """PostgreSQL defense-in-depth must not silently fall back to a writable transaction."""
+        from elspeth.core.landscape.database import LandscapeDB
+
+        conn = Mock()
+
+        @contextmanager
+        def begin() -> object:
+            yield conn
+
+        db = LandscapeDB.__new__(LandscapeDB)
+        db.connection_string = "postgresql://user:pass@host/db"
+        db._passphrase = None
+        db._journal = None
+        db._engine = SimpleNamespace(begin=begin, dialect=SimpleNamespace(name="postgresql"))
+        db._require_existing_schema = False
+
+        with db.read_only_connection():
+            pass
+
+        assert conn.execute.call_count == 1
+        statement = conn.execute.call_args.args[0]
+        assert str(statement) == "SET TRANSACTION READ ONLY"

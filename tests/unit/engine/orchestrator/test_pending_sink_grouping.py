@@ -21,6 +21,7 @@ import pytest
 
 from elspeth.contracts import PendingOutcome, RowOutcome, TokenInfo
 from elspeth.contracts.errors import OrchestrationInvariantError
+from elspeth.engine.orchestrator.types import ExecutionCounters
 from elspeth.testing import make_token_info
 
 # =============================================================================
@@ -338,6 +339,7 @@ class TestSinkNameValidation:
                 run_id="test-run",
                 config=config,
                 ctx=ctx,
+                counters=ExecutionCounters(),
                 pending_tokens=pending_tokens,
                 sink_id_map={"output": "node-1"},
                 edge_map={},
@@ -364,6 +366,7 @@ class TestSinkNameValidation:
             run_id="test-run",
             config=config,
             ctx=ctx,
+            counters=ExecutionCounters(),
             pending_tokens=pending_tokens,
             sink_id_map={},
             edge_map={},

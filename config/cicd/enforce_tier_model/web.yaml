@@ -344,12 +344,12 @@ allow_hits:
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=01f04498dc1b0b55
+- key: web/composer/tools.py:R6:_execute_list_models:fp=359c4a136b2dcdfa
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=9bcc9edc6ca0b832
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=18971fe2b866d5af
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
@@ -386,10 +386,15 @@ allow_hits:
 # (quota is checked before os.replace, so no file mutation to roll
 # back); the rollback branch is retained as a defensive guardrail
 # for the post-replace commit-failure window only.
-- key: web/composer/tools.py:R6:_execute_update_blob:fp=461c91d2bf185b6e
+- key: web/composer/tools.py:R6:_execute_update_blob:fp=5e3282626e1755d3
   owner: web-composer
   reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk faults during post-replace divergence rollback expected; programmer bugs still propagate
   safety: Rollback failure attached as add_note() on primary_exc with blob_id and "manual reconciliation required"; primary commit exception remains the headline.  Pre-replace failures bypass the rollback branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback and test_quota_breach_returns_failure_without_touching_storage).
+  expires: null
+- key: web/composer/tools.py:R6:_execute_delete_blob:fp=3d05707f21c263bc
+  owner: web-composer
+  reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
+  safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged
   expires: null
 - key: web/execution/validation.py:R5:validate_pipeline:fp=650270c571bb9401
   owner: web-execution
@@ -523,7 +528,7 @@ allow_hits:
 # blob_id and target session_id, mirroring the convention used by
 # finalize_run_output_blobs (fp=42178d47e9e1c5e0 below).  This is
 # not a silent swallow — operators see both causes in the traceback.
-- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=4e8fb496cbcf7ab5
+- key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=a6f3d6c5c313a06c
   owner: web-blobs
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO faults expected during cleanup; programmer bugs still propagate
   safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan blob_id and target session_id; storage file unlinked best-effort; primary copy exception remains the headline
@@ -643,12 +648,12 @@ allow_hits:
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=468a7c38d57f4118
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=167813bc5b04773a
   owner: web-blobs
   reason: Quota exceeded during finalization marks blob as error instead of crashing run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=066b1b12f53af075
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=0989f39b81a966ed
   owner: web-blobs
   reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
   safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
@@ -658,7 +663,7 @@ allow_hits:
 # with no audit trail; this replacement records the secondary failure as a
 # separate RecoveryFailed[<type>] entry in BlobFinalizationResult.errors so
 # the audit record carries both the primary cause and the recovery outcome.
-- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=a8520234e0210e9e
+- key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=3af5b664750c7418
   owner: web-blobs
   reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE — DB/IO faults expected; programmer bugs still propagate
   safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not a silent swallow
@@ -859,28 +864,6 @@ allow_hits:
     PermissionError/IsADirectoryError now propagate (operator misconfiguration).
   safety: Returns empty string for absent file only (not a fabricated default). Core skill always loads
     (crash on missing). Only the deployment overlay is optional. Size guard rejects oversized files.
-  expires: null
-# Group E: blob service Tier 1 read guards — isinstance checks on COALESCE(SUM()) output.
-# Fingerprints refreshed 2026-04-18 (CR-1 review remediation): the
-# previous ``assert isinstance(...)`` guards were converted to
-# ``if not isinstance(...): raise AuditIntegrityError(...)`` so they
-# survive ``python -O`` execution (asserts are stripped under -O,
-# silently removing Tier-1 audit integrity checks).  Guarded code
-# semantics are unchanged — still crash-loud on anomaly.
-- key: web/blobs/service.py:R5:BlobServiceImpl:create_blob:_sync:fp=2fe6cd34f78082ff
-  owner: web-blobs
-  reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
-  safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
-  expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:copy_blobs_for_fork:_check_quota:fp=a2743a0ee6136046
-  owner: web-blobs
-  reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
-  safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
-  expires: null
-- key: web/blobs/service.py:R5:BlobServiceImpl:_finalize_blob_sync:fp=b49d66dbd3c7d6cd
-  owner: web-blobs
-  reason: Tier 1 read guard — COALESCE(SUM()) must return int; raises AuditIntegrityError on anomaly instead of silent coercion
-  safety: Explicit raise crashes immediately with diagnostic message; survives ``python -O``
   expires: null
 # Group E: redact_source_storage_path — polymorphic dict input
 # Called with full to_dict() output (has "source") AND component-specific dicts

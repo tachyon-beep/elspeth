@@ -180,6 +180,8 @@ class HTTPCallRequest:
     * **Standard** (``resolved_ip`` is None): includes json/params by method.
     * **SSRF-safe** (``resolved_ip`` set, no hop): includes resolved_ip.
     * **Redirect hop** (``hop_number`` set): includes hop tracking fields.
+      Successful hops include ``resolved_ip``; blocked pre-validation hops
+      record ``redirect_from`` without fabricating a resolved IP.
     * **Audit-only metadata** (``audit_metadata`` set): includes request-linked
       provenance that was not sent over the wire.
     """
@@ -196,8 +198,8 @@ class HTTPCallRequest:
 
     def __post_init__(self) -> None:
         freeze_fields(self, "headers", "json", "params", "audit_metadata")
-        if self.hop_number is not None and self.resolved_ip is None:
-            msg = "hop_number requires resolved_ip (redirect hops are always SSRF-safe)"
+        if self.hop_number is not None and self.resolved_ip is None and self.redirect_from is None:
+            msg = "hop_number without resolved_ip requires redirect_from for blocked redirect attempts"
             raise ValueError(msg)
         if self.redirect_from is not None and self.hop_number is None:
             msg = "redirect_from requires hop_number"

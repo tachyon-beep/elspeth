@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 from uuid import uuid4
 
 from sqlalchemy import Engine, delete, func, select, update
@@ -26,7 +26,7 @@ from sqlalchemy import Engine, delete, func, select, update
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.web.blobs.protocol import BlobIntegrityError
-from elspeth.web.blobs.service import _source_references_blob, content_hash, sanitize_filename
+from elspeth.web.blobs.service import _guard_blob_row_literals, _source_references_blob, content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
 from elspeth.web.composer.protocol import ToolArgumentError
 from elspeth.web.composer.redaction import redact_source_storage_path
@@ -1114,7 +1114,39 @@ _MIME_TO_SOURCE: dict[str, tuple[str, dict[str, str]]] = {
 }
 
 
-def _sync_get_blob(engine: Engine, blob_id: str, session_id: str | None = None) -> dict[str, Any] | None:
+class BlobToolRecord(TypedDict):
+    """Closed dict shape returned by composer blob discovery helpers."""
+
+    id: str
+    session_id: str
+    filename: str
+    mime_type: str
+    size_bytes: int
+    content_hash: str | None
+    storage_path: str
+    created_by: str
+    source_description: str | None
+    status: str
+
+
+def _blob_row_to_tool_dict(row: Any) -> BlobToolRecord:
+    """Serialize a validated blobs row to the tool-layer dict shape."""
+    _guard_blob_row_literals(row)
+    return {
+        "id": row.id,
+        "session_id": row.session_id,
+        "filename": row.filename,
+        "mime_type": row.mime_type,
+        "size_bytes": row.size_bytes,
+        "content_hash": row.content_hash,
+        "storage_path": row.storage_path,
+        "created_by": row.created_by,
+        "source_description": row.source_description,
+        "status": row.status,
+    }
+
+
+def _sync_get_blob(engine: Engine, blob_id: str, session_id: str | None = None) -> BlobToolRecord | None:
     """Synchronous blob lookup for use in the tool executor thread."""
     with engine.connect() as conn:
         query = select(blobs_table).where(blobs_table.c.id == blob_id)
@@ -1123,18 +1155,7 @@ def _sync_get_blob(engine: Engine, blob_id: str, session_id: str | None = None) 
         row = conn.execute(query).first()
         if row is None:
             return None
-        return {
-            "id": row.id,
-            "session_id": row.session_id,
-            "filename": row.filename,
-            "mime_type": row.mime_type,
-            "size_bytes": row.size_bytes,
-            "content_hash": row.content_hash,
-            "storage_path": row.storage_path,
-            "created_by": row.created_by,
-            "source_description": row.source_description,
-            "status": row.status,
-        }
+        return _blob_row_to_tool_dict(row)
 
 
 def _sync_list_blobs(engine: Engine, session_id: str) -> list[dict[str, Any]]:
@@ -1145,14 +1166,14 @@ def _sync_list_blobs(engine: Engine, session_id: str) -> list[dict[str, Any]]:
         ).fetchall()
         return [
             {
-                "id": row.id,
-                "filename": row.filename,
-                "mime_type": row.mime_type,
-                "size_bytes": row.size_bytes,
-                "created_by": row.created_by,
-                "status": row.status,
+                "id": blob["id"],
+                "filename": blob["filename"],
+                "mime_type": blob["mime_type"],
+                "size_bytes": blob["size_bytes"],
+                "created_by": blob["created_by"],
+                "status": blob["status"],
             }
-            for row in rows
+            for blob in (_blob_row_to_tool_dict(row) for row in rows)
         ]
 
 
@@ -1476,17 +1497,39 @@ def _execute_upsert_edge(
     # must match the output name for the pipeline to work at runtime.
     output_names = {o.name for o in new_state.outputs}
     if to_node in output_names:
-        if from_node == "source" and edge_type == "on_success":
+        if from_node == "source":
+            if edge_type != "on_success":
+                return _failure_result(state, "Source sink edges must use 'on_success'.")
             if new_state.source is not None and new_state.source.on_success != to_node:
                 new_source = replace(new_state.source, on_success=to_node)
                 new_state = new_state.with_source(new_source)
         else:
             node = next((n for n in new_state.nodes if n.id == from_node), None)
             if node is not None:
-                if edge_type == "on_success" and node.on_success != to_node:
-                    new_state = new_state.with_node(replace(node, on_success=to_node))
-                elif edge_type == "on_error" and node.on_error != to_node:
-                    new_state = new_state.with_node(replace(node, on_error=to_node))
+                if edge_type == "on_success":
+                    if node.node_type == "gate":
+                        return _failure_result(state, f"Gate '{from_node}' sink edges must use route_true, route_false, or fork.")
+                    if node.on_success != to_node:
+                        new_state = new_state.with_node(replace(node, on_success=to_node))
+                elif edge_type == "on_error":
+                    if node.node_type == "gate":
+                        return _failure_result(state, f"Gate '{from_node}' sink edges must use route_true, route_false, or fork.")
+                    if node.on_error != to_node:
+                        new_state = new_state.with_node(replace(node, on_error=to_node))
+                elif edge_type in ("route_true", "route_false"):
+                    if node.node_type != "gate":
+                        return _failure_result(state, f"Only gates can use '{edge_type}' edges to sinks.")
+                    route_key = "true" if edge_type == "route_true" else "false"
+                    routes = dict(node.routes or {})
+                    if routes.get(route_key) != to_node:
+                        routes[route_key] = to_node
+                        new_state = new_state.with_node(replace(node, routes=routes))
+                elif edge_type == "fork":
+                    if node.node_type != "gate":
+                        return _failure_result(state, "Only gates can use 'fork' edges to sinks.")
+                    fork_targets = tuple(dict.fromkeys((*(node.fork_to or ()), to_node)))
+                    if node.fork_to != fork_targets:
+                        new_state = new_state.with_node(replace(node, fork_to=fork_targets))
 
     return _mutation_result(new_state, (from_node, to_node))
 
@@ -2271,60 +2314,84 @@ def _execute_delete_blob(
         return _failure_result(state, f"Blob '{blob_id}' not found.")
 
     storage_path = Path(blob["storage_path"])
+    tombstone_path: Path | None = None
 
-    # Single transaction: guard + unlink + delete (matches BlobServiceImpl.delete_blob)
-    with session_engine.begin() as conn:
-        # Active-run guard (two checks):
-        #
-        # 1. Explicit link: blob_run_links already points at an active run.
-        active_link = conn.execute(
-            select(blob_run_links_table)
-            .join(runs_table, blob_run_links_table.c.run_id == runs_table.c.id)
-            .where(blob_run_links_table.c.blob_id == blob_id)
-            .where(runs_table.c.status.in_(["pending", "running"]))
-        ).first()
-        if active_link is not None:
-            return _failure_result(
-                state,
-                f"Blob '{blob_id}' is linked to active run '{active_link.run_id}' and cannot be deleted.",
-            )
+    try:
+        with session_engine.begin() as conn:
+            # Active-run guard (two checks):
+            #
+            # 1. Explicit link: blob_run_links already points at an active run.
+            active_link = conn.execute(
+                select(blob_run_links_table)
+                .join(runs_table, blob_run_links_table.c.run_id == runs_table.c.id)
+                .where(blob_run_links_table.c.blob_id == blob_id)
+                .where(runs_table.c.status.in_(["pending", "running"]))
+            ).first()
+            if active_link is not None:
+                return _failure_result(
+                    state,
+                    f"Blob '{blob_id}' is linked to active run '{active_link.run_id}' and cannot be deleted.",
+                )
 
-        # 2. Pre-link window: _execute_locked() creates the run record before
-        #    link_blob_to_run() inserts the blob_run_links row.  During that
-        #    gap the explicit-link check above sees nothing, but the backing
-        #    file is about to be needed.
-        #
-        #    Scoped to THIS blob: join runs → composition_states and check
-        #    whether the active run's source references this blob via
-        #    blob_ref OR via a path/file matching this blob's storage_path.
-        #    Runs whose source doesn't touch this blob must not block
-        #    unrelated blob deletions.
-        active_run = conn.execute(
-            select(runs_table.c.id, composition_states_table.c.source)
-            .join(
-                composition_states_table,
-                runs_table.c.state_id == composition_states_table.c.id,
-            )
-            .where(runs_table.c.session_id == session_id)
-            .where(runs_table.c.status.in_(["pending", "running"]))
-        ).first()
-        if active_run is not None and _source_references_blob(active_run.source, blob_id, blob["storage_path"]):
-            return _failure_result(
-                state,
-                f"Blob '{blob_id}' cannot be deleted while active run '{active_run.id}' references it.",
-            )
+            # 2. Pre-link window: _execute_locked() creates the run record before
+            #    link_blob_to_run() inserts the blob_run_links row.  During that
+            #    gap the explicit-link check above sees nothing, but the backing
+            #    file is about to be needed.
+            #
+            #    Scoped to THIS blob: join runs → composition_states and check
+            #    whether the active run's source references this blob via
+            #    blob_ref OR via a path/file matching this blob's storage_path.
+            #    Runs whose source doesn't touch this blob must not block
+            #    unrelated blob deletions.
+            active_run = conn.execute(
+                select(runs_table.c.id, composition_states_table.c.source)
+                .join(
+                    composition_states_table,
+                    runs_table.c.state_id == composition_states_table.c.id,
+                )
+                .where(runs_table.c.session_id == session_id)
+                .where(runs_table.c.status.in_(["pending", "running"]))
+            ).first()
+            if active_run is not None and _source_references_blob(active_run.source, blob_id, blob["storage_path"]):
+                return _failure_result(
+                    state,
+                    f"Blob '{blob_id}' cannot be deleted while active run '{active_run.id}' references it.",
+                )
 
-        # Delete backing file first — orphaned DB row is recoverable,
-        # orphaned file with no metadata is not
-        storage_path.unlink(missing_ok=True)
+            # Move the file to a tombstone path before the DB delete so a
+            # later SQL/commit failure can restore it atomically. This avoids
+            # leaving a live blobs row pointing at missing bytes.
+            if storage_path.exists():
+                tombstone_path = storage_path.with_name(f".{storage_path.name}.delete-{uuid4().hex}")
+                os.replace(storage_path, tombstone_path)
 
-        # Delete record — include session_id filter for defence in depth
-        conn.execute(
-            delete(blobs_table).where(
-                blobs_table.c.id == blob_id,
-                blobs_table.c.session_id == session_id,
+            # Delete record — include session_id filter for defence in depth
+            conn.execute(
+                delete(blobs_table).where(
+                    blobs_table.c.id == blob_id,
+                    blobs_table.c.session_id == session_id,
+                )
             )
-        )
+    except Exception as primary_exc:
+        if tombstone_path is not None and tombstone_path.exists():
+            try:
+                os.replace(tombstone_path, storage_path)
+            except OSError as rollback_exc:
+                primary_exc.add_note(
+                    f"Rollback failed: could not restore deleted blob file {storage_path} from tombstone "
+                    f"{tombstone_path} ({type(rollback_exc).__name__}: {rollback_exc}). "
+                    f"Blob row and storage may now diverge; manual reconciliation required."
+                )
+        raise
+
+    if tombstone_path is not None and tombstone_path.exists():
+        try:
+            tombstone_path.unlink()
+        except OSError as cleanup_exc:
+            raise RuntimeError(
+                f"Blob '{blob_id}' metadata was deleted but tombstone cleanup failed for {tombstone_path}: "
+                f"{type(cleanup_exc).__name__}: {cleanup_exc}"
+            ) from cleanup_exc
 
     return _discovery_result(state, {"blob_id": blob_id, "deleted": True})
 

@@ -152,26 +152,21 @@ allow_hits:
   reason: Rollback protection — catch any rollback failure so secondary exception doesn't bury original diagnostic
   safety: Logs rollback error then re-raises the original exception unchanged
   expires: null
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=1d9351405d977ee4
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_execute_request:fp=89f5749a5c05003a
   owner: architecture
   reason: httpx Client.get() method call - dispatched based on HTTP method
   safety: This is the actual external HTTP call, not a defensive dict access
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=e0d73f57c68af01a
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=bf32cd6693b31b20
   owner: architecture
   reason: httpx Client.get() method call - ephemeral client for TLS/SNI isolation
   safety: This is the actual external HTTP call with IP pinning
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:get_ssrf_safe:fp=74e5b8375db71dfe
-  owner: architecture
-  reason: HTTP response content-type header access at external system boundary
-  safety: Falls back to binary encoding if content-type absent
-  expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=09bdba46a18ce4a0
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=fbc6b3aca998f23c
   owner: architecture
   reason: httpx Client.get() method call — ephemeral client per redirect hop for TLS isolation
   safety: This is the actual external HTTP call, not a defensive dict access
-- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=69270a7a922c6561
+- key: plugins/infrastructure/clients/http.py:R1:AuditedHTTPClient:_follow_redirects_safe:fp=10ab112db646388f
   owner: architecture
   reason: HTTP redirect Location header — external system boundary, header may be absent
   safety: Missing Location header breaks redirect loop naturally
@@ -271,21 +266,61 @@ allow_hits:
   reason: HTTP response content-type header - external system boundary, header may be missing
   safety: Falls back to binary encoding if content-type absent
   expires: '2026-05-02'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_record_and_emit:fp=e80a11000f5c6b3c
+- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:_emit_telemetry_after_audit:fp=91c1cd21a0368986
   owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to HTTP processing
+  reason: Telemetry emission happens only after Landscape succeeds; broad catch keeps operational telemetry failures from corrupting the main HTTP call path once programmer bugs and Tier 1 errors have already been re-raised
+  safety: TypeError, AttributeError, KeyError, NameError, and Tier 1 errors propagate before this handler; remaining exceptions are logged and the audited HTTP result is preserved
   expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=e737a44a219111af
+- key: plugins/infrastructure/clients/llm.py:R1:_extract_usage_from_provider_response:fp=153b600f7b824428
   owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-06'
-- key: plugins/infrastructure/clients/http.py:R4:AuditedHTTPClient:get_ssrf_safe:fp=42e95ca4630f5311
+  reason: Provider usage mappings are Tier 3 data and may omit prompt/completion/total token fields; dict.get preserves honest absence before TokenUsage.from_dict normalizes the payload
+  safety: Missing keys become None in TokenUsage.from_dict; no fabricated counts are introduced
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R1:_extract_usage_from_provider_response:fp=54f676db05cacf08
   owner: architecture
-  reason: Telemetry emission failure - must not crash main request flow
-  safety: Logged and continues - telemetry is non-critical to HTTP processing
-  expires: '2026-05-06'
+  reason: Provider usage mappings are Tier 3 data and may omit prompt/completion/total token fields; dict.get preserves honest absence before TokenUsage.from_dict normalizes the payload
+  safety: Missing keys become None in TokenUsage.from_dict; no fabricated counts are introduced
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R1:_extract_usage_from_provider_response:fp=3ce6385129d45fcc
+  owner: architecture
+  reason: Provider usage mappings are Tier 3 data and may omit prompt/completion/total token fields; dict.get preserves honest absence before TokenUsage.from_dict normalizes the payload
+  safety: Missing keys become None in TokenUsage.from_dict; no fabricated counts are introduced
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R2:_extract_usage_from_provider_response:fp=92c580e9594a61bd
+  owner: architecture
+  reason: Provider SDK usage objects vary by version and may omit prompt/completion/total token attributes; getattr preserves honest absence before TokenUsage.from_dict performs the single normalization step
+  safety: Missing attributes become None in TokenUsage.from_dict; no fabricated counts are introduced
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R2:_extract_usage_from_provider_response:fp=f8ac3c8b6b9c5f85
+  owner: architecture
+  reason: Provider SDK usage objects vary by version and may omit prompt/completion/total token attributes; getattr preserves honest absence before TokenUsage.from_dict performs the single normalization step
+  safety: Missing attributes become None in TokenUsage.from_dict; no fabricated counts are introduced
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R2:_extract_usage_from_provider_response:fp=d741dbbe7cf1857f
+  owner: architecture
+  reason: Provider SDK usage objects vary by version and may omit prompt/completion/total token attributes; getattr preserves honest absence before TokenUsage.from_dict performs the single normalization step
+  safety: Missing attributes become None in TokenUsage.from_dict; no fabricated counts are introduced
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=52b9845ad6995c97
+  owner: architecture
+  reason: Telemetry emission happens only after Landscape succeeds; broad catch keeps operational telemetry failures from corrupting the audited LLM error path once programmer bugs and Tier 1 errors have already been re-raised
+  safety: TypeError, AttributeError, KeyError, NameError, and Tier 1 errors propagate before this handler; remaining exceptions are logged and the audited LLM result is preserved
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=1d9927748b7579fb
+  owner: architecture
+  reason: Telemetry emission happens only after Landscape succeeds; broad catch keeps operational telemetry failures from corrupting the audited LLM error path once programmer bugs and Tier 1 errors have already been re-raised
+  safety: TypeError, AttributeError, KeyError, NameError, and Tier 1 errors propagate before this handler; remaining exceptions are logged and the audited LLM result is preserved
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=dbcb564d7f24962b
+  owner: architecture
+  reason: Telemetry emission happens only after Landscape succeeds; broad catch keeps operational telemetry failures from corrupting the audited LLM error path once programmer bugs and Tier 1 errors have already been re-raised
+  safety: TypeError, AttributeError, KeyError, NameError, and Tier 1 errors propagate before this handler; remaining exceptions are logged and the audited LLM result is preserved
+  expires: null
+- key: plugins/infrastructure/clients/llm.py:R4:AuditedLLMClient:chat_completion:fp=b5f64a7d87e28337
+  owner: architecture
+  reason: Telemetry emission happens only after Landscape succeeds; broad catch keeps operational telemetry failures from corrupting the audited LLM success path once programmer bugs and Tier 1 errors have already been re-raised
+  safety: TypeError, AttributeError, KeyError, NameError, and Tier 1 errors propagate before this handler; remaining exceptions are logged and the audited LLM result is preserved
+  expires: null
 - key: plugins/sinks/azure_blob_sink.py:R5:AzureBlobSinkConfig:headers_mapping:fp=62d056151ce64838
   owner: refactor
   reason: isinstance(dict) check for config field type discrimination — same pattern as SinkPathConfig.headers_mapping
@@ -305,6 +340,16 @@ allow_hits:
   owner: feature
   reason: Offensive isinstance(str) guard on Tier 2 pipeline data — crashes immediately with TypeError if upstream plugin sends non-string value to query_field
   safety: Raises TypeError (crash), does not suppress or coerce; message identifies the upstream plugin bug
+  expires: null
+- key: plugins/transforms/rag/transform.py:R2:RAGRetrievalTransform:_configured_collection_name:fp=887390c301de47c9
+  owner: architecture
+  reason: Provider config comes from a validated provider-specific model union; getattr is limited to the two mutually exclusive naming conventions (collection vs index) needed for readiness auditing
+  safety: Missing both attributes raises FrameworkBugError immediately; no fallback value is fabricated
+  expires: null
+- key: plugins/transforms/rag/transform.py:R5:RAGRetrievalTransform:_configured_collection_name:fp=f3428dc23e118267
+  owner: architecture
+  reason: Provider config comes from a validated provider-specific model union; isinstance(value, str) confirms the selected readiness-audit identifier is a non-empty string before use
+  safety: Non-string or empty values do not pass; the helper raises FrameworkBugError rather than fabricating a collection/index name
   expires: null
 - key: plugins/transforms/rag/config.py:R6:_get_providers:fp=3371a100de2c9052
   owner: feature

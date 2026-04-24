@@ -454,7 +454,7 @@ class TestHTTPCallRequest:
             obj.method = "POST"  # type: ignore[misc]
 
     def test_hop_number_without_resolved_ip_raises(self) -> None:
-        with pytest.raises(ValueError, match="hop_number requires resolved_ip"):
+        with pytest.raises(ValueError, match="hop_number without resolved_ip requires redirect_from"):
             HTTPCallRequest(
                 method="GET",
                 url="https://example.com",
@@ -482,6 +482,18 @@ class TestHTTPCallRequest:
             redirect_from="https://old.example.com",
         )
         assert obj.hop_number == 1
+
+    def test_blocked_redirect_attempt_allows_hop_tracking_without_resolved_ip(self) -> None:
+        """Blocked redirects still need hop lineage even when SSRF resolution never completes."""
+        obj = HTTPCallRequest(
+            method="GET",
+            url="http://169.254.169.254/latest/meta-data/",
+            headers={"Host": "169.254.169.254"},
+            hop_number=1,
+            redirect_from="https://example.com/start",
+        )
+        assert obj.hop_number == 1
+        assert obj.resolved_ip is None
 
 
 # ---------------------------------------------------------------------------

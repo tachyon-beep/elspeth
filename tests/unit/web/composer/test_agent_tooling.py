@@ -16,6 +16,7 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy import select
 
+from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import (
@@ -887,7 +888,7 @@ class TestSetSourceFromBlob:
         assert result.success is False
 
     def test_unsupported_mime_type(self, blob_env: dict[str, Any]) -> None:
-        """Manually insert a blob with an unsupported MIME type."""
+        """A manually corrupted blob row trips the Tier 1 MIME guard."""
         from datetime import UTC, datetime
 
         state = _empty_state()
@@ -912,16 +913,15 @@ class TestSetSourceFromBlob:
                     status="ready",
                 )
             )
-        result = execute_tool(
-            "set_source_from_blob",
-            {"blob_id": "exotic-blob", "on_success": "step1"},
-            state,
-            catalog,
-            session_engine=blob_env["engine"],
-            session_id=blob_env["session_id"],
-        )
-        assert result.success is False
-        assert "Cannot infer source plugin" in result.data["error"]
+        with pytest.raises(AuditIntegrityError, match=r"blobs\.mime_type is 'application/x-parquet'"):
+            execute_tool(
+                "set_source_from_blob",
+                {"blob_id": "exotic-blob", "on_success": "step1"},
+                state,
+                catalog,
+                session_engine=blob_env["engine"],
+                session_id=blob_env["session_id"],
+            )
 
 
 class TestCreateBlobToSetSourceEndToEnd:

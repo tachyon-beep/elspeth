@@ -1,6 +1,7 @@
 # tests/plugins/clients/test_audited_llm_client.py
 """Tests for AuditedLLMClient."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
 import pytest
@@ -749,6 +750,176 @@ class TestAuditedLLMClient:
         assert call_kwargs["status"] == CallStatus.SUCCESS
         assert call_kwargs["response_data"].to_dict()["content"] == "Hello, I'm working!"
         assert call_kwargs["response_data"].to_dict()["usage"] == {}
+
+    def test_success_path_preserves_aggregate_only_usage(self) -> None:
+        """Aggregate-only provider usage must not crash before audit recording."""
+        execution = self._create_mock_execution()
+
+        message = Mock()
+        message.content = "Hello, aggregate usage!"
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "stop"
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = SimpleNamespace(total_tokens=15)
+        response.model_dump = Mock(return_value={"id": "resp_total_only", "usage": {"total_tokens": 15}})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            execution=execution,
+            state_id="state_aggregate",
+            run_id="run_aggregate",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        result = client.chat_completion(
+            model="gpt-4",
+            messages=[{"role": "user", "content": "Hello"}],
+        )
+
+        assert result.content == "Hello, aggregate usage!"
+        assert result.usage.prompt_tokens is None
+        assert result.usage.completion_tokens is None
+        assert result.usage.total_tokens == 15
+
+        call_kwargs = execution.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.SUCCESS
+        assert call_kwargs["response_data"].to_dict()["usage"] == {"total_tokens": 15}
+
+    def test_empty_choices_preserves_aggregate_only_usage_in_error_record(self) -> None:
+        """Malformed responses with total-only usage must still record the call."""
+        execution = self._create_mock_execution()
+
+        response = Mock()
+        response.choices = []
+        response.model = "gpt-4"
+        response.usage = SimpleNamespace(total_tokens=15)
+        response.model_dump = Mock(return_value={"id": "resp_empty_total_only", "usage": {"total_tokens": 15}})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            execution=execution,
+            state_id="state_empty_choices",
+            run_id="run_empty_choices",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(LLMClientError, match="empty choices"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        call_kwargs = execution.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["response_data"].to_dict()["usage"] == {"total_tokens": 15}
+
+    def test_invalid_provider_model_records_error_with_raw_response(self) -> None:
+        """Missing provider model must be rejected before success is recorded."""
+        execution = self._create_mock_execution()
+
+        message = Mock()
+        message.content = "Hello!"
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "stop"
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = None
+        response.usage = usage
+        response.model_dump = Mock(return_value={"id": "resp_bad_model", "model": None})
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        emitted_events: list[ExternalCallCompleted] = []
+        client = AuditedLLMClient(
+            execution=execution,
+            state_id="state_bad_model",
+            run_id="run_bad_model",
+            telemetry_emit=lambda event: emitted_events.append(event),
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(LLMClientError, match="model"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        call_kwargs = execution.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["error"].type == "MalformedResponseError"
+        assert "model" in call_kwargs["error"].message.lower()
+        assert call_kwargs["response_data"].to_dict()["model"] is None
+
+        assert len(emitted_events) == 1
+        assert emitted_events[0].status == CallStatus.ERROR
+        assert emitted_events[0].response_payload is not None
+
+    def test_non_string_content_records_raw_response_payload(self) -> None:
+        """Non-string content must preserve the provider payload for audit."""
+        execution = self._create_mock_execution()
+
+        message = Mock()
+        message.content = ["part1", "part2"]
+
+        choice = Mock()
+        choice.message = message
+        choice.finish_reason = "stop"
+
+        usage = Mock()
+        usage.prompt_tokens = 10
+        usage.completion_tokens = 5
+
+        raw_response = {
+            "id": "resp_non_string_content",
+            "choices": [{"message": {"content": ["part1", "part2"]}, "finish_reason": "stop"}],
+        }
+
+        response = Mock()
+        response.choices = [choice]
+        response.model = "gpt-4"
+        response.usage = usage
+        response.model_dump = Mock(return_value=raw_response)
+
+        openai_client = MagicMock()
+        openai_client.chat.completions.create.return_value = response
+
+        client = AuditedLLMClient(
+            execution=execution,
+            state_id="state_non_string_content",
+            run_id="run_non_string_content",
+            telemetry_emit=lambda event: None,
+            underlying_client=openai_client,
+        )
+
+        with pytest.raises(LLMClientError, match="expected str"):
+            client.chat_completion(
+                model="gpt-4",
+                messages=[{"role": "user", "content": "Hello"}],
+            )
+
+        call_kwargs = execution.record_call.call_args[1]
+        assert call_kwargs["status"] == CallStatus.ERROR
+        assert call_kwargs["response_data"] is not None
+        assert call_kwargs["response_data"].to_dict()["choices"][0]["message"]["content"] == ["part1", "part2"]
 
 
 class TestBug4_6_SuccessPathOutsideTryExcept:

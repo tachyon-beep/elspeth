@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from unittest.mock import Mock, patch
 
+import httpx
 import pytest
 
 from elspeth.contracts import CallStatus, CallType
@@ -32,6 +33,11 @@ def _create_mock_http_response() -> Mock:
     response.content = b"<html><body>Test content</body></html>"
     response.text = "<html><body>Test content</body></html>"
     response.headers = {"content-type": "text/html"}
+    # WebScrapeTransform records the IP-pinned destination from the final
+    # SSRF-safe request. Contract fixtures must therefore emulate the
+    # real AuditedHTTPClient behavior rather than leaving request.url.host
+    # as an untyped Mock.
+    response.request = httpx.Request("GET", "https://93.184.216.34/contract-test")
     response.raise_for_status = Mock()
     return response
 

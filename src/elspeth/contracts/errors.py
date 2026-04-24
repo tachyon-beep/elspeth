@@ -445,6 +445,8 @@ class TransformErrorReason(TypedDict):
         provider: Retrieval provider name (e.g., "azure_search", "chroma")
         cause: Sub-cause within an error category (e.g., "null_value", "empty_query")
         pattern: Regex pattern string (for no_regex_match errors)
+        skipped_count: Number of candidate hits rejected before final output
+        skipped_reasons: Structured reasons for candidate hits rejected before final output
 
     Rate limiting/timeout context:
         elapsed_seconds: Time elapsed before timeout
@@ -552,6 +554,8 @@ class TransformErrorReason(TypedDict):
     provider: NotRequired[str]  # Retrieval provider name (e.g., "azure_search", "chroma")
     cause: NotRequired[str]  # Sub-cause within error category (e.g., "null_value", "empty_query")
     pattern: NotRequired[str]  # Regex pattern string (for no_regex_match errors)
+    skipped_count: NotRequired[int]  # Candidate hits rejected before final output
+    skipped_reasons: NotRequired[list[dict[str, Any]]]  # Structured reasons for rejected candidate hits
 
     # Content filtering context
     matched_pattern: NotRequired[str]

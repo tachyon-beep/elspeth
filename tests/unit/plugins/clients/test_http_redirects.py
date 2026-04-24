@@ -458,3 +458,41 @@ class TestBug4_7_FailedHopRecordsAuditTrail:
         assert "Connection refused" in call_kwargs["error"].message
         assert isinstance(call_kwargs["latency_ms"], float)
         assert call_kwargs["latency_ms"] >= 0
+
+
+class TestRedirectValidationFailuresPreserveEvidence:
+    """Blocked redirect validation must retain both hop and triggering response evidence."""
+
+    @patch("elspeth.plugins.infrastructure.clients.http.validate_url_for_ssrf")
+    def test_blocked_redirect_records_hop_error_and_triggering_3xx_response(self, mock_validate, http_client):
+        """Redirect validation failures must preserve both redirect target and 3xx response."""
+        from elspeth.core.security.web import SSRFBlockedError
+
+        redirect_url = "http://169.254.169.254/latest/meta-data/"
+        initial_request = _make_ssrf_request("http://example.com/start")
+        redirect_response = httpx.Response(
+            301,
+            headers={"location": redirect_url},
+            request=httpx.Request("GET", "http://93.184.216.34:80/start"),
+        )
+
+        mock_validate.side_effect = SSRFBlockedError("blocked redirect")
+        http_client._ephemeral_mock.get.return_value = redirect_response
+
+        with pytest.raises(SSRFBlockedError, match="blocked redirect"):
+            http_client.get_ssrf_safe(initial_request, follow_redirects=True)
+
+        calls = [call.kwargs for call in http_client._execution.record_call.call_args_list]
+        assert len(calls) == 2
+
+        initial_call = next(call for call in calls if call["call_type"] == CallType.HTTP)
+        redirect_call = next(call for call in calls if call["call_type"] == CallType.HTTP_REDIRECT)
+
+        assert initial_call["status"] == CallStatus.ERROR
+        assert initial_call["response_data"].to_dict()["status_code"] == 301
+        assert initial_call["response_data"].to_dict()["headers"]["location"] == redirect_url
+
+        assert redirect_call["status"] == CallStatus.ERROR
+        assert redirect_call["request_data"].to_dict()["url"] == redirect_url
+        assert redirect_call["request_data"].to_dict()["redirect_from"] == "http://example.com/start"
+        assert redirect_call["error"].type == "SSRFBlockedError"

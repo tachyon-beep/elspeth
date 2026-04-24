@@ -122,6 +122,7 @@ from elspeth.engine.orchestrator.outcomes import (
     accumulate_row_outcomes,
     flush_coalesce_pending,
     handle_coalesce_timeouts,
+    reconcile_sink_write_diversions,
 )
 from elspeth.engine.orchestrator.types import (
     AggNodeEntry,
@@ -705,6 +706,7 @@ class Orchestrator:
         run_id: str,
         config: PipelineConfig,
         ctx: PluginContext,
+        counters: ExecutionCounters,
         pending_tokens: PendingTokenMap,
         sink_id_map: dict[SinkName, NodeID],
         edge_map: Mapping[tuple[NodeID, str], str],
@@ -804,6 +806,12 @@ class Orchestrator:
                     failsink_name=failsink_config_name,
                     failsink_edge_id=failsink_edge_id,
                     on_token_written=on_token_written,
+                )
+                reconcile_sink_write_diversions(
+                    counters=counters,
+                    sink_name=sink_name,
+                    pending_outcome=pending_outcome,
+                    diversion_count=diversion_count,
                 )
                 total_diversions += diversion_count
 
@@ -1991,6 +1999,7 @@ class Orchestrator:
             run_id=run_id,
             config=loop_ctx.config,
             ctx=loop_ctx.ctx,
+            counters=loop_ctx.counters,
             pending_tokens=loop_ctx.pending_tokens,
             sink_id_map=dict(sink_id_map),
             edge_map=edge_map,
