@@ -123,6 +123,7 @@ def _make_flush_transform(*, passes_through_input: bool = True, can_drop_rows: b
     transform.passes_through_input = passes_through_input
     transform.can_drop_rows = can_drop_rows
     transform._output_schema_config = None
+    transform.effective_static_contract.return_value = frozenset()
     return transform
 
 

@@ -141,12 +141,11 @@ def _dispatch(
             violations.append(exc)
         except PluginContractViolation as exc:
             # PassThroughContractViolation inherits PluginContractViolation
-            # (predates the ADR-010 DCV hierarchy — ADR-010 §Consequences
-            # line 96-97 preserves it as a dedicated subclass for triage SQL
-            # continuity). Under audit-complete we must catch it here or it
-            # would short-circuit the loop and shadow every later contract
-            # on the same row. The exception carries its own 9-key
-            # to_audit_dict so the aggregate can surface it without
+            # (predates the ADR-010 DCV hierarchy — see ADR-010
+            # §Consequences → §Neutral). Under audit-complete we must catch
+            # it here or it would short-circuit the loop and shadow every
+            # later contract on the same row. The exception carries its own
+            # 9-key to_audit_dict so the aggregate can surface it without
             # _attach_contract_name.
             violations.append(exc)
 

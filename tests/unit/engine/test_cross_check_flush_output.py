@@ -63,6 +63,9 @@ def _make_flush_transform(
     transform.passes_through_input = passes_through_input
     transform.can_drop_rows = can_drop_rows
     transform._output_schema_config = output_schema_config
+    transform.effective_static_contract.return_value = (
+        output_schema_config.get_effective_guaranteed_fields() if output_schema_config is not None else frozenset()
+    )
     return transform
 
 

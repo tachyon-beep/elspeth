@@ -7,6 +7,14 @@ from collections.abc import Iterator
 import pytest
 
 import elspeth.engine.executors.declared_output_fields as declared_output_fields_module
+from elspeth.contracts.declaration_contracts import (
+    DeclarationContract,
+    DispatchSite,
+    ExampleBundle,
+    PostEmissionInputs,
+    PostEmissionOutputs,
+    implements_dispatch_site,
+)
 from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
 from elspeth.engine.executors.pass_through import PassThroughDeclarationContract
@@ -189,3 +197,42 @@ def test_manifest_records_tier_1_implementation_hash(_isolate_runtime_val_regist
     assert baseline_entry["class_module"] == mutated_entry["class_module"]
     assert baseline_entry["reason"] == mutated_entry["reason"]
     assert baseline_entry["implementation_hash"] != mutated_entry["implementation_hash"]
+
+
+def test_manifest_crashes_if_registered_contract_lacks_payload_schema(
+    _isolate_runtime_val_registries: None,
+) -> None:
+    """A corrupted registry entry must not hash ``None`` as its payload schema."""
+    import elspeth.contracts.declaration_contracts as dc
+    import elspeth.contracts.tier_registry as tr
+
+    class _NoPayloadSchemaContract(DeclarationContract):
+        name = "no_payload_schema"
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        @implements_dispatch_site("post_emission_check")
+        def post_emission_check(
+            self,
+            inputs: PostEmissionInputs,
+            outputs: PostEmissionOutputs,
+        ) -> None:
+            raise AssertionError("not reached")
+
+        @classmethod
+        def negative_example(cls) -> ExampleBundle:
+            raise NotImplementedError
+
+        @classmethod
+        def positive_example_does_not_apply(cls) -> ExampleBundle:
+            raise NotImplementedError
+
+    contract = _NoPayloadSchemaContract()
+    dc._REGISTRY.append(contract)
+    dc._REGISTRY_BY_SITE[DispatchSite.POST_EMISSION].append(contract)
+    dc._FROZEN = True
+    tr._FROZEN = True
+
+    with pytest.raises(AttributeError, match="payload_schema"):
+        build_runtime_val_manifest()

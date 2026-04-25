@@ -262,6 +262,24 @@ class BaseTransform(ABC):
             )
         self.declared_input_fields = declared_input_fields
 
+    def effective_static_contract(self) -> frozenset[str]:
+        """Return the transform's public static output guarantee surface.
+
+        Runtime declaration checks record this value in audit evidence. A
+        missing output schema config is therefore a framework bug: returning
+        an empty set would falsely state that the transform made no static
+        guarantees.
+        """
+        output_schema_config = self._output_schema_config
+        if output_schema_config is None:
+            raise FrameworkBugError(
+                f"Cannot derive effective static contract for transform {self.name!r}: "
+                "_output_schema_config is missing. Concrete transforms must "
+                "initialize their output schema config during construction "
+                "before the engine can run declaration-contract checks."
+            )
+        return output_schema_config.get_effective_guaranteed_fields()
+
     def _align_output_contract(self, contract: SchemaContract) -> SchemaContract:
         """Normalize emitted contract mode/lock state to declared output semantics.
 

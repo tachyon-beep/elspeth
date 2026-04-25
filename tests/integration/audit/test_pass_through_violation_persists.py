@@ -79,6 +79,7 @@ def _mk_transform() -> Mock:
     t.passes_through_input = True
     t.can_drop_rows = False
     t._output_schema_config = None
+    t.effective_static_contract.return_value = frozenset()
     return t
 
 

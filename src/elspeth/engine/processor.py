@@ -786,11 +786,7 @@ class RowProcessor:
                 frozenset(fc.normalized_name for fc in token.row_data.contract.fields) for token in fctx.buffered_tokens
             ]
 
-            static_contract: frozenset[str] = (
-                fctx.transform._output_schema_config.get_effective_guaranteed_fields()
-                if fctx.transform._output_schema_config is not None
-                else frozenset()
-            )
+            static_contract = fctx.transform.effective_static_contract()
 
             if fctx.settings.output_mode == OutputMode.PASSTHROUGH:
                 # 1:1 pairing — routing enforces len(emitted) == len(buffered).

@@ -288,7 +288,7 @@ def _declaration_contract_implementation_hash(contract: DeclarationContract) -> 
         cls,
         method_names=method_names,
         extra={
-            "payload_schema_hash": _payload_schema_hash(getattr(cls, "payload_schema", None)),
+            "payload_schema_hash": _payload_schema_hash(cls.payload_schema),
             "method_dependency_hashes": _iter_relevant_method_dependency_hashes(cls, method_names=method_names),
         },
     )

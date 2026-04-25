@@ -307,6 +307,15 @@ class TransformProtocol(Protocol):
     # a corresponding _output_schema_config (raises FrameworkBugError otherwise).
     _output_schema_config: SchemaConfig | None
 
+    def effective_static_contract(self) -> frozenset[str]:
+        """Return the transform's static output guarantee surface.
+
+        Runtime declaration dispatchers use this public method instead of
+        reaching into ``_output_schema_config`` directly, so missing or stale
+        output-schema declarations crash at the transform boundary.
+        """
+        ...
+
     # Error routing configuration
     # Injected by cli_helpers.py bridge from TransformSettings.on_error.
     # Always non-None at runtime (TransformSettings requires on_error).

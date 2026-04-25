@@ -243,6 +243,27 @@ def test_contract_claiming_no_dispatch_sites_rejected() -> None:
         register_declaration_contract(_NoSites())
 
 
+def test_missing_payload_schema_registration_preserves_exception_chain() -> None:
+    class _MissingPayloadSchema(DeclarationContract):
+        name = "missing_payload_schema"
+
+        def applies_to(self, plugin: object) -> bool:
+            return False
+
+        @classmethod
+        def negative_example(cls) -> ExampleBundle:
+            raise NotImplementedError
+
+        @classmethod
+        def positive_example_does_not_apply(cls) -> ExampleBundle:
+            raise NotImplementedError
+
+    with pytest.raises(TypeError, match="payload_schema") as exc_info:
+        register_declaration_contract(_MissingPayloadSchema())
+
+    assert isinstance(exc_info.value.__cause__, AttributeError)
+
+
 def test_default_dispatch_methods_raise_framework_bug() -> None:
     class _PassiveContract(DeclarationContract):
         name = "passive_contract"

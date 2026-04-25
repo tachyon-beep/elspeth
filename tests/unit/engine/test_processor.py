@@ -203,6 +203,7 @@ def _make_mock_transform(
     transform.passes_through_input = False
     transform.can_drop_rows = False
     transform._output_schema_config = None
+    transform.effective_static_contract.return_value = frozenset()
     if result is not None:
         transform.process.return_value = result
     return transform

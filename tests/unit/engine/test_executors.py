@@ -254,6 +254,7 @@ def _make_transform(
             "can_drop_rows",
             "is_batch_aware",
             "_output_schema_config",
+            "effective_static_contract",
         ]
     )
     t.name = name
@@ -268,6 +269,7 @@ def _make_transform(
     t.can_drop_rows = can_drop_rows
     t.is_batch_aware = is_batch_aware
     t._output_schema_config = None
+    t.effective_static_contract.return_value = frozenset()
     return t
 
 
@@ -5164,7 +5166,8 @@ class TestTransformExecutorBatchPath:
             is_batch_aware = False
             output_schema = _PermissiveSchema
 
-            pass
+            def effective_static_contract(self) -> frozenset[str]:
+                return frozenset()
 
         t = MagicMock(spec=_FakeBatchTransform)
         t.name = name
@@ -5181,6 +5184,7 @@ class TestTransformExecutorBatchPath:
         t.passes_through_input = False
         t.can_drop_rows = False
         t._output_schema_config = None
+        t.effective_static_contract.return_value = frozenset()
         return t
 
     # --- Mixin detection ---

@@ -278,67 +278,47 @@ allow_hits:
   reason: Decorator API boundary — isinstance(class_module, str) validates the registered exception class exposes a concrete owning module string before the allowlist checks enforce Tier-1 ownership
   safety: Raises TypeError immediately on invalid module metadata and PermissionError on disallowed module ownership; no silent fallback
   expires: null
-- key: contracts/declaration_contracts.py:R5:PostEmissionOutputs:__post_init__:fp=3cf77dfbdbc53693
+- key: contracts/declaration_contracts.py:R5:_normalise_row_tuple:fp=6cd7a87f9b40bc62
   owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization — PostEmissionOutputs is the renamed RuntimeCheckOutputs; same pattern, same safety posture."
-  safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
+  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization helper for emitted row bundles; list inputs are normalized to deep-frozen tuples and non-list/non-tuple values crash immediately."
+  safety: TypeError raised immediately on any non-list/non-tuple input; tuple members are deep-frozen before storage
   expires: null
-- key: contracts/declaration_contracts.py:R5:PostEmissionOutputs:__post_init__:fp=a0157919e1471834
+- key: contracts/declaration_contracts.py:R5:_normalise_row_tuple:fp=2be5b2edada71a02
   owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization — PostEmissionOutputs is the renamed RuntimeCheckOutputs; same pattern, same safety posture."
-  safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
+  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization helper for emitted row bundles; tuple inputs are accepted as the already-normalized immutable shape."
+  safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:BatchFlushInputs:__post_init__:fp=41c6c5e3b995b522
+- key: contracts/declaration_contracts.py:R5:BatchFlushInputs:__post_init__:fp=a2e0caa17576e635
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BatchFlushInputs.buffered_tokens — isinstance dispatch mirrors RuntimeCheckOutputs pattern; non-list/non-tuple raises TypeError (offensive guard per CLAUDE.md §Offensive Programming)."
   safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:BatchFlushInputs:__post_init__:fp=3984093c0a34ff83
+- key: contracts/declaration_contracts.py:R5:BatchFlushInputs:__post_init__:fp=4ec415cce6bbe35e
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BatchFlushInputs.buffered_tokens — isinstance dispatch mirrors RuntimeCheckOutputs pattern; non-list/non-tuple raises TypeError (offensive guard per CLAUDE.md §Offensive Programming)."
   safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:BatchFlushOutputs:__post_init__:fp=c697424ed833f908
-  owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BatchFlushOutputs.emitted_rows — identical pattern to RuntimeCheckOutputs/PostEmissionOutputs."
-  safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
-  expires: null
-- key: contracts/declaration_contracts.py:R5:BatchFlushOutputs:__post_init__:fp=2873846d2855615d
-  owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BatchFlushOutputs.emitted_rows — identical pattern to RuntimeCheckOutputs/PostEmissionOutputs."
-  safety: TypeError raised immediately on any Sequence subtype that is not list or tuple; no silent passthrough
-  expires: null
-- key: contracts/declaration_contracts.py:R5:BoundaryOutputs:__post_init__:fp=0f7b64e843e81fd8
-  owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BoundaryOutputs.rows — identical pattern to RuntimeCheckOutputs freeze guard."
-  safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
-  expires: null
-- key: contracts/declaration_contracts.py:R5:BoundaryOutputs:__post_init__:fp=dd6e63c35eb99e48
-  owner: architecture
-  reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for BoundaryOutputs.rows — identical pattern to RuntimeCheckOutputs freeze guard."
-  safety: TypeError raised immediately on any non-list/non-tuple input; no silent passthrough
-  expires: null
-- key: contracts/declaration_contracts.py:R5:ExampleBundle:__post_init__:fp=273b732926122f5d
+- key: contracts/declaration_contracts.py:R5:ExampleBundle:__post_init__:fp=ea9262fbccfdb527
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for ExampleBundle.args — list inputs are normalized to deep-frozen tuples and any non-list/non-tuple input must crash immediately."
   safety: TypeError raised immediately on any non-list/non-tuple input; tuple members are deep-frozen before storage
   expires: null
-- key: contracts/declaration_contracts.py:R5:ExampleBundle:__post_init__:fp=0d51652f783c930e
+- key: contracts/declaration_contracts.py:R5:ExampleBundle:__post_init__:fp=4f2d78378d9ca2ea
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) freeze-guard normalization for ExampleBundle.args — the tuple-only branch is an offensive invariant check, not a silent fallback."
   safety: TypeError raised immediately when args is not list or tuple; no coercion beyond the explicit list->tuple normalization
   expires: null
-- key: contracts/declaration_contracts.py:R2:_collect_contract_sites:fp=869de49b26475258
+- key: contracts/declaration_contracts.py:R2:_collect_contract_sites:fp=8d6e48bba4566067
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) getattr(candidate, _DISPATCH_SITE_MARKER_ATTR, None) probes for the @implements_dispatch_site decorator marker on contract methods. The default-None is semantic: 'this method did not declare a dispatch site'. Using direct attribute access (bare .x access) would crash on every non-decorated method walked (applies_to, negative_example, __init_subclass__, etc.), defeating the discovery pass. This is the canonical marker-discovery pattern the @implements_dispatch_site decorator contract specifies."
   safety: Invalid marker values (site_name not in _DISPATCH_SITE_VALUES) raise FrameworkBugError immediately — no silent fallthrough
   expires: null
-- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=2ae99bbacce54f24
+- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=e770539007d53958
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) nominal ABC gate — register_declaration_contract uses isinstance(contract, DeclarationContract) to enforce ADR-010 §Alternative 3 nominal-typing posture (rejects structural Protocol matching). This is a Tier-1 trust boundary check at the registry's entry point; a non-DeclarationContract passed here is a framework bug that MUST crash loudly before the registry freezes. TypeError raised with a self-diagnosing message."
   safety: TypeError raised immediately naming ADR-010 §Alternative 3 rationale
   expires: null
-- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=e7667076d692a07d
+- key: contracts/declaration_contracts.py:R5:register_declaration_contract:fp=28b565efc229de07
   owner: architecture
   reason: "ADR-010 H2 (2026-04-20) payload_schema type gate — register_declaration_contract uses isinstance(payload_schema, type) to reject non-type payload_schema values (must be a TypedDict class, not an instance or string). Tier-1 trust boundary at registry entry; caller-supplied bad shape is a framework bug that crashes before the registry freezes. Predates H2 (C2 closure); H2 preserves the same pattern."
   safety: TypeError raised immediately with diagnostic message

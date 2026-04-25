@@ -9,6 +9,7 @@ REJECTED by design — see ADR-010 §Alternative 3 for the security rationale
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -74,6 +75,17 @@ def test_subclass_cannot_bypass_abstract_check_with_reversed_base_order() -> Non
 
     class _Incomplete(RuntimeError, AuditEvidenceBase):
         pass
+
+    with pytest.raises(TypeError, match="abstract"):
+        _Incomplete("x")
+
+
+def test_dataclass_subclass_cannot_overwrite_abstract_guard() -> None:
+    """A dataclass-generated ``__init__`` must not bypass abstract enforcement."""
+
+    @dataclass
+    class _Incomplete(AuditEvidenceBase, RuntimeError):
+        message: str
 
     with pytest.raises(TypeError, match="abstract"):
         _Incomplete("x")

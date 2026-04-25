@@ -161,3 +161,48 @@ def _freeze_runtime_val_registries_before_begin_run(monkeypatch: pytest.MonkeyPa
         return original_begin_run(self, *args, **kwargs)
 
     monkeypatch.setattr(RunLifecycleRepository, "begin_run", wrapped_begin_run)
+
+
+@pytest.fixture(autouse=True)
+def _restore_runtime_val_registries_after_each_test() -> None:
+    """Restore runtime-VAL registries and fail on leaked registry membership.
+
+    Tests may freeze registries through production bootstrap paths; that flag
+    is restored without failing. Membership and reason/site-map mutations must
+    be restored by the test that made them, because leaking synthetic contracts
+    or Tier-1 classes changes every later runtime-VAL manifest.
+    """
+    import elspeth.contracts.declaration_contracts as dc
+    import elspeth.contracts.tier_registry as tr
+
+    with dc._REGISTRY_LOCK:
+        saved_dc_registry = list(dc._REGISTRY)
+        saved_dc_per_site = {site: list(lst) for site, lst in dc._REGISTRY_BY_SITE.items()}
+        saved_dc_frozen = dc._FROZEN
+
+    with tr._REGISTRY_LOCK:
+        saved_tr_registry = list(tr._REGISTRY)
+        saved_tr_reasons = dict(tr._REASONS)
+        saved_tr_frozen = tr._FROZEN
+
+    yield
+
+    leaked: list[str] = []
+    with dc._REGISTRY_LOCK:
+        if saved_dc_registry != dc._REGISTRY or any(saved_dc_per_site[site] != dc._REGISTRY_BY_SITE[site] for site in dc.DispatchSite):
+            leaked.append("declaration-contract registry")
+        dc._REGISTRY[:] = saved_dc_registry
+        for site in dc.DispatchSite:
+            dc._REGISTRY_BY_SITE[site][:] = saved_dc_per_site[site]
+        dc._FROZEN = saved_dc_frozen
+
+    with tr._REGISTRY_LOCK:
+        if saved_tr_registry != tr._REGISTRY or saved_tr_reasons != tr._REASONS:
+            leaked.append("Tier-1 error registry")
+        tr._REGISTRY[:] = saved_tr_registry
+        tr._REASONS.clear()
+        tr._REASONS.update(saved_tr_reasons)
+        tr._FROZEN = saved_tr_frozen
+
+    if leaked:
+        pytest.fail(f"Runtime-VAL registry state leaked from test: {', '.join(leaked)}")

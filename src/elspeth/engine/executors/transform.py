@@ -312,11 +312,7 @@ class TransformExecutor:
             # post-emission call site (panel F1 resolution: contracts use the
             # caller-derived set, not their own re-derivation).
             effective_input_fields = derive_effective_input_fields(token.row_data)
-            static_contract: frozenset[str] = (
-                transform._output_schema_config.get_effective_guaranteed_fields()
-                if transform._output_schema_config is not None
-                else frozenset()
-            )
+            static_contract = transform.effective_static_contract()
             try:
                 run_pre_emission_checks(
                     inputs=PreEmissionInputs(

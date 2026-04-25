@@ -167,6 +167,22 @@ def implements_dispatch_site(site_name: DispatchSiteName) -> Callable[[F], F]:
     return wrap
 
 
+def _normalise_row_tuple(
+    value: object,
+    *,
+    field_name: str,
+    owner_cls: type[object],
+) -> tuple[Any, ...]:
+    """Normalise a row-sequence bundle field to a deep-frozen tuple."""
+    if isinstance(value, list):
+        normalised = tuple(value)
+    elif isinstance(value, tuple):
+        normalised = value
+    else:
+        raise TypeError(f"{owner_cls.__name__}.{field_name} must be list or tuple, got {type(value).__name__!r}")
+    return cast(tuple[Any, ...], deep_freeze(normalised))
+
+
 # =============================================================================
 # Bundle types (per dispatch site, H2 §Fix direction)
 # =============================================================================
@@ -235,17 +251,15 @@ class PostEmissionOutputs:
     emitted_rows: tuple[Any, ...]
 
     def __post_init__(self) -> None:
-        value: object = self.emitted_rows
-        if isinstance(value, list):
-            object.__setattr__(
-                self,
-                "emitted_rows",
-                tuple(deep_freeze(item) for item in value),
-            )
-        elif isinstance(value, tuple):
-            freeze_fields(self, "emitted_rows")
-        else:
-            raise TypeError(f"PostEmissionOutputs.emitted_rows must be list or tuple, got {type(value).__name__!r}")
+        object.__setattr__(
+            self,
+            "emitted_rows",
+            _normalise_row_tuple(
+                self.emitted_rows,
+                field_name="emitted_rows",
+                owner_cls=type(self),
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,17 +306,15 @@ class BatchFlushOutputs:
     emitted_rows: tuple[Any, ...]
 
     def __post_init__(self) -> None:
-        value: object = self.emitted_rows
-        if isinstance(value, list):
-            object.__setattr__(
-                self,
-                "emitted_rows",
-                tuple(deep_freeze(item) for item in value),
-            )
-        elif isinstance(value, tuple):
-            freeze_fields(self, "emitted_rows")
-        else:
-            raise TypeError(f"BatchFlushOutputs.emitted_rows must be list or tuple, got {type(value).__name__!r}")
+        object.__setattr__(
+            self,
+            "emitted_rows",
+            _normalise_row_tuple(
+                self.emitted_rows,
+                field_name="emitted_rows",
+                owner_cls=type(self),
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -350,14 +362,15 @@ class BoundaryOutputs:
     rows: tuple[Any, ...] = ()
 
     def __post_init__(self) -> None:
-        value: object = self.rows
-        if isinstance(value, list):
-            object.__setattr__(self, "rows", tuple(value))
-        elif isinstance(value, tuple):
-            pass
-        else:
-            raise TypeError(f"BoundaryOutputs.rows must be list or tuple, got {type(value).__name__!r}")
-        freeze_fields(self, "rows")
+        object.__setattr__(
+            self,
+            "rows",
+            _normalise_row_tuple(
+                self.rows,
+                field_name="rows",
+                owner_cls=type(self),
+            ),
+        )
 
 
 # =============================================================================
@@ -1162,8 +1175,8 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
         # payload_schema validation (H5 Layer 1 — same as 2A).
         try:
             payload_schema = contract.payload_schema
-        except AttributeError:
-            raise TypeError(f"Contract {contract.name!r} missing required payload_schema attribute") from None
+        except AttributeError as exc:
+            raise TypeError(f"Contract {contract.name!r} missing required payload_schema attribute") from exc
         if not isinstance(payload_schema, type):
             raise TypeError(f"Contract {contract.name!r} payload_schema must be a type (TypedDict subclass)")
 
@@ -1171,10 +1184,10 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
         for method_name in ("negative_example", "positive_example_does_not_apply"):
             try:
                 method = getattr(type(contract), method_name)
-            except AttributeError:
+            except AttributeError as exc:
                 raise TypeError(
                     f"Contract {contract.name!r} missing required {method_name!r} classmethod (ADR-010 §Decision 3 + N2 Layer A/B harness)."
-                ) from None
+                ) from exc
             if not callable(method):
                 raise TypeError(f"Contract {contract.name!r}.{method_name} must be callable")
 
