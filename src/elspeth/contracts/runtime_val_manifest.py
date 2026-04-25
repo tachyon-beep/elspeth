@@ -56,7 +56,7 @@ from elspeth.contracts.declaration_contracts import (
     registered_declaration_contracts,
 )
 from elspeth.contracts.tier_registry import (
-    TIER_1_ERRORS,
+    _TIER_1_ERRORS_VIEW,
     FrameworkBugError,
     tier_1_reason,
     tier_registry_is_frozen,
@@ -331,7 +331,7 @@ def build_runtime_val_manifest() -> dict[str, Any]:
             "reason": tier_1_reason(cls),
             "implementation_hash": _tier_1_implementation_hash(cls),
         }
-        for cls in sorted(TIER_1_ERRORS, key=lambda c: (c.__module__, c.__name__))
+        for cls in sorted(_TIER_1_ERRORS_VIEW, key=lambda c: (c.__module__, c.__name__))
     ]
     expected_contract_sites_serialized: dict[str, list[str]] = {name: sorted(sites) for name, sites in EXPECTED_CONTRACT_SITES.items()}
     return {

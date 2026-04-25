@@ -14,7 +14,7 @@ payloads so they never carry secrets (see per-contract TypedDict payload_schema)
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Set
 from typing import Any, cast
 from urllib.parse import parse_qs, urlparse
 
@@ -126,6 +126,11 @@ def _scrub_value(value: Any, *, parent_key: str | None) -> Any:
         return value
     if isinstance(value, (list, tuple)):
         return [_scrub_value(item, parent_key=None) for item in value]
+    if isinstance(value, Set):
+        return sorted(
+            (_scrub_value(item, parent_key=None) for item in value),
+            key=repr,
+        )
     return value
 
 

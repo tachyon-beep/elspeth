@@ -91,6 +91,7 @@ from elspeth.contracts.tier_registry import FrameworkBugError, tier_1_error
 
 
 type DispatchSiteName = Literal[
+    # Keep in sync with DispatchSite below; CI manifest checks rely on both.
     "pre_emission_check",
     "post_emission_check",
     "batch_flush_check",
@@ -102,6 +103,7 @@ class DispatchSite(StrEnum):
     """Named dispatch site. StrEnum so members are directly usable as method
     names via ``getattr(contract, site.value)``."""
 
+    # Keep in sync with DispatchSiteName above; the Literal serves static tools.
     PRE_EMISSION = "pre_emission_check"
     POST_EMISSION = "post_emission_check"
     BATCH_FLUSH = "batch_flush_check"
@@ -342,6 +344,8 @@ class BoundaryInputs:
     row_contract: Any | None = None
 
     def __post_init__(self) -> None:
+        if not isinstance(self.row_data, Mapping):
+            raise TypeError(f"BoundaryInputs.row_data must be a mapping, got {type(self.row_data).__name__}")
         object.__setattr__(self, "row_data", deep_freeze(self.row_data))
         if not self.row_id:
             raise ValueError("BoundaryInputs.row_id must not be empty")

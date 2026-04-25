@@ -9,24 +9,24 @@ import pytest
 
 
 def test_all_four_pre_migration_members_remain_tier_1() -> None:
+    from elspeth.contracts import errors as errors_mod
     from elspeth.contracts.errors import (
         AuditIntegrityError,
         FrameworkBugError,
         OrchestrationInvariantError,
         PassThroughContractViolation,
     )
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS
 
     for cls in (AuditIntegrityError, FrameworkBugError, OrchestrationInvariantError, PassThroughContractViolation):
-        assert cls in TIER_1_ERRORS, f"{cls.__name__} missing from TIER_1_ERRORS after migration"
+        assert cls in errors_mod.TIER_1_ERRORS, f"{cls.__name__} missing from TIER_1_ERRORS after migration"
 
 
 def test_plugin_contract_violation_is_NOT_tier_1() -> None:
     """Base class stays out (ADR-008: plugin bug != framework corruption)."""
+    from elspeth.contracts import errors as errors_mod
     from elspeth.contracts.errors import PluginContractViolation
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS
 
-    assert PluginContractViolation not in TIER_1_ERRORS
+    assert PluginContractViolation not in errors_mod.TIER_1_ERRORS
 
 
 def test_plugin_contract_violation_is_audit_evidence() -> None:
@@ -82,10 +82,19 @@ def test_contracts_package_root_does_not_expose_tier_1_errors() -> None:
         exec("from elspeth.contracts import TIER_1_ERRORS", {})
 
 
-def test_tier_1_reason_is_non_empty_for_all_members() -> None:
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_reason
+def test_tier_registry_does_not_export_except_clause_view() -> None:
+    """The registry live view is private so callers cannot use it in ``except``."""
+    import elspeth.contracts.tier_registry as registry_mod
 
-    for cls in TIER_1_ERRORS:
+    assert not hasattr(registry_mod, "TIER_1_ERRORS")
+    with pytest.raises(ImportError, match="TIER_1_ERRORS"):
+        exec("from elspeth.contracts.tier_registry import TIER_1_ERRORS", {})
+
+
+def test_tier_1_reason_is_non_empty_for_all_members() -> None:
+    from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_reason
+
+    for cls in _TIER_1_ERRORS_VIEW:
         reason = tier_1_reason(cls)
         assert reason and reason.strip(), f"{cls.__name__} registered without meaningful reason"
 
@@ -100,7 +109,7 @@ def test_repo_uses_live_tier_1_error_attribute_access_not_from_import_snapshots(
         for node in ast.walk(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
-            if node.module not in {"elspeth.contracts", "elspeth.contracts.errors"}:
+            if node.module not in {"elspeth.contracts", "elspeth.contracts.errors", "elspeth.contracts.tier_registry"}:
                 continue
             if not any(alias.name == "TIER_1_ERRORS" for alias in node.names):
                 continue

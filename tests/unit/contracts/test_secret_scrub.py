@@ -45,6 +45,18 @@ def test_sequence_values_scrubbed() -> None:
     assert out["secrets"] == [REDACTED, "normal"]
 
 
+def test_set_values_scrubbed_after_freeze() -> None:
+    p = deep_freeze({"secrets": {"sk-abcdef1234567890abcdef1234567890", "normal"}})
+    out = scrub_payload_for_audit(p)
+    assert out["secrets"] == [REDACTED, "normal"]
+
+
+def test_frozenset_values_scrubbed() -> None:
+    p = {"secrets": frozenset({"sk-abcdef1234567890abcdef1234567890", "normal"})}
+    out = scrub_payload_for_audit(p)
+    assert out["secrets"] == [REDACTED, "normal"]
+
+
 def test_secret_named_tuple_value_redacted_after_freeze() -> None:
     p = deep_freeze({"api_key": ["dev-token-123", "dev-token-456"]})
     out = scrub_payload_for_audit(p)

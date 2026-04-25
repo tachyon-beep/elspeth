@@ -148,7 +148,7 @@ def _freeze_runtime_val_registries_before_begin_run(monkeypatch: pytest.MonkeyPa
         freeze_declaration_registry,
         registered_declaration_contracts,
     )
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS, freeze_tier_registry
+    from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, freeze_tier_registry
     from elspeth.core.landscape.run_lifecycle_repository import RunLifecycleRepository
 
     original_begin_run = RunLifecycleRepository.begin_run
@@ -156,7 +156,7 @@ def _freeze_runtime_val_registries_before_begin_run(monkeypatch: pytest.MonkeyPa
     def wrapped_begin_run(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         if registered_declaration_contracts():
             freeze_declaration_registry()
-        if len(TIER_1_ERRORS) > 0:
+        if len(_TIER_1_ERRORS_VIEW) > 0:
             freeze_tier_registry()
         return original_begin_run(self, *args, **kwargs)
 

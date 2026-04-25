@@ -13,11 +13,11 @@ from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.declaration_contracts import DeclarationContractViolation
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
 
-# Re-export FrameworkBugError which now lives in tier_registry for the
-# circular-import break (Task 3 Step 3 rationale).  Apply @tier_1_error here
-# so the decoration happens in errors.py (the canonical Tier-1 declaration
-# site) without a circular import.  The re-exported name is identical to the
-# class object in tier_registry — isinstance/except identity is preserved.
+# Re-export FrameworkBugError which lives in tier_registry to break the import
+# cycle between the registry primitive and the public exception module. Apply
+# @tier_1_error here so the decoration happens in errors.py (the canonical
+# Tier-1 declaration site). The re-exported name is identical to the class
+# object in tier_registry — isinstance/except identity is preserved.
 from elspeth.contracts.tier_registry import FrameworkBugError as _FrameworkBugError
 from elspeth.contracts.tier_registry import tier_1_error
 
@@ -1221,7 +1221,7 @@ if TYPE_CHECKING:
 
 def __getattr__(name: str) -> tuple[type[Exception], ...]:
     if name == "TIER_1_ERRORS":
-        from elspeth.contracts.tier_registry import TIER_1_ERRORS as _TR
+        from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW
 
         # Materialise a fresh tuple on every access so callers can use it in
         # ``except`` clauses (which require a tuple, not a custom view) while
@@ -1229,7 +1229,7 @@ def __getattr__(name: str) -> tuple[type[Exception], ...]:
         # This is distinct from the _Tier1ErrorsView live-view object in
         # tier_registry (which supports membership tests and iteration but is
         # NOT a tuple).
-        return tuple(_TR)  # type: ignore[arg-type]  # _Tier1ErrorsView yields BaseException subclasses; Exception is a subtype
+        return tuple(_TIER_1_ERRORS_VIEW)  # type: ignore[arg-type]  # _Tier1ErrorsView yields BaseException subclasses; Exception is a subtype
     raise AttributeError(name)
 
 

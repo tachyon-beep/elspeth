@@ -31,13 +31,13 @@ def _reset_registry():
 
 
 def test_decorator_registers_class() -> None:
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
+    from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_error
 
     @tier_1_error(reason="test: registered via decorator", caller_module=__name__)
     class _TestViolation(Exception):
         pass
 
-    assert _TestViolation in TIER_1_ERRORS
+    assert _TestViolation in _TIER_1_ERRORS_VIEW
 
 
 def test_decorator_requires_reason() -> None:
@@ -81,7 +81,7 @@ def test_decorator_returns_the_class_unchanged() -> None:
 
 
 def test_double_registration_idempotent_with_matching_reason() -> None:
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
+    from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_error
 
     decorator = tier_1_error(reason="first", caller_module=__name__)
 
@@ -90,7 +90,7 @@ def test_double_registration_idempotent_with_matching_reason() -> None:
         pass
 
     decorator(_Twice)
-    assert TIER_1_ERRORS.count(_Twice) == 1
+    assert _TIER_1_ERRORS_VIEW.count(_Twice) == 1
 
 
 def test_non_exception_class_raises_typeerror() -> None:
@@ -191,26 +191,26 @@ def test_double_registration_with_conflicting_reason_raises() -> None:
 
 
 def test_tier_1_errors_view_supports_len() -> None:
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
+    from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_error
 
-    before = len(TIER_1_ERRORS)
+    before = len(_TIER_1_ERRORS_VIEW)
 
     @tier_1_error(reason="len test", caller_module=__name__)
     class _Counted(Exception):
         pass
 
-    assert len(TIER_1_ERRORS) == before + 1
+    assert len(_TIER_1_ERRORS_VIEW) == before + 1
 
 
 def test_tier_1_errors_view_repr_shows_names() -> None:
-    from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_error
+    from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_error
 
     @tier_1_error(reason="repr test", caller_module=__name__)
     class _Repr(Exception):
         pass
 
-    assert "_Repr" in repr(TIER_1_ERRORS)
-    assert repr(TIER_1_ERRORS).startswith("TIER_1_ERRORS(")
+    assert "_Repr" in repr(_TIER_1_ERRORS_VIEW)
+    assert repr(_TIER_1_ERRORS_VIEW).startswith("TIER_1_ERRORS(")
 
 
 def test_caller_module_kwarg_is_required() -> None:
@@ -336,4 +336,4 @@ def test_tier_1_registration_uses_registry_lock() -> None:
 
     assert not thread.is_alive()
     assert errors == []
-    assert _ThreadRegistered in tier_registry.TIER_1_ERRORS
+    assert _ThreadRegistered in tier_registry._TIER_1_ERRORS_VIEW

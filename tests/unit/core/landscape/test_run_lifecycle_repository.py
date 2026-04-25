@@ -171,7 +171,7 @@ class TestBeginRunRuntimeValManifest:
 
     def test_manifest_records_tier_1_errors(self) -> None:
         """Every Tier-1 error class with its reason is in the manifest."""
-        from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_reason
+        from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_reason
 
         db, _ = _make_repo(run_id="m3-tier-1")
         manifest = self._fetch_manifest(db, "m3-tier-1")
@@ -183,20 +183,20 @@ class TestBeginRunRuntimeValManifest:
         recorded_by_name = {(e["class_module"], e["class_name"]): e["reason"] for e in tier_1_entries}
         for entry in tier_1_entries:
             assert entry["implementation_hash"].startswith("sha256:")
-        for cls in TIER_1_ERRORS:
+        for cls in _TIER_1_ERRORS_VIEW:
             key = (cls.__module__, cls.__name__)
             assert key in recorded_by_name, f"Tier-1 class {key} missing from manifest"
             assert recorded_by_name[key] == tier_1_reason(cls)
 
     def test_manifest_includes_landscape_record_error(self) -> None:
         """Recorder-failure marker types must be registered and serialized."""
-        from elspeth.contracts.tier_registry import TIER_1_ERRORS, tier_1_reason
+        from elspeth.contracts.tier_registry import _TIER_1_ERRORS_VIEW, tier_1_reason
         from elspeth.core.landscape.errors import LandscapeRecordError
 
         db, _ = _make_repo(run_id="m3-landscape-record-error")
         manifest = self._fetch_manifest(db, "m3-landscape-record-error")
 
-        assert LandscapeRecordError in TIER_1_ERRORS
+        assert LandscapeRecordError in _TIER_1_ERRORS_VIEW
 
         recorded_by_name = {(e["class_module"], e["class_name"]): e["reason"] for e in manifest["tier_1_errors"]}
         key = (LandscapeRecordError.__module__, LandscapeRecordError.__name__)

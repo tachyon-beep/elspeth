@@ -183,7 +183,9 @@ def tier_1_reason(cls: type[BaseException]) -> str:
 def freeze_tier_registry() -> None:
     """Seal the registry. Subsequent registrations raise ``FrameworkBugError``.
 
-    Called at end of orchestrator bootstrap (see Task 5b)."""
+    Called at the end of orchestrator bootstrap after runtime-VAL registration
+    has been validated.
+    """
     _TIER_REGISTRY.freeze()
 
 
@@ -198,9 +200,9 @@ class _Tier1ErrorsView:
     Live view over ``_REGISTRY``. Unlike a snapshot tuple, membership tests
     (``__contains__``), iteration, and ``count`` always see the current registry
     contents. Not a drop-in tuple replacement: ``len()`` is supported for test
-    assertions, but indexing and use in ``except`` clauses remain unsupported —
-    use the ``errors.TIER_1_ERRORS`` module attribute (PEP 562 re-export added
-    in Task 4) when tuple semantics are required.
+    assertions, but indexing and use in ``except`` clauses remain unsupported.
+    Use the ``errors.TIER_1_ERRORS`` module attribute when tuple semantics are
+    required.
     """
 
     def __contains__(self, item: object) -> bool:
@@ -225,4 +227,4 @@ class _Tier1ErrorsView:
             return _REGISTRY.count(item)  # type: ignore[arg-type]  # list[type[BaseException]].count(object) is safe
 
 
-TIER_1_ERRORS = _Tier1ErrorsView()
+_TIER_1_ERRORS_VIEW = _Tier1ErrorsView()

@@ -139,9 +139,9 @@ per_file_rules:
 - pattern: contracts/secret_scrub.py
   rules:
   - R5
-  reason: Secret-scrubbing dispatch — _scrub_value recurses over arbitrary Mapping[str, Any] payloads (Tier 3) and uses isinstance to distinguish Mapping, str, and sequence types for correct redaction routing
+  reason: Secret-scrubbing dispatch — _scrub_value recurses over arbitrary Mapping[str, Any] payloads (Tier 3) and uses isinstance to distinguish Mapping, str, sequence, and set/frozenset types for correct redaction routing
   expires: null
-  max_hits: 3
+  max_hits: 4
 - pattern: contracts/runtime_val_manifest.py
   rules:
   - R2
@@ -217,6 +217,10 @@ allow_hits:
   owner: architecture
   reason: Tier 3 boundary — ValueError/TypeError from stable_hash on non-canonical data falls back to repr_hash
   safety: Warning logged (without row content); row_id still generated via repr_hash for audit trail continuity
+- key: contracts/declaration_contracts.py:R5:BoundaryInputs:__post_init__:fp=db78bae36c2f61ba
+  owner: architecture
+  reason: Row-attributed source/sink boundary DTO — row_data must be a mapping before deep_freeze so declaration-contract adopters never receive arbitrary sequence/scalar payloads
+  safety: Non-mapping values raise TypeError immediately; no coercion or fallback is attempted
 - key: contracts/run_result.py:R5:RunResult:__post_init__:fp=9b76d74a33629d87
   owner: architecture
   reason: Offensive guard — validates status is RunStatus enum at contract construction

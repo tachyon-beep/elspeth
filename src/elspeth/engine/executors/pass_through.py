@@ -37,7 +37,6 @@ from elspeth.contracts.declaration_contracts import (
     ExampleBundle,
     PostEmissionInputs,
     PostEmissionOutputs,
-    PreEmissionInputs,
     implements_dispatch_site,
     register_declaration_contract,
 )
@@ -429,7 +428,3 @@ class PassThroughDeclarationContract(DeclarationContract):
 # Module import side-effect: register with the framework. Bootstrap asserts
 # the registration actually happened (orchestrator.core.prepare_for_run).
 register_declaration_contract(PassThroughDeclarationContract())
-
-# Unused import suppressed — ``PreEmissionInputs`` is imported so the type is
-# available for docstring references; the contract does not implement the site.
-_ = PreEmissionInputs

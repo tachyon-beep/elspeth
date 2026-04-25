@@ -121,6 +121,19 @@ def test_boundary_inputs_require_row_identity() -> None:
         )
 
 
+def test_boundary_inputs_require_mapping_row_data() -> None:
+    with pytest.raises(TypeError, match=r"BoundaryInputs\.row_data must be a mapping"):
+        BoundaryInputs(
+            plugin=object(),
+            node_id="node-1",
+            run_id="run-1",
+            row_id="row-1",
+            token_id="token-1",
+            static_contract=frozenset(),
+            row_data=["not", "a", "mapping"],  # type: ignore[arg-type]
+        )
+
+
 def test_run_boundary_checks_dispatches_only_boundary_contracts() -> None:
     register_declaration_contract(_BoundaryOnlyContract())
     register_declaration_contract(_PostEmissionOnlyContract())
