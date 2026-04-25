@@ -35,7 +35,7 @@ class WebSettings(BaseModel):
     registration_mode: Literal["open", "email_verified", "closed"] = "open"
     cors_origins: tuple[str, ...] = ("http://localhost:5173",)
     data_dir: Path = Path("data")
-    composer_model: str = "gpt-4o"
+    composer_model: str = "gpt-5.5"
     composer_max_composition_turns: int = Field(..., ge=1)
     composer_max_discovery_turns: int = Field(..., ge=1)
     composer_timeout_seconds: float = Field(..., gt=0)

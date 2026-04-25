@@ -9,6 +9,7 @@ import type {
   ValidationResult,
 } from "@/types/api";
 import * as api from "@/api/client";
+import { COMPOSE_TIMEOUT_MS } from "@/config/composer";
 import { useBlobStore } from "./blobStore";
 import { useExecutionStore } from "./executionStore";
 
@@ -246,9 +247,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     lines.push("", "Please fix these validation errors.");
     const content = lines.join("\n");
 
-    // Use sendMessage with a 90-second timeout (same as manual sends).
+    // Use sendMessage with the same timeout as manual sends.
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 90_000);
+    const timer = setTimeout(() => controller.abort(), COMPOSE_TIMEOUT_MS);
     try {
       await get().sendMessage(content, controller.signal);
     } finally {

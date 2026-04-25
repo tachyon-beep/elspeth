@@ -254,7 +254,7 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:37d3848364e5c88f"
+    source_file_hash: str | None = "sha256:9b48986e840e6355"
     config_model = WebScrapeConfig
     passes_through_input = True
 
@@ -518,6 +518,7 @@ class WebScrapeTransform(BaseTransform):
             input_contract=row.contract,
             output_row=output,
         )
+        output_contract = self._apply_declared_output_field_contracts(output_contract)
         output_contract = self._align_output_contract(output_contract)
 
         return TransformResult.success(

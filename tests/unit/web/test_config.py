@@ -107,6 +107,16 @@ class TestWebSettingsValidation:
         with pytest.raises(ValidationError):
             WebSettings()  # type: ignore[call-arg]  # intentionally omitted to test validation
 
+    def test_composer_model_default_uses_current_openai_frontier_model(self) -> None:
+        settings = WebSettings(
+            composer_max_composition_turns=15,
+            composer_max_discovery_turns=10,
+            composer_timeout_seconds=85.0,
+            composer_rate_limit_per_minute=10,
+        )
+
+        assert settings.composer_model == "gpt-5.5"
+
     def test_max_upload_bytes_zero_rejected(self) -> None:
         with pytest.raises(ValueError):
             WebSettings(

@@ -23,6 +23,7 @@ from typing import Any, cast
 
 import litellm
 import structlog
+from litellm.exceptions import APIError as LiteLLMAPIError
 from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from sqlalchemy import Engine, update
 from sqlalchemy.exc import SQLAlchemyError
@@ -50,6 +51,8 @@ from elspeth.web.sessions.models import sessions_table
 slog = structlog.get_logger()
 
 _ARRAY_ITEM_SEGMENT = "[]"
+_LLM_API_MAX_ATTEMPTS = 3
+_LLM_API_RETRY_BASE_DELAY_SECONDS = 1.0
 type RequiredPath = tuple[str, ...]
 
 
@@ -804,26 +807,37 @@ class ComposerServiceImpl:
         already passed or the call exceeds the remaining budget, raise
         ComposerConvergenceError with the current partial state.
         """
-        remaining = deadline - asyncio.get_event_loop().time()
-        if remaining <= 0:
-            raise ComposerConvergenceError.capture(
-                max_turns=0,
-                budget_exhausted="timeout",
-                state=state,
-                initial_version=initial_version,
-            )
-        try:
-            return await asyncio.wait_for(
-                self._call_llm(messages, tools),
-                timeout=remaining,
-            )
-        except TimeoutError:
-            raise ComposerConvergenceError.capture(
-                max_turns=0,
-                budget_exhausted="timeout",
-                state=state,
-                initial_version=initial_version,
-            ) from None
+        attempt = 0
+        while True:
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                raise ComposerConvergenceError.capture(
+                    max_turns=0,
+                    budget_exhausted="timeout",
+                    state=state,
+                    initial_version=initial_version,
+                )
+            try:
+                return await asyncio.wait_for(
+                    self._call_llm(messages, tools),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                raise ComposerConvergenceError.capture(
+                    max_turns=0,
+                    budget_exhausted="timeout",
+                    state=state,
+                    initial_version=initial_version,
+                ) from None
+            except LiteLLMAPIError:
+                attempt += 1
+                if attempt >= _LLM_API_MAX_ATTEMPTS:
+                    raise
+                delay_seconds = _LLM_API_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+                remaining_after_error = deadline - asyncio.get_event_loop().time()
+                if remaining_after_error <= delay_seconds:
+                    raise
+                await asyncio.sleep(delay_seconds)
 
     def _compute_availability(self) -> ComposerAvailability:
         """Infer whether the configured model has the required env at boot.

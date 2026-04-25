@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.contracts.diversion import RowDiversion, SinkWriteResult
 from elspeth.contracts.errors import FrameworkBugError
-from elspeth.contracts.schema_contract import PipelineRow
+from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
@@ -304,6 +304,39 @@ class BaseTransform(ABC):
             mode=expected_mode,
             fields=contract.fields,
             locked=True,
+        )
+
+    def _apply_declared_output_field_contracts(self, contract: SchemaContract) -> SchemaContract:
+        """Apply declared output field metadata to an emitted row contract.
+
+        Contract propagation infers newly added fields from runtime values, which
+        marks them as ``source="inferred"`` and ``required=False``. When a
+        transform has an explicit ``_output_schema_config`` field declaration,
+        ADR-014 expects emitted contracts to carry that declared metadata.
+        """
+        output_schema_config = self._output_schema_config
+        if output_schema_config is None or output_schema_config.fields is None:
+            return contract
+
+        from elspeth.contracts.schema_contract_factory import create_contract_from_config
+
+        declared_fields = {field.normalized_name: field for field in create_contract_from_config(output_schema_config).fields}
+        fields: list[FieldContract] = []
+        changed = False
+        for field in contract.fields:
+            if field.normalized_name in declared_fields:
+                fields.append(declared_fields[field.normalized_name])
+                changed = True
+            else:
+                fields.append(field)
+
+        if not changed:
+            return contract
+
+        return SchemaContract(
+            mode=contract.mode,
+            fields=tuple(fields),
+            locked=contract.locked,
         )
 
     def _align_output_row_contract(self, row: PipelineRow) -> PipelineRow:

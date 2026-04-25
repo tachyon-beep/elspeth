@@ -1354,6 +1354,17 @@ class TestToolDefinitions:
             assert "description" in defn
             assert "parameters" in defn
 
+    def test_array_schemas_declare_items(self) -> None:
+        """Provider contract: every JSON-Schema array must declare items.
+
+        OpenAI rejects tool schemas with bare ``{"type": "array"}`` at
+        request validation time. This walks the full composer tool surface so
+        one malformed nested schema cannot make every new session fail before
+        the model sees the prompt.
+        """
+        for defn in get_tool_definitions():
+            self._assert_arrays_have_items(defn["parameters"], defn["name"], ("parameters",))
+
     def test_on_validation_failure_has_no_enum_constraint(self) -> None:
         """Regression: on_validation_failure must accept any sink name, not just enum values.
 
@@ -1377,6 +1388,19 @@ class TestToolDefinitions:
         elif isinstance(schema, list):
             for item in schema:
                 self._assert_no_enum_on_validation_failure(item, tool_name)
+
+    def _assert_arrays_have_items(self, schema: object, tool_name: str, path: tuple[str, ...]) -> None:
+        """Recursively walk a JSON schema and assert all arrays declare items."""
+        if isinstance(schema, dict):
+            schema_type = schema.get("type")
+            has_array_type = schema_type == "array" or (isinstance(schema_type, list) and "array" in schema_type)
+            assert not has_array_type or "items" in schema, f"Tool {tool_name!r} has array schema without items at {'.'.join(path)}"
+            for key, value in schema.items():
+                if isinstance(value, (dict, list)):
+                    self._assert_arrays_have_items(value, tool_name, (*path, str(key)))
+        elif isinstance(schema, list):
+            for index, item in enumerate(schema):
+                self._assert_arrays_have_items(item, tool_name, (*path, f"[{index}]"))
 
 
 class TestToolResultValidation:

@@ -577,6 +577,41 @@ def test_web_scrape_with_pipeline_row(mock_ctx):
 
 
 @respx.mock
+def test_web_scrape_output_contract_matches_declared_enriched_fields(mock_ctx):
+    """Declared web_scrape fields must keep declared metadata at emission."""
+    html_content = "<html><body><h1>Title</h1></body></html>"
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing declared output contract metadata",
+            },
+        }
+    )
+    transform.on_start(mock_ctx)
+
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+
+    field_by_name = {field.normalized_name: field for field in result.row.contract.fields}
+    for field_name in (
+        "page_content",
+        "page_fingerprint",
+        "fetch_status",
+        "fetch_url_final",
+        "fetch_url_final_ip",
+    ):
+        assert field_by_name[field_name].required is True
+        assert field_by_name[field_name].source == "declared"
+
+
+@respx.mock
 def test_web_scrape_follows_redirects_301(mock_ctx):
     """HTTP 301 redirect should be followed and final URL recorded.
 

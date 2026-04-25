@@ -723,7 +723,7 @@ allow_hits:
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=ae9ab2326a1a815d
+- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=7eec08d7537b2339
   owner: bugfix
   reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays, nulls, or scalars; the composer must reject non-object arguments before cache lookup or tool dispatch
   safety: Emits a tool error back to the LLM, does not call execute_tool, marks mutation intent for budget accounting, and preserves current state

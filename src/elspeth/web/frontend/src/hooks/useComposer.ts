@@ -1,12 +1,11 @@
 // src/hooks/useComposer.ts
 import { useCallback } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
-
-const COMPOSE_TIMEOUT_MS = 90_000;
+import { COMPOSE_TIMEOUT_MS } from "@/config/composer";
 
 /**
  * Hook for composing messages. Wraps sessionStore.sendMessage()
- * with a 90-second AbortController timeout. Dispatches error messages
+ * with an AbortController timeout. Dispatches error messages
  * based on HTTP status and error_type field.
  *
  * The AbortController is wired to abort the underlying fetch when the

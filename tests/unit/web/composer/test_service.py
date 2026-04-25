@@ -1407,6 +1407,36 @@ class TestComposerAvailabilityAndBadRequest:
         assert str(exc_info.value) == "LLM request rejected (BadRequestError)"
         assert "leaked-detail" not in str(exc_info.value)
 
+    @pytest.mark.asyncio
+    async def test_litellm_api_error_is_retried_before_unavailable(self) -> None:
+        from litellm.exceptions import APIError as LiteLLMAPIError
+
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        transient_error = LiteLLMAPIError(
+            status_code=503,
+            message="provider temporarily unavailable leaked-detail",
+            model="openrouter/openai/gpt-5.5",
+            llm_provider="openrouter",
+        )
+        success = _make_llm_response(content="Recovered.")
+
+        with (
+            patch(
+                "elspeth.web.composer.service.litellm.acompletion",
+                new_callable=AsyncMock,
+                side_effect=[transient_error, success],
+            ) as mock_llm,
+            patch("elspeth.web.composer.service.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        ):
+            result = await service.compose("Hello", [], state)
+
+        assert result.message == "Recovered."
+        assert mock_llm.call_count == 2
+        mock_sleep.assert_awaited_once()
+
 
 class TestPluginBugCrashesFromToolExecution:
     """Plugin-internal TypeError/ValueError/UnicodeError must crash.
