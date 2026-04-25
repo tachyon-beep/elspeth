@@ -23,8 +23,8 @@ from elspeth.web.blobs.routes import create_blobs_router
 from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.config import WebSettings
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.routes import create_session_router
+from elspeth.web.sessions.schema import initialize_session_schema
 from elspeth.web.sessions.service import SessionServiceImpl
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ def _make_app(
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    run_migrations(engine)
+    initialize_session_schema(engine)
     session_service = SessionServiceImpl(engine)
     blob_service = BlobServiceImpl(engine, tmp_path)
 
@@ -276,7 +276,7 @@ class TestIDORProtection:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(engine)
+        initialize_session_schema(engine)
         session_service = SessionServiceImpl(engine)
         blob_service = BlobServiceImpl(engine, tmp_path)
 

@@ -1749,15 +1749,15 @@ class TestPluginCrashSessionPersistence:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -2499,15 +2499,15 @@ class TestToolArgumentErrorAcrossThreadBoundary:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path

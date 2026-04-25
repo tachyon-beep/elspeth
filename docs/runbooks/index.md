@@ -13,7 +13,6 @@ Operational procedures for ELSPETH pipeline management.
 | [Database Maintenance](database-maintenance.md) | Audit DB growing large, need cleanup |
 | [Incident Response](incident-response.md) | Production issue needs investigation |
 | [Backup and Recovery](backup-and-recovery.md) | Backup audit trail, restore from backup |
-| [Repair `ck_blobs_ready_hash`](repair-blob-ready-hash.md) | Migration 008 aborts on pre-existing `ready` blobs without a SHA-256 hash |
 
 ---
 

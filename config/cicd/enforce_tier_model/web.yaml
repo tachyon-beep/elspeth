@@ -858,11 +858,6 @@ allow_hits:
   reason: derived_from_map.get() traversing parent chain — parent may reference state outside session or not in map
   safety: Returns None, terminates transitive closure walk
   expires: null
-- key: web/sessions/migrations/env.py:R1:run_migrations_online:fp=d098eea85c79ecc6
-  owner: web-sessions
-  reason: Tier 3 boundary — Alembic's programmatic API documents cfg.attributes as optional key/value storage; 'connection' is absent by contract in CLI mode. We branch on the None sentinel to distinguish programmatic (caller-injected connection) from CLI (resolve URL) invocation.
-  safety: None sentinel routes to the CLI branch which resolves URL from env var / alembic.ini — both modes are correct
-  expires: null
 - key: web/composer/skills/__init__.py:R6:load_deployment_skill:fp=a7cf6bcf22cab117
   owner: web-composer
   reason: Deployment skill is optional — FileNotFoundError is expected when deployment skill is absent.

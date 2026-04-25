@@ -23,7 +23,7 @@ from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
+from elspeth.web.sessions.schema import initialize_session_schema
 
 
 @pytest.fixture(autouse=True)
@@ -60,7 +60,7 @@ def _make_app(
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    run_migrations(engine)
+    initialize_session_schema(engine)
 
     user_store = UserSecretStore(engine, _TEST_MASTER_KEY)
     server_store = ServerSecretStore(server_allowlist)
@@ -356,7 +356,7 @@ class TestCrossUserIsolation:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(engine)
+        initialize_session_schema(engine)
 
         user_store = UserSecretStore(engine, _TEST_MASTER_KEY)
         server_store = ServerSecretStore(())

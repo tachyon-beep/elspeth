@@ -30,8 +30,8 @@ from elspeth.contracts.secrets import (
 from elspeth.core.security.secret_loader import SecretNotFoundError
 from elspeth.web.secrets.user_store import UserSecretStore, _derive_fernet_key
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.models import user_secrets_table
+from elspeth.web.sessions.schema import initialize_session_schema
 
 TEST_MASTER_KEY = "test-master-key-for-encryption"
 
@@ -44,7 +44,7 @@ def db_engine():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    run_migrations(engine)
+    initialize_session_schema(engine)
     return engine
 
 
@@ -216,7 +216,7 @@ class TestUserSecretStore:
         """
         db_path = tmp_path / "test_concurrent.db"
         engine = create_session_engine(f"sqlite:///{db_path}")
-        run_migrations(engine)
+        initialize_session_schema(engine)
         store = UserSecretStore(engine=engine, master_key=TEST_MASTER_KEY)
         errors: list[Exception] = []
 

@@ -944,18 +944,18 @@ def _validate_finalize_hash(
     ``finalize_blob`` / ``_finalize_blob_sync`` write-path call and
     raises :class:`BlobStateError` — a structured, caller-friendly
     diagnostic — before any SQL is issued. The DB-level CHECK
-    constraint ``ck_blobs_ready_hash`` (migration 008) is the
-    AUTHORITATIVE guard: it closes the same invariant for any writer
-    that bypasses this service (direct SQL, future migrations, or an
-    ORM call path that skips finalize). If these two guards disagree,
-    the DB CHECK wins and the service pre-check is the bug.
+    constraint ``ck_blobs_ready_hash`` is the AUTHORITATIVE guard: it
+    closes the same invariant for any writer that bypasses this service
+    (direct SQL or an ORM call path that skips finalize). If these two
+    guards disagree, the DB CHECK wins and the service pre-check is the
+    bug.
 
     Keeping both guards means a service regression surfaces as a clean
     BlobStateError at the write-path entry point (easy to debug),
     while a writer that skips the service still cannot corrupt the
     audit trail. The shape rule is kept in agreement between the two
-    sites by design — the docstring of migration 008 documents the
-    pairing from the DB side, and the tests in
+    sites by design — the current session schema declares the DB-side
+    guard, and the tests in
     ``tests/unit/web/blobs/test_service.py::TestBlobsReadyHashDBConstraint``
     pin the DB guard independently of this one.
     """

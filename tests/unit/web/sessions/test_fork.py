@@ -16,12 +16,12 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.config import WebSettings
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
     InvalidForkTargetError,
 )
 from elspeth.web.sessions.routes import create_session_router
+from elspeth.web.sessions.schema import initialize_session_schema
 from elspeth.web.sessions.service import SessionServiceImpl
 
 
@@ -32,7 +32,7 @@ def engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(eng)
+    initialize_session_schema(eng)
     return eng
 
 
@@ -322,7 +322,7 @@ def _make_fork_app(
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    run_migrations(engine)
+    initialize_session_schema(engine)
     session_service = SessionServiceImpl(engine)
     blob_service = BlobServiceImpl(engine, tmp_path)
 
@@ -605,7 +605,7 @@ class TestForkEndpoint:
             connect_args={"check_same_thread": False},
             poolclass=StaticPool,
         )
-        run_migrations(engine)
+        initialize_session_schema(engine)
         session_service = SessionServiceImpl(engine)
         # Source blob service has generous quota; we'll swap to a tight one for the fork
         blob_service = BlobServiceImpl(engine, tmp_path, max_storage_per_session=500)

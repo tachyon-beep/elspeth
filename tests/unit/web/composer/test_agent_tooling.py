@@ -33,8 +33,8 @@ from elspeth.web.composer.tools import (
     execute_tool,
 )
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.models import blobs_table
+from elspeth.web.sessions.schema import initialize_session_schema
 
 
 def _empty_state() -> CompositionState:
@@ -74,7 +74,7 @@ def blob_env(tmp_path: Path) -> dict[str, Any]:
     from elspeth.web.sessions.models import sessions_table
 
     engine = create_session_engine("sqlite:///:memory:")
-    run_migrations(engine)
+    initialize_session_schema(engine)
 
     session_id = "test-session-001"
     now = datetime.now(UTC)

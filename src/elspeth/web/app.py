@@ -45,9 +45,9 @@ from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import ScopedSecretResolver, WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
 from elspeth.web.sessions.routes import create_session_router
+from elspeth.web.sessions.schema import initialize_session_schema
 from elspeth.web.sessions.service import SessionServiceImpl
 
 _RETRYABLE_STORAGE_ERRNOS: frozenset[int] = frozenset(
@@ -384,7 +384,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     # --- Session database setup ---
     session_db_url = settings.get_session_db_url()
     session_engine = create_session_engine(session_db_url)
-    run_migrations(session_engine)
+    initialize_session_schema(session_engine)
 
     session_service = SessionServiceImpl(session_engine, data_dir=settings.data_dir)
     app.state.session_service = session_service

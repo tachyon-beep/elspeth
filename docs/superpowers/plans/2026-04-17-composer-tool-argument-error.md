@@ -281,7 +281,7 @@ class TestCreateBlobTypeGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.schema import initialize_session_schema
         from elspeth.web.sessions.models import sessions_table
 
         self.engine = create_session_engine(
@@ -289,7 +289,7 @@ class TestCreateBlobTypeGuard:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -329,7 +329,7 @@ class TestCreateBlobTypeGuard:
             )
 ```
 
-Verify before writing: open `test_tools.py:2441` (`TestDeleteBlobActiveRunGuard`) and confirm the imports, the `sessions_table` insert columns (`auth_provider_type="local"` is required — the schema may add fields over time), and that `create_session_engine` / `run_migrations` / `sessions_table` are the correct symbol names in this tree. If any have drifted, update the snippet — do NOT invent replacements.
+Verify before writing: open `test_tools.py:2441` (`TestDeleteBlobActiveRunGuard`) and confirm the imports, the `sessions_table` insert columns (`auth_provider_type="local"` is required — the schema may add fields over time), and that `create_session_engine` / `initialize_session_schema` / `sessions_table` are the correct symbol names in this tree. If any have drifted, update the snippet — do NOT invent replacements.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -420,7 +420,7 @@ class TestUpdateBlobTypeGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.schema import initialize_session_schema
         from elspeth.web.sessions.models import sessions_table
 
         self.engine = create_session_engine(
@@ -428,7 +428,7 @@ class TestUpdateBlobTypeGuard:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -1017,7 +1017,7 @@ class TestPluginCrashSessionPersistence:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.schema import initialize_session_schema
         from elspeth.web.sessions.models import sessions_table
 
         self.engine = create_session_engine(
@@ -1025,7 +1025,7 @@ class TestPluginCrashSessionPersistence:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -1730,7 +1730,7 @@ class TestToolArgumentErrorAcrossThreadBoundary:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
+        from elspeth.web.sessions.schema import initialize_session_schema
         from elspeth.web.sessions.models import sessions_table
 
         self.engine = create_session_engine(
@@ -1738,7 +1738,7 @@ class TestToolArgumentErrorAcrossThreadBoundary:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path

@@ -3,7 +3,9 @@
 Tables: sessions, chat_messages, composition_states, runs, run_events,
 blobs, blob_run_links.
 
-Schema evolution via Alembic migrations (sessions/migrations/).
+Current schema bootstrap lives in ``sessions/schema.py``. Pre-release
+session databases are created from this metadata and stale runtime DBs
+are deleted/recreated rather than migrated.
 
 All tables live in a dedicated session database, separate from the
 Landscape audit database.
@@ -203,11 +205,9 @@ blobs_table = Table(
     # The shape rule mirrors ``_validate_finalize_hash`` at the write
     # side (``re.compile(r"^[a-f0-9]{64}$")``).  The DDL here uses
     # SQLite GLOB syntax because the session DB is SQLite (see
-    # ``sessions/engine.py`` and the StaticPool test harness); the
-    # PostgreSQL POSIX-regex equivalent lives in migration 008's
-    # ``_ready_hash_check_clause`` and is selected at upgrade time.
-    # Operator repair guidance for both invariant classes (NULL and
-    # malformed) lives in docs/runbooks/repair-blob-ready-hash.md.
+    # ``sessions/engine.py`` and the StaticPool test harness). If a
+    # different dialect is introduced, add its V0 check expression here
+    # instead of adding a migration path.
     CheckConstraint(
         "status != 'ready' OR (content_hash IS NOT NULL AND length(content_hash) = 64 AND content_hash NOT GLOB '*[^a-f0-9]*')",
         name="ck_blobs_ready_hash",

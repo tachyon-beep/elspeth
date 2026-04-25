@@ -29,8 +29,8 @@ from elspeth.web.blobs.service import (
     sanitize_filename,
 )
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.models import sessions_table
+from elspeth.web.sessions.schema import initialize_session_schema
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -45,7 +45,7 @@ def db_engine():
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    run_migrations(engine)
+    initialize_session_schema(engine)
     return engine
 
 
@@ -1782,7 +1782,7 @@ class TestBlobsReadyHashDBConstraint:
     """The DB refuses status='ready' rows without a content_hash.
 
     Service-level validation in _validate_finalize_hash is the first line
-    of defence, but the CHECK constraint (migration 008) is the belt:
+    of defence, but the CHECK constraint in the current schema is the belt:
     even raw SQL / direct ORM writes that bypass the service cannot
     commit a violating row.
     """

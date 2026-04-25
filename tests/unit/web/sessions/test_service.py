@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy.pool import StaticPool
 
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import (
     ChatMessageRecord,
     CompositionStateData,
@@ -18,6 +17,7 @@ from elspeth.web.sessions.protocol import (
     RunRecord,
     SessionRecord,
 )
+from elspeth.web.sessions.schema import initialize_session_schema
 from elspeth.web.sessions.service import SessionServiceImpl
 
 
@@ -33,7 +33,7 @@ def engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    run_migrations(eng)
+    initialize_session_schema(eng)
     return eng
 
 

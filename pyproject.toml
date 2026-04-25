@@ -40,7 +40,6 @@ dependencies = [
 
     # Database
     "sqlalchemy>=2.0,<3",  # SQL toolkit and ORM
-    "alembic>=1.18,<2",  # Database migrations
 
     # Retries
     "tenacity>=9.0,<10",  # Retry logic with backoff
@@ -269,7 +268,6 @@ extend-immutable-calls = ["typer.Option", "typer.Argument"]
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["T20"]  # Allow print in tests
 "scripts/**/*.py" = ["T20"]  # Allow print in CLI scripts
-"alembic/**/*.py" = ["E402"]  # Alembic env.py has imports after config setup
 "vulture_whitelist.py" = ["B018", "F821"]  # Vulture whitelist uses bare names
 # Package __init__ files use categorical __all__ grouping for readability
 "src/elspeth/contracts/__init__.py" = ["RUF022"]

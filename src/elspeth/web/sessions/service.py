@@ -734,11 +734,10 @@ class SessionServiceImpl:
     ) -> CompositionStateRecord:
         """Scoped read: fetch state and verify it belongs to ``session_id``.
 
-        Runtime defence-in-depth complementing the migration-007 composite
-        foreign key: post-007 data cannot create cross-session state
-        references at the schema layer, but pre-007 data repaired with
-        Variant-A (delete orphans) has no DB-enforced invariant. This
-        method raises ``AuditIntegrityError`` on any mismatch it
+        Runtime defence-in-depth complementing the current-schema
+        composite foreign key: persisted data cannot create cross-session
+        state references at the schema layer, and this method raises
+        ``AuditIntegrityError`` on any mismatch it
         encounters. The exception class is chosen deliberately to match
         the cross-session blob-ref rejection in the
         ``fork_from_message`` route handler (web/sessions/routes.py):

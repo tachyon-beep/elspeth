@@ -18,7 +18,7 @@ from elspeth.web.secrets.server_store import ServerSecretStore
 from elspeth.web.secrets.service import WebSecretService
 from elspeth.web.secrets.user_store import UserSecretStore
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
+from elspeth.web.sessions.schema import initialize_session_schema
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +31,7 @@ def _ensure_fingerprint_key(monkeypatch: pytest.MonkeyPatch) -> None:
 def engine() -> sa.engine.Engine:
     """In-memory SQLite engine migrated to head."""
     eng = create_session_engine("sqlite:///:memory:")
-    run_migrations(eng)
+    initialize_session_schema(eng)
     return eng
 
 

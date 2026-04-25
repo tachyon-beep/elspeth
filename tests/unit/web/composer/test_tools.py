@@ -2117,15 +2117,15 @@ class TestBlobTools:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.other_session_id = str(uuid4())
@@ -2643,15 +2643,15 @@ class TestDeleteBlobActiveRunGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())
@@ -3025,15 +3025,15 @@ class TestUpdateBlobQuota:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())
@@ -3298,15 +3298,15 @@ class TestUpdateBlobRollbackPreservesPrimaryException:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())
@@ -3547,15 +3547,15 @@ class TestUpdateBlobSessionLockSerialisation:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = f"lock-serialise-{uuid4()}"
         self.blob_id = str(uuid4())
@@ -3696,15 +3696,15 @@ class TestUpdateBlobQuotaRollbackDivergence:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())
@@ -5478,15 +5478,15 @@ class TestCreateBlobTypeGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -5546,15 +5546,15 @@ class TestUpdateBlobTypeGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -5620,15 +5620,15 @@ class TestSetSourceFromBlobTypeGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.data_dir = tmp_path
@@ -5719,15 +5719,15 @@ class TestGetBlobContentGuards:
 
         from elspeth.web.blobs.service import content_hash as _content_hash
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())
@@ -5965,15 +5965,15 @@ class TestUpdateBlobActiveRunGuard:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())
@@ -6258,15 +6258,15 @@ class TestUpdateBlobAtomicWrite:
         from sqlalchemy.pool import StaticPool
 
         from elspeth.web.sessions.engine import create_session_engine
-        from elspeth.web.sessions.migrations import run_migrations
         from elspeth.web.sessions.models import blobs_table, sessions_table
+        from elspeth.web.sessions.schema import initialize_session_schema
 
         self.engine = create_session_engine(
             "sqlite:///:memory:",
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(self.engine)
+        initialize_session_schema(self.engine)
 
         self.session_id = str(uuid4())
         self.blob_id = str(uuid4())

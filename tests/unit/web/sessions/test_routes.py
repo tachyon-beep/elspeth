@@ -20,9 +20,9 @@ from elspeth.web.composer.protocol import ComposerPluginCrashError, ComposerResu
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.config import WebSettings
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.protocol import CompositionStateData
 from elspeth.web.sessions.routes import create_session_router
+from elspeth.web.sessions.schema import initialize_session_schema
 from elspeth.web.sessions.service import SessionServiceImpl
 
 # Sentinel empty state for mock composer responses
@@ -100,7 +100,7 @@ def _make_app(
         poolclass=StaticPool,
         connect_args={"check_same_thread": False},
     )
-    run_migrations(engine)
+    initialize_session_schema(engine)
     service = SessionServiceImpl(engine)
 
     app = FastAPI()
@@ -529,7 +529,7 @@ class TestIDORProtection:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(engine)
+        initialize_session_schema(engine)
         service = SessionServiceImpl(engine)
 
         # Create two apps sharing the same service
@@ -718,7 +718,7 @@ class TestSendMessageStateIdValidation:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(engine)
+        initialize_session_schema(engine)
         service = SessionServiceImpl(engine)
 
         def make_app_for_user(uid: str) -> FastAPI:
@@ -1688,7 +1688,7 @@ class TestRevertEndpoint:
             poolclass=StaticPool,
             connect_args={"check_same_thread": False},
         )
-        run_migrations(engine)
+        initialize_session_schema(engine)
         service = SessionServiceImpl(engine)
 
         def make_app_for_user(uid: str) -> FastAPI:

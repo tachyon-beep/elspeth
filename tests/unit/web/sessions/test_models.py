@@ -10,7 +10,6 @@ from sqlalchemy import insert, inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.migrations import run_migrations
 from elspeth.web.sessions.models import (
     chat_messages_table,
     composition_states_table,
@@ -18,13 +17,14 @@ from elspeth.web.sessions.models import (
     runs_table,
     sessions_table,
 )
+from elspeth.web.sessions.schema import initialize_session_schema
 
 
 @pytest.fixture
 def engine():
     """Create an in-memory SQLite engine migrated to head."""
     eng = create_session_engine("sqlite:///:memory:")
-    run_migrations(eng)
+    initialize_session_schema(eng)
     return eng
 
 

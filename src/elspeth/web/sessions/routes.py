@@ -894,10 +894,9 @@ def create_session_router() -> APIRouter:
 
         # Resolve composition_version from each run's state_id.
         # A missing state is Tier 1 data corruption — crash, don't hide.
-        # Scope the read to the current session: migration 007's composite
-        # FK prevents future cross-session state refs at the schema layer,
-        # but pre-007 rows repaired with Variant-A (delete orphans) have
-        # no runtime guard. ``get_state_in_session`` raises
+        # Scope the read to the current session: the current-schema
+        # composite FK prevents cross-session state refs at the schema
+        # layer. ``get_state_in_session`` raises
         # ``AuditIntegrityError`` on session mismatch, surfacing Tier 1
         # corruption rather than silently returning the wrong state's
         # version number in another session's listing.
@@ -1097,7 +1096,7 @@ def create_session_router() -> APIRouter:
                     # would leave the forked state's blob_ref pointing at
                     # the source session's blob, which is the cross-session
                     # reference class closed at the FK layer by the
-                    # migration-007 composite FK and is audit-contradictory
+                    # current-schema composite FK and is audit-contradictory
                     # on its face.  The enclosing ``except Exception``
                     # block archives the partially-created fork (see the
                     # cleanup-rollback site below), so this crash does

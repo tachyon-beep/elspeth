@@ -1865,7 +1865,7 @@ record.
 | Modify | `src/elspeth/web/sessions/models.py` | Add web-side compiled-digest hint/cache references |
 | Modify | `src/elspeth/web/sessions/protocol.py` | Extend run/session contracts with non-authoritative compiled-digest hint metadata |
 | Modify | `src/elspeth/web/sessions/service.py` | Persist compiled-digest hints/cache metadata only after Landscape sealing completes; treat session hints as untrusted lookup aids and support backfill/repair for cache lag |
-| Modify | `src/elspeth/web/sessions/migrations/versions/*.py` | Add session-side schema changes for compiled-digest hint/cache fields |
+| Modify | `src/elspeth/web/sessions/models.py` and `src/elspeth/web/sessions/schema.py` | Add session-side V0 schema changes for compiled-digest hint/cache fields; pre-release session DBs are recreated rather than migrated |
 
 ### CI, rollout, and observability
 

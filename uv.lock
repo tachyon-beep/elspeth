@@ -115,20 +115,6 @@ wheels = [
 ]
 
 [[package]]
-name = "alembic"
-version = "1.18.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "mako" },
-    { name = "sqlalchemy" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/70/a5/57f989c26c078567a08f1d88c337acfcb69c8c9cac6876a34054f35b8112/alembic-1.18.0.tar.gz", hash = "sha256:0c4c03c927dc54d4c56821bdcc988652f4f63bf7b9017fd9d78d63f09fd22b48", size = 2043788, upload-time = "2026-01-09T21:22:23.683Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ed/fd/68773667babd452fb48f974c4c1f6e6852c6e41bcf622c745faca1b06605/alembic-1.18.0-py3-none-any.whl", hash = "sha256:3993fcfbc371aa80cdcf13f928b7da21b1c9f783c914f03c3c6375f58efd9250", size = 260967, upload-time = "2026-01-09T21:22:25.333Z" },
-]
-
-[[package]]
 name = "annotated-doc"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
@@ -752,7 +738,6 @@ name = "elspeth"
 version = "0.5.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alembic" },
     { name = "deepdiff" },
     { name = "dynaconf" },
     { name = "httpx" },
@@ -889,7 +874,6 @@ webui = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.18,<2" },
     { name = "azure-identity", marker = "extra == 'all'", specifier = ">=1.25,<2" },
     { name = "azure-identity", marker = "extra == 'azure'", specifier = ">=1.25,<2" },
     { name = "azure-keyvault-secrets", marker = "extra == 'all'", specifier = ">=4.10,<5" },
@@ -1739,18 +1723,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c5/2b/299d54f95e02e9ed551c186e881a4ac0eaa5a948a6be93ecaa26a748f1be/litellm-1.81.1.tar.gz", hash = "sha256:9c758db8abff04a2f1f43582d042080e36f245fe34cfbafe2f8b7ca8f1de29b6", size = 13487469, upload-time = "2026-01-21T12:55:58.271Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/59/73/8d100c4e48935f6a381df60f894ca9c063ea412ce354fbe7a17770ad4092/litellm-1.81.1-py3-none-any.whl", hash = "sha256:503512a8a7f3cddf9d8fed6182c14f1e77c5655635fe67b09efb09c75234bb87", size = 11795146, upload-time = "2026-01-21T12:55:55.613Z" },
-]
-
-[[package]]
-name = "mako"
-version = "1.3.10"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "markupsafe" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/9e/38/bd5b78a920a64d708fe6bc8e0a2c075e1389d53bef8413725c63ba041535/mako-1.3.10.tar.gz", hash = "sha256:99579a6f39583fa7e5630a28c3c1f440e4e97a414b80372649c0ce338da2ea28", size = 392474, upload-time = "2025-04-10T12:44:31.16Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/87/fb/99f81ac72ae23375f22b7afdb7642aba97c00a713c217124420147681a2f/mako-1.3.10-py3-none-any.whl", hash = "sha256:baef24a52fc4fc514a0887ac600f9f1cff3d82c61d4d700a1fa84d597b88db59", size = 78509, upload-time = "2025-04-10T12:50:53.297Z" },
 ]
 
 [[package]]
