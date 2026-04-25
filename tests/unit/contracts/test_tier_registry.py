@@ -260,3 +260,80 @@ def test_tests_prefix_absent_when_pytest_not_loaded() -> None:
     )
     assert result.returncode == 0, (result.stdout, result.stderr)
     assert "OK" in result.stdout
+
+
+def test_freeze_tier_registry_uses_registry_lock() -> None:
+    """freeze_tier_registry must serialize with concurrent registry mutation."""
+    from threading import Event, Thread
+
+    from elspeth.contracts import tier_registry
+
+    started = Event()
+    finished = Event()
+    errors: list[BaseException] = []
+
+    def freeze_registry() -> None:
+        started.set()
+        try:
+            tier_registry.freeze_tier_registry()
+        except BaseException as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    tier_registry._REGISTRY_LOCK.acquire()
+    try:
+        thread = Thread(target=freeze_registry)
+        thread.start()
+        assert started.wait(timeout=1.0)
+        assert not finished.wait(timeout=0.05), "freeze completed while the registry lock was held"
+    finally:
+        tier_registry._REGISTRY_LOCK.release()
+
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert tier_registry.tier_registry_is_frozen()
+
+
+def test_tier_1_registration_uses_registry_lock() -> None:
+    """Tier-1 registration must not race a concurrent freeze/registration path."""
+    from threading import Event, Thread
+
+    from elspeth.contracts import tier_registry
+
+    started = Event()
+    finished = Event()
+    errors: list[BaseException] = []
+
+    class _ThreadRegistered(Exception):
+        pass
+
+    def register_error() -> None:
+        started.set()
+        try:
+            tier_registry._register_with_module_prefix(
+                cls=_ThreadRegistered,
+                reason="registered while lock-protected",
+                caller_module=__name__,
+            )
+        except BaseException as exc:  # pragma: no cover - assertion reports details
+            errors.append(exc)
+        finally:
+            finished.set()
+
+    tier_registry._REGISTRY_LOCK.acquire()
+    try:
+        thread = Thread(target=register_error)
+        thread.start()
+        assert started.wait(timeout=1.0)
+        assert not finished.wait(timeout=0.05), "registration completed while the registry lock was held"
+    finally:
+        tier_registry._REGISTRY_LOCK.release()
+
+    thread.join(timeout=1.0)
+
+    assert not thread.is_alive()
+    assert errors == []
+    assert _ThreadRegistered in tier_registry.TIER_1_ERRORS

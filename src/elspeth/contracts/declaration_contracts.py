@@ -64,7 +64,6 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from threading import RLock
 from types import MappingProxyType
 from typing import (
     Any,
@@ -82,6 +81,7 @@ from typing import (
 
 from elspeth.contracts.audit_evidence import AuditEvidenceBase
 from elspeth.contracts.freeze import deep_freeze, freeze_fields
+from elspeth.contracts.registry_primitive import FrozenRegistry
 from elspeth.contracts.secret_scrub import scrub_payload_for_audit, scrub_text_for_audit
 from elspeth.contracts.tier_registry import FrameworkBugError, tier_1_error
 
@@ -986,10 +986,27 @@ def derive_effective_input_fields(input_row: Any) -> frozenset[str]:
 # Registry (H2 extension — per-site map)
 # =============================================================================
 
-_REGISTRY: list[DeclarationContract] = []
-_REGISTRY_BY_SITE: dict[DispatchSite, list[DeclarationContract]] = {site: [] for site in DispatchSite}
-_REGISTRY_LOCK = RLock()
 _FROZEN: bool = False
+
+
+def _get_frozen_flag() -> bool:
+    return _FROZEN
+
+
+def _set_frozen_flag(value: bool) -> None:
+    global _FROZEN
+    _FROZEN = value
+
+
+_DECLARATION_REGISTRY: FrozenRegistry[DeclarationContract, dict[DispatchSite, list[DeclarationContract]]] = FrozenRegistry(
+    name="declaration-contract",
+    auxiliary={site: [] for site in DispatchSite},
+    frozen_getter=_get_frozen_flag,
+    frozen_setter=_set_frozen_flag,
+)
+_REGISTRY = _DECLARATION_REGISTRY.items
+_REGISTRY_BY_SITE = _DECLARATION_REGISTRY.auxiliary
+_REGISTRY_LOCK = _DECLARATION_REGISTRY.lock
 
 
 # -----------------------------------------------------------------------------
@@ -1131,10 +1148,9 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
         ValueError: duplicate ``name``; or contract claims zero dispatch
             sites.
     """
-    with _REGISTRY_LOCK:
-        if _FROZEN:
-            raise FrameworkBugError(f"Cannot register {contract.name!r}: declaration-contract registry is frozen.")
-
+    with _DECLARATION_REGISTRY.write_unfrozen(
+        lambda: FrameworkBugError(f"Cannot register {contract.name!r}: declaration-contract registry is frozen.")
+    ):
         if not isinstance(contract, DeclarationContract):
             raise TypeError(
                 f"register_declaration_contract requires a DeclarationContract "
@@ -1185,7 +1201,7 @@ def register_declaration_contract(contract: DeclarationContract) -> None:
 
 def registered_declaration_contracts() -> Sequence[DeclarationContract]:
     """Return the full contract registry (across all sites)."""
-    with _REGISTRY_LOCK:
+    with _DECLARATION_REGISTRY.read():
         return tuple(_REGISTRY)
 
 
@@ -1197,7 +1213,7 @@ def registered_declaration_contracts_for_site(
     Order preserved from registration order within the site. Used by the
     dispatcher's site-filtered iteration.
     """
-    with _REGISTRY_LOCK:
+    with _DECLARATION_REGISTRY.read():
         return tuple(_REGISTRY_BY_SITE[site])
 
 
@@ -1211,15 +1227,12 @@ def contract_sites(contract: DeclarationContract) -> frozenset[DispatchSiteName]
 
 def freeze_declaration_registry() -> None:
     """Seal the registry. Called at end of orchestrator bootstrap."""
-    global _FROZEN
-    with _REGISTRY_LOCK:
-        _FROZEN = True
+    _DECLARATION_REGISTRY.freeze()
 
 
 def declaration_registry_is_frozen() -> bool:
     """Return whether the registry has been sealed by bootstrap."""
-    with _REGISTRY_LOCK:
-        return _FROZEN
+    return _DECLARATION_REGISTRY.is_frozen()
 
 
 # =============================================================================

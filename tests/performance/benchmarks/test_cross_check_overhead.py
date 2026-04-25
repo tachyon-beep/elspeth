@@ -25,6 +25,7 @@ import pytest
 import elspeth.engine.executors.pass_through  # noqa: F401
 from elspeth.contracts.declaration_contracts import (
     DeclarationContract,
+    DeclarationContractViolation,
     ExampleBundle,
     PostEmissionInputs,
     PostEmissionOutputs,
@@ -43,6 +44,16 @@ from elspeth.engine.executors.pass_through import (
     verify_pass_through,
 )
 from elspeth.testing import make_field
+
+
+def _stable_tail_bound_sec(stats: Any) -> float:
+    """Return a robust upper-tail bound for microsecond benchmarks.
+
+    Host scheduler spikes can add millisecond-scale single outliers to an
+    otherwise stable microbenchmark. ``q3 + 3*IQR`` still fails when the normal
+    tail widens, but does not let one unrelated host spike dominate the gate.
+    """
+    return stats["q3"] + 3.0 * stats["iqr"]
 
 
 def _build_wide_contract(n_fields: int = 200) -> SchemaContract:
@@ -290,24 +301,24 @@ def test_dispatcher_overhead_vs_direct_verify_pass_through(benchmark: pytest.Fix
 # H1 — dispatcher-overhead scales with N (issue elspeth-5dae105959)
 # =============================================================================
 #
-# The original dispatcher-overhead benchmark measures the live registry
-# (N=1 today). As Phase 2B/2C adopters land, the registered set grows but a
-# single-N benchmark would pass forever while production-N diverges — the
-# NFR would degrade to theatre.
+# The original dispatcher-overhead benchmark measured the live registry
+# (N=1 at the time). The first N-scaling fix only added N-1 skipped contracts,
+# which guarded skip-cost but still hid the real production shape: several
+# contracts can apply to the same row and each applicable contract performs
+# its own runtime observation work.
 #
-# The parametrised test below registers N-1 no-op contracts (applies_to
-# always returns False, so runtime_check is never invoked) plus the real
-# PassThroughDeclarationContract (the one contract that DOES apply) and
-# measures the dispatcher under increasing N. The budget scales with N per
-# the derivation in ADR-010 §Consequences (NFR derivation) and fails the
-# CI gate when the scaling law drifts.
+# The parametrised test below varies BOTH N_registered and M_applicable. It
+# registers one real PassThroughDeclarationContract, M-1 additional applicable
+# contracts that perform production-like contract/payload field observation,
+# and N-M skipped contracts. The budget scales separately for apply and skip
+# paths so the NFR fails when either law drifts.
 
 
 class _NoopPayload(TypedDict):
     reason: str
 
 
-class _NoopContract(DeclarationContract):
+class _SkipContract(DeclarationContract):
     """applies_to-returns-False stub for dispatcher scaling benchmarks.
 
     Ties up one registry slot without contributing any post_emission_check
@@ -343,38 +354,112 @@ class _NoopContract(DeclarationContract):
         raise NotImplementedError
 
 
+class _ApplicablePayload(TypedDict):
+    reason: str
+    missing: list[str]
+
+
+class _ApplicableViolation(DeclarationContractViolation):
+    payload_schema: type = _ApplicablePayload
+
+
+class _ApplicableContract(DeclarationContract):
+    """applies_to-True contract for dispatcher apply-cost benchmarks.
+
+    This deliberately does real runtime observation work (contract fields ∩
+    payload keys) over the same 200-field row as PassThroughDeclarationContract.
+    The happy path returns normally; the violation path is present so the
+    contract has the same audit-evidence shape as production declaration
+    contracts if the benchmark fixture drifts.
+    """
+
+    payload_schema: type = _ApplicablePayload
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    def applies_to(self, plugin: Any) -> bool:
+        return True
+
+    @implements_dispatch_site("post_emission_check")
+    def post_emission_check(
+        self,
+        inputs: PostEmissionInputs,
+        outputs: PostEmissionOutputs,
+    ) -> None:
+        for emitted in outputs.emitted_rows:
+            runtime_contract_fields = frozenset(fc.normalized_name for fc in emitted.contract.fields)
+            runtime_payload_fields = frozenset(emitted.keys())
+            runtime_observed = runtime_contract_fields & runtime_payload_fields
+            missing = inputs.effective_input_fields - runtime_observed
+            if missing:
+                raise _ApplicableViolation(
+                    plugin=inputs.plugin.name,
+                    node_id=inputs.node_id,
+                    run_id=inputs.run_id,
+                    row_id=inputs.row_id,
+                    token_id=inputs.token_id,
+                    payload={
+                        "reason": "applicable benchmark contract observed missing fields",
+                        "missing": sorted(missing),
+                    },
+                    message=f"Applicable benchmark contract {self.name!r} observed missing fields {sorted(missing)!r}.",
+                )
+
+    @classmethod
+    def negative_example(cls) -> ExampleBundle:
+        raise NotImplementedError
+
+    @classmethod
+    def positive_example_does_not_apply(cls) -> ExampleBundle:
+        raise NotImplementedError
+
+
 @pytest.mark.performance
 @pytest.mark.benchmark(group="dispatcher-overhead-scaling")
-@pytest.mark.parametrize("n_contracts", [1, 2, 4, 8, 16])
-def test_dispatcher_overhead_scales_with_n(
+@pytest.mark.parametrize(
+    "n_registered,m_applicable",
+    [
+        (1, 1),
+        (2, 1),
+        (4, 2),
+        (8, 4),
+        (16, 5),
+    ],
+)
+def test_dispatcher_overhead_scales_with_registered_and_applicable_contracts(
     benchmark: pytest.FixtureRequest,
-    n_contracts: int,
+    n_registered: int,
+    m_applicable: int,
 ) -> None:
     """NFR derivation (ADR-010 §Consequences, issue elspeth-5dae105959 / H1):
 
-    per-row dispatcher overhead at N registered contracts is bounded by
+    per-row dispatcher overhead at (N registered, M applicable) contracts is
+    bounded by
 
-        budget_median(N) = 27 us (N=1 baseline) + (N - 1) * 1.5 us
+        budget_median(N, M) =
+            27 us pass-through baseline
+          + (M - 1) * 25 us per additional applicable contract
+          + (N - M) * 1.5 us per skipped contract
 
     where 1.5 us is the applies_to short-circuit cost per skipped contract
-    with generous headroom for CI jitter on CPython 3.13 / Linux x86-64. The
-    P99 proxy (mean + 3 * stddev) gets 2x the median budget. This is a
-    deliberate over-estimate: the applies_to stub here is a plain attribute
-    read and returns constant ``False``, so real-world contracts with a cheap
-    guard (e.g. ``plugin.creates_tokens``) should hit well below 1.5 us.
+    with generous headroom for CI jitter on CPython 3.13 / Linux x86-64, and
+    25 us is the established pass-through happy-path budget for one
+    applicable 200-field contract. The tail proxy is q3 + 3*IQR so isolated
+    host scheduler spikes do not masquerade as dispatcher overhead.
 
     The fixed 2 µs at N=1 is the dispatcher's own structural cost —
     ``registered_declaration_contracts()`` tuple materialisation + loop
     enter — and does not scale with N.
 
-    The benchmark registers N-1 no-op contracts + the real
-    PassThroughDeclarationContract. N-1 contracts return False from
-    applies_to (pure short-circuit), exactly one contract runs
-    ``verify_pass_through`` on the 200-field row.
+    The benchmark registers one real PassThroughDeclarationContract, M-1
+    additional applicable contracts that perform 200-field runtime
+    observation, and N-M skipped contracts.
 
     Registry state is snapshot/restored so the benchmark does not leak into
     sibling tests.
     """
+    assert 1 <= m_applicable <= n_registered
 
     class _PassThroughPlugin:
         name = "bench_dispatcher_scaling"
@@ -414,10 +499,14 @@ def test_dispatcher_overhead_scales_with_n(
         # post_emission_check. The 200-field verify_pass_through dominates
         # the measurement and anchors the N=1 baseline.
         register_declaration_contract(PassThroughDeclarationContract())
-        # N-1 no-op contracts — exercise only the applies_to short-circuit
+        # M-1 applicable contracts — exercise the runtime-check path instead
+        # of only the applies_to short-circuit.
+        for i in range(m_applicable - 1):
+            register_declaration_contract(_ApplicableContract(name=f"applicable_scaling_{i}"))
+        # N-M skipped contracts — exercise only the applies_to short-circuit
         # path. Names are distinct to satisfy registry uniqueness.
-        for i in range(n_contracts - 1):
-            register_declaration_contract(_NoopContract(name=f"noop_scaling_{i}"))
+        for i in range(n_registered - m_applicable):
+            register_declaration_contract(_SkipContract(name=f"skip_scaling_{i}"))
 
         def run_dispatcher() -> None:
             run_post_emission_checks(inputs=inputs, outputs=outputs)
@@ -428,22 +517,20 @@ def test_dispatcher_overhead_scales_with_n(
 
     stats = benchmark.stats
     median_sec = stats["median"]
-    mean_sec = stats["mean"]
-    stddev_sec = stats["stddev"]
-    p99_bound = mean_sec + 3 * stddev_sec
+    stable_tail_bound_sec = _stable_tail_bound_sec(stats)
 
-    # Scaling formula (see docstring). 1.5 µs per skipped contract is a
-    # generous bound — a regression that halves the applies_to cost is
-    # still captured by the P99 proxy.
-    median_budget_us = 27.0 + (n_contracts - 1) * 1.5
-    p99_budget_us = median_budget_us * 2.0
+    # Scaling formula (see docstring): separate apply-cost from skip-cost so
+    # the benchmark cannot pass by measuring only cheap applies_to=False slots.
+    median_budget_us = 27.0 + (m_applicable - 1) * 25.0 + (n_registered - m_applicable) * 1.5
+    tail_budget_us = median_budget_us * 2.0
     assert median_sec * 1e6 < median_budget_us, (
         f"Dispatcher median {median_sec * 1e6:.1f}us exceeds {median_budget_us:.1f}us "
-        f"budget at N={n_contracts} (27us N=1 baseline + {n_contracts - 1} * 1.5us per-skip; "
-        f"ADR-010 §NFR derivation)"
+        f"budget at N_registered={n_registered}, M_applicable={m_applicable} "
+        f"(27us baseline + {m_applicable - 1} * 25us per-apply + "
+        f"{n_registered - m_applicable} * 1.5us per-skip; ADR-010 §NFR derivation)"
     )
-    assert p99_bound * 1e6 < p99_budget_us, (
-        f"Dispatcher mean+3*stddev {p99_bound * 1e6:.1f}us exceeds {p99_budget_us:.1f}us "
-        f"P99 budget at N={n_contracts} "
-        f"(mean={mean_sec * 1e6:.1f}us, stddev={stddev_sec * 1e6:.1f}us)"
+    assert stable_tail_bound_sec * 1e6 < tail_budget_us, (
+        f"Dispatcher stable tail {stable_tail_bound_sec * 1e6:.1f}us exceeds {tail_budget_us:.1f}us "
+        f"tail budget at N_registered={n_registered}, M_applicable={m_applicable} "
+        f"(q3={stats['q3'] * 1e6:.1f}us, iqr={stats['iqr'] * 1e6:.1f}us)"
     )

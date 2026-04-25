@@ -23,6 +23,8 @@ import sys
 from collections.abc import Iterator
 from typing import TypeVar
 
+from elspeth.contracts.registry_primitive import FrozenRegistry
+
 
 # Intentional forward-declaration: FrameworkBugError is defined here first so
 # ``errors.py`` can apply ``@tier_1_error`` to it without circular import.
@@ -46,9 +48,27 @@ class FrameworkBugError(Exception):
     """
 
 
-_REGISTRY: list[type[BaseException]] = []
-_REASONS: dict[type[BaseException], str] = {}
 _FROZEN: bool = False
+
+
+def _get_frozen_flag() -> bool:
+    return _FROZEN
+
+
+def _set_frozen_flag(value: bool) -> None:
+    global _FROZEN
+    _FROZEN = value
+
+
+_TIER_REGISTRY: FrozenRegistry[type[BaseException], dict[type[BaseException], str]] = FrozenRegistry(
+    name="TIER_1_ERRORS",
+    auxiliary={},
+    frozen_getter=_get_frozen_flag,
+    frozen_setter=_set_frozen_flag,
+)
+_REGISTRY = _TIER_REGISTRY.items
+_REASONS = _TIER_REGISTRY.auxiliary
+_REGISTRY_LOCK = _TIER_REGISTRY.lock
 
 _ALLOWED_MODULE_PREFIXES: tuple[str, ...] = (
     "elspeth.contracts.",
@@ -116,58 +136,60 @@ def tier_1_error(_cls: type | None = None, *, reason: str, caller_module: str): 
 
 
 def _register_with_module_prefix[ExcT: BaseException](*, cls: type[ExcT], reason: str, caller_module: str) -> type[ExcT]:
-    if _FROZEN:
-        raise FrameworkBugError(
+    def _frozen_error() -> FrameworkBugError:
+        return FrameworkBugError(
             f"Cannot register {cls.__name__!r}: TIER_1_ERRORS registry is frozen. "
             f"Bootstrap is complete; new Tier-1 classes must be added before plugin discovery finishes."
         )
-    if not (isinstance(cls, type) and issubclass(cls, BaseException)):
-        raise TypeError(f"@tier_1_error applied to {cls!r} — must be a BaseException subclass")
-    if not _module_is_allowed(caller_module):
-        raise PermissionError(
-            f"@tier_1_error used from {caller_module!r}; only allowed from "
-            f"{_ALLOWED_MODULE_PREFIXES!r}. Plugin modules cannot elevate their "
-            f"own exceptions to Tier-1 — request ADR review instead."
-        )
-    class_module = cls.__module__
-    if not isinstance(class_module, str) or not class_module.strip():
-        raise TypeError(
-            f"@tier_1_error applied to {cls!r} with invalid __module__={class_module!r}; "
-            "Tier-1 registration requires a non-empty module name."
-        )
-    if not _module_is_allowed(class_module):
-        raise PermissionError(
-            f"@tier_1_error cannot register {cls.__name__!r} from {class_module!r}; only "
-            f"{_ALLOWED_MODULE_PREFIXES!r} may own Tier-1 exceptions. Plugin modules "
-            "cannot elevate their own exceptions to Tier-1 — request ADR review instead."
-        )
-    if cls in _REGISTRY:
-        if _REASONS[cls] != reason:
-            raise ValueError(
-                f"{cls.__name__} already registered with reason {_REASONS[cls]!r}; double-registration with conflicting reason {reason!r}"
+
+    with _TIER_REGISTRY.write_unfrozen(_frozen_error):
+        if not (isinstance(cls, type) and issubclass(cls, BaseException)):
+            raise TypeError(f"@tier_1_error applied to {cls!r} — must be a BaseException subclass")
+        if not _module_is_allowed(caller_module):
+            raise PermissionError(
+                f"@tier_1_error used from {caller_module!r}; only allowed from "
+                f"{_ALLOWED_MODULE_PREFIXES!r}. Plugin modules cannot elevate their "
+                f"own exceptions to Tier-1 — request ADR review instead."
             )
-        return cls
-    _REGISTRY.append(cls)
-    _REASONS[cls] = reason
+        class_module = cls.__module__
+        if not isinstance(class_module, str) or not class_module.strip():
+            raise TypeError(
+                f"@tier_1_error applied to {cls!r} with invalid __module__={class_module!r}; "
+                "Tier-1 registration requires a non-empty module name."
+            )
+        if not _module_is_allowed(class_module):
+            raise PermissionError(
+                f"@tier_1_error cannot register {cls.__name__!r} from {class_module!r}; only "
+                f"{_ALLOWED_MODULE_PREFIXES!r} may own Tier-1 exceptions. Plugin modules "
+                "cannot elevate their own exceptions to Tier-1 — request ADR review instead."
+            )
+        if cls in _REGISTRY:
+            if _REASONS[cls] != reason:
+                raise ValueError(
+                    f"{cls.__name__} already registered with reason {_REASONS[cls]!r}; double-registration with conflicting reason {reason!r}"
+                )
+            return cls
+        _REGISTRY.append(cls)
+        _REASONS[cls] = reason
     return cls
 
 
 def tier_1_reason(cls: type[BaseException]) -> str:
     """Return the registered reason for ``cls``, or raise KeyError."""
-    return _REASONS[cls]
+    with _TIER_REGISTRY.read():
+        return _REASONS[cls]
 
 
 def freeze_tier_registry() -> None:
     """Seal the registry. Subsequent registrations raise ``FrameworkBugError``.
 
     Called at end of orchestrator bootstrap (see Task 5b)."""
-    global _FROZEN
-    _FROZEN = True
+    _TIER_REGISTRY.freeze()
 
 
 def tier_registry_is_frozen() -> bool:
     """Return whether the Tier-1 registry has been sealed by bootstrap."""
-    return _FROZEN
+    return _TIER_REGISTRY.is_frozen()
 
 
 class _Tier1ErrorsView:
@@ -182,20 +204,25 @@ class _Tier1ErrorsView:
     """
 
     def __contains__(self, item: object) -> bool:
-        return item in _REGISTRY
+        with _TIER_REGISTRY.read():
+            return item in _REGISTRY
 
     def __iter__(self) -> Iterator[type[BaseException]]:
-        return iter(list(_REGISTRY))
+        with _TIER_REGISTRY.read():
+            return iter(list(_REGISTRY))
 
     def __len__(self) -> int:
-        return len(_REGISTRY)
+        with _TIER_REGISTRY.read():
+            return len(_REGISTRY)
 
     def __repr__(self) -> str:
-        names = [cls.__name__ for cls in _REGISTRY]
+        with _TIER_REGISTRY.read():
+            names = [cls.__name__ for cls in _REGISTRY]
         return f"TIER_1_ERRORS({names})"
 
     def count(self, item: object) -> int:
-        return _REGISTRY.count(item)  # type: ignore[arg-type]  # list[type[BaseException]].count(object) is safe
+        with _TIER_REGISTRY.read():
+            return _REGISTRY.count(item)  # type: ignore[arg-type]  # list[type[BaseException]].count(object) is safe
 
 
 TIER_1_ERRORS = _Tier1ErrorsView()
