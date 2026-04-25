@@ -54,6 +54,7 @@ class AzureContentSafetyConfig(BaseAzureSafetyConfig):
 
     Optional:
         max_capacity_retry_seconds: Timeout for capacity error retries (default 3600)
+        batch_wait_timeout_seconds: Timeout for receiving a completed row result (default 3600)
 
     Example YAML:
         transforms:
@@ -120,7 +121,7 @@ class AzureContentSafety(BaseAzureSafetyTransform):
 
     name = "azure_content_safety"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:312759fdb2889836"
+    source_file_hash: str | None = "sha256:6940d98599fd6dcb"
     config_model = AzureContentSafetyConfig
     passes_through_input = True
 

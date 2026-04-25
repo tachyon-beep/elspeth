@@ -610,6 +610,7 @@ class TestContentSafetyBatchProcessing:
             assert result.reason["field"] == "score"
             assert result.reason["actual_type"] == "int"
             assert result.retryable is False
+            assert mock_httpx_client.post.call_count == 0
         finally:
             transform.close()
 
@@ -1127,24 +1128,37 @@ class TestContentSafetyInternalProcessing:
             mock_client_class.return_value = mock_instance
             yield mock_instance
 
-    def test_process_single_with_state_raises_capacity_error_on_rate_limit(self, mock_httpx_client: MagicMock) -> None:
-        """Rate limit (429) triggers CapacityError for AIMD retry."""
+    def test_process_single_with_state_retries_rate_limit_with_configured_budget(self, mock_httpx_client: MagicMock) -> None:
+        """Rate limit errors retry locally before producing the row result."""
         import httpx
 
-        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
-        mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
+        capacity_error = httpx.HTTPStatusError(
             "Rate limited",
             request=Mock(),
             response=Mock(status_code=429),
         )
+        mock_httpx_client.post.side_effect = [
+            capacity_error,
+            _create_mock_http_response(
+                {
+                    "categoriesAnalysis": [
+                        {"category": "Hate", "severity": 0},
+                        {"category": "Violence", "severity": 0},
+                        {"category": "Sexual", "severity": 0},
+                        {"category": "SelfHarm", "severity": 0},
+                    ]
+                }
+            ),
+        ]
 
         transform = AzureContentSafety(
             {
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["content"],
+                "max_capacity_retry_seconds": 1,
                 "thresholds": {"hate": 2, "violence": 2, "sexual": 2, "self_harm": 0},
                 "schema": {"mode": "observed"},
             }
@@ -1156,10 +1170,10 @@ class TestContentSafetyInternalProcessing:
         row_data = {"content": "test", "id": 1}
         row = make_pipeline_row(row_data)
 
-        with pytest.raises(CapacityError) as exc_info:
-            transform._process_single_with_state(row, "test-state-id")
+        result = transform._process_single_with_state(row, "test-state-id")
 
-        assert exc_info.value.status_code == 429
+        assert result.status == "success"
+        assert mock_httpx_client.post.call_count == 2
 
     def test_process_single_with_state_returns_error_on_non_rate_limit_http_error(self, mock_httpx_client: MagicMock) -> None:
         """Non-429 HTTP errors return TransformResult.error (not retryable)."""

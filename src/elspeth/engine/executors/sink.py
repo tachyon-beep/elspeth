@@ -475,6 +475,8 @@ class SinkExecutor:
         # Index by token_id for O(1) lookup in Phases 2 and 3.
         state_by_token_id: dict[str, NodeStateOpen] = {token.token_id: state for token, state in all_states}
 
+        primary_states_closed_by_boundary_failure = False
+
         # ── PHASE 1: External I/O (inside track_operation) ──
         # If any operation here raises, complete ALL pre-opened states as FAILED
         # before re-raising — no token may exit this method without a terminal state.
@@ -518,6 +520,7 @@ class SinkExecutor:
                             duration_ms=0.0,
                             error=self._build_boundary_error(exc=boundary_violation, phase="sink_write"),
                         )
+                        primary_states_closed_by_boundary_failure = True
                         self._record_boundary_failure_outcomes(
                             tokens=tokens,
                             sink_name=sink.name,
@@ -566,7 +569,8 @@ class SinkExecutor:
                     "content_hash": artifact_info.content_hash,
                 }
         except contract_errors.TIER_1_ERRORS as e:
-            self._best_effort_cleanup(all_states, e, "sink_write")
+            if not primary_states_closed_by_boundary_failure:
+                self._best_effort_cleanup(all_states, e, "sink_write")
             raise
         except Exception as e:
             io_error = ExecutionError(
@@ -574,11 +578,12 @@ class SinkExecutor:
                 exception_type=type(e).__name__,
                 phase="sink_write",
             )
-            self._complete_states_failed(
-                states=all_states,
-                duration_ms=0.0,
-                error=io_error,
-            )
+            if not primary_states_closed_by_boundary_failure:
+                self._complete_states_failed(
+                    states=all_states,
+                    duration_ms=0.0,
+                    error=io_error,
+                )
             raise
 
         # ── PHASE 2: Partition and complete primary tokens ──

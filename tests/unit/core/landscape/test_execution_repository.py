@@ -17,6 +17,7 @@ from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts import (
     BatchStatus,
@@ -39,6 +40,7 @@ from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.canonical import stable_hash
 from elspeth.core.landscape import LandscapeDB
 from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape.errors import LandscapeRecordError
 from elspeth.core.landscape.execution_repository import ExecutionRepository
 from elspeth.core.landscape.factory import RecorderFactory
 from elspeth.core.landscape.model_loaders import (
@@ -52,6 +54,7 @@ from elspeth.core.landscape.model_loaders import (
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
 from tests.fixtures.landscape import make_factory, make_landscape_db
+from tests.fixtures.stores import MockPayloadStore
 
 _DYNAMIC_SCHEMA = SchemaConfig.from_dict({"mode": "observed"})
 
@@ -130,6 +133,19 @@ def _make_repo_with_token(
     factory.data_flow.create_row(run_id, "source-0", 0, {"name": "test"}, row_id="row-1")
     factory.data_flow.create_token("row-1", token_id="tok-1")
     return db, repo, factory, "tok-1"
+
+
+class _TrackingPayloadStore(MockPayloadStore):
+    """Mock payload store that records store() side effects."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.store_calls: list[str] = []
+
+    def store(self, content: bytes) -> str:
+        content_hash = super().store(content)
+        self.store_calls.append(content_hash)
+        return content_hash
 
 
 # ---------------------------------------------------------------------------
@@ -575,6 +591,19 @@ class TestCompleteOperationWithPayloadStore:
         assert result is not None
         assert result.status == "pending"
 
+    @pytest.mark.parametrize("invalid_status", ["open", "bogus"])
+    def test_complete_operation_rejects_invalid_runtime_statuses(self, invalid_status: str) -> None:
+        """complete_operation must reject runtime status strings outside the terminal allowlist."""
+        _db, repo, _fac, _tok = _make_repo_with_token()
+        op = repo.begin_operation("run-1", "source-0", "source_load")
+
+        with pytest.raises(FrameworkBugError, match="unsupported status"):
+            repo.complete_operation(
+                op.operation_id,
+                invalid_status,  # type: ignore[arg-type]  # Intentional runtime-boundary test
+                duration_ms=5.0,
+            )
+
     def test_complete_nonexistent_operation_raises_framework_bug(self) -> None:
         """Completing a nonexistent operation raises FrameworkBugError."""
         _db, repo, _fac, _tok = _make_repo_with_token()
@@ -780,6 +809,25 @@ class TestRetryBatch:
         retry2 = repo.retry_batch(batch.batch_id)
         assert retry1.batch_id == retry2.batch_id
         assert retry1.attempt == retry2.attempt
+
+    def test_retry_batch_keeps_lineages_distinct_for_multiple_failed_batches(self) -> None:
+        """Failed batches on the same aggregation node must not share one retry row."""
+        _db, repo, fac, tok = _make_repo_with_token()
+        fac.data_flow.create_row("run-1", "source-0", 1, {"name": "second"}, row_id="row-2")
+        fac.data_flow.create_token("row-2", token_id="tok-2")
+
+        batch_a = repo.create_batch("run-1", "agg-1", batch_id="batch-a")
+        repo.add_batch_member(batch_a.batch_id, tok, 0)
+        repo.complete_batch(batch_a.batch_id, BatchStatus.FAILED, trigger_type=TriggerType.COUNT, trigger_reason="fail-a")
+        retry_a = repo.retry_batch(batch_a.batch_id)
+
+        batch_b = repo.create_batch("run-1", "agg-1", batch_id="batch-b")
+        repo.add_batch_member(batch_b.batch_id, "tok-2", 0)
+        repo.complete_batch(batch_b.batch_id, BatchStatus.FAILED, trigger_type=TriggerType.COUNT, trigger_reason="fail-b")
+        retry_b = repo.retry_batch(batch_b.batch_id)
+
+        assert retry_b.batch_id != retry_a.batch_id
+        assert [member.token_id for member in repo.get_batch_members(retry_b.batch_id)] == ["tok-2"]
 
     def test_retry_non_failed_batch_raises_audit_integrity_error(self) -> None:
         """Cannot retry a batch that isn't in FAILED status."""
@@ -1476,6 +1524,81 @@ class TestCallRecordingWithPayloadStore:
         assert call.status == CallStatus.ERROR
         assert call.response_hash is None
         assert call.error_json is not None
+
+    def test_record_call_failed_insert_does_not_store_payloads(self) -> None:
+        """Failed call inserts must not leak request/response payload blobs."""
+        store = _TrackingPayloadStore()
+        _db, repo, _fac, _tok = _make_repo_with_token(payload_store=store)
+
+        with pytest.raises(LandscapeRecordError, match="FOREIGN KEY constraint failed"):
+            repo.record_call(
+                "missing-state",
+                0,
+                CallType.LLM,
+                CallStatus.SUCCESS,
+                RawCallPayload({"prompt": "bad"}),
+                RawCallPayload({"response": "bad"}),
+            )
+
+        assert store.store_calls == []
+
+    def test_record_operation_call_failed_insert_does_not_store_payloads(self) -> None:
+        """Failed operation-call inserts must not leak request/response payload blobs."""
+        store = _TrackingPayloadStore()
+        _db, repo, _fac, _tok = _make_repo_with_token(payload_store=store)
+
+        with pytest.raises(LandscapeRecordError, match="FOREIGN KEY constraint failed"):
+            repo.record_operation_call(
+                "missing-operation",
+                CallType.HTTP,
+                CallStatus.SUCCESS,
+                RawCallPayload({"url": "https://example.com"}),
+                RawCallPayload({"status": 200}),
+            )
+
+        assert store.store_calls == []
+
+    def test_record_routing_event_failed_insert_does_not_store_reason(self) -> None:
+        """Failed routing-event inserts must not leak reason payloads."""
+        store = _TrackingPayloadStore()
+        _db, repo, _fac, tok = _make_repo_with_token(payload_store=store)
+        state = repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1})
+
+        with pytest.raises(LandscapeRecordError, match="FOREIGN KEY constraint failed"):
+            repo.record_routing_event(
+                state.state_id,
+                "missing-edge",
+                RoutingMode.MOVE,
+                reason={"condition": "x", "result": "true"},
+            )
+
+        assert store.store_calls == []
+
+    def test_record_routing_events_failed_insert_does_not_store_shared_reason(self) -> None:
+        """Failed multi-routing inserts must not materialize the shared reason blob."""
+        store = _TrackingPayloadStore()
+        _db, repo, fac, tok = _make_repo_with_token(payload_store=store)
+        state = repo.begin_node_state(tok, "transform-1", "run-1", 1, {"a": 1})
+        fac.data_flow.register_edge(
+            run_id="run-1",
+            from_node_id="transform-1",
+            to_node_id="sink-0",
+            label="path-a",
+            mode=RoutingMode.COPY,
+            edge_id="edge-a",
+        )
+
+        with pytest.raises((LandscapeRecordError, SQLAlchemyError), match="FOREIGN KEY constraint failed"):
+            repo.record_routing_events(
+                state.state_id,
+                [
+                    RoutingSpec(edge_id="edge-a", mode=RoutingMode.COPY),
+                    RoutingSpec(edge_id="missing-edge", mode=RoutingMode.COPY),
+                ],
+                reason={"condition": "fork", "result": "true"},
+            )
+
+        assert store.store_calls == []
 
 
 # ---------------------------------------------------------------------------

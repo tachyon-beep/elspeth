@@ -43,7 +43,9 @@ metadata = MetaData()
 #        carries run_id, token_outcomes.batch_id is scoped by run_id,
 #        batches.aggregation_state_id is scoped by run_id, and
 #        artifacts.produced_by_state_id is scoped by run_id.
-SQLITE_SCHEMA_EPOCH = 5
+#   6 → batches.retry_of_batch_id records retry lineage so retry_batch()
+#        can deduplicate per failed batch rather than per aggregation node.
+SQLITE_SCHEMA_EPOCH = 6
 
 # Column width for node_id across all tables. Referenced by dag.py
 # for validation — changing this value requires an Alembic migration.
@@ -387,6 +389,7 @@ batches_table = Table(
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
     Column("aggregation_node_id", String(64), nullable=False),
     Column("aggregation_state_id", String(64)),
+    Column("retry_of_batch_id", String(64)),
     Column("trigger_reason", String(128)),
     Column("trigger_type", String(32)),  # TriggerType enum value
     Column("attempt", Integer, nullable=False, default=0),
@@ -395,10 +398,13 @@ batches_table = Table(
     Column("completed_at", DateTime(timezone=True)),
     # Composite unique target for run-scoped batch FKs.
     UniqueConstraint("batch_id", "run_id"),
+    UniqueConstraint("retry_of_batch_id"),
     # Composite FK to nodes (node_id, run_id)
     ForeignKeyConstraint(["aggregation_node_id", "run_id"], ["nodes.node_id", "nodes.run_id"]),
     # Composite FK: aggregation state must belong to the batch run.
     ForeignKeyConstraint(["aggregation_state_id", "run_id"], ["node_states.state_id", "node_states.run_id"]),
+    # Retry lineage is same-run and one-to-one at the direct-retry level.
+    ForeignKeyConstraint(["retry_of_batch_id", "run_id"], ["batches.batch_id", "batches.run_id"]),
 )
 
 batch_members_table = Table(

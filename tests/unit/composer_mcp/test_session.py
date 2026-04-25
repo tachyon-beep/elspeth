@@ -63,6 +63,11 @@ class TestSessionManager:
         with pytest.raises(SessionNotFoundError, match=missing):
             manager.load(missing)
 
+    def test_delete_nonexistent_before_scratch_exists_raises_session_not_found(self, manager: SessionManager) -> None:
+        missing = "0" * 12
+        with pytest.raises(SessionNotFoundError, match=missing):
+            manager.delete(missing)
+
     def test_list_sessions_empty(self, manager: SessionManager) -> None:
         assert manager.list_sessions() == []
 

@@ -39,6 +39,7 @@ from elspeth.web.composer.protocol import (
 )
 from elspeth.web.composer.state import CompositionState, ValidationSummary
 from elspeth.web.composer.tools import (
+    ToolResult,
     execute_tool,
     get_tool_definitions,
     is_cacheable_discovery_tool,
@@ -149,6 +150,15 @@ class ComposerAvailability:
     missing_keys: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedDiscoveryPayload:
+    """State-independent portion of a cacheable discovery tool result."""
+
+    success: bool
+    affected_nodes: tuple[str, ...]
+    data: Any
+
+
 class ComposerServiceImpl:
     """LLM-driven pipeline composer with dual-counter budget and discovery caching.
 
@@ -213,6 +223,9 @@ class ComposerServiceImpl:
             ComposerConvergenceError: If a budget is exhausted or
                 the timeout is exceeded.
         """
+        if not self._availability.available:
+            raise ComposerServiceError(self._availability.reason or "Composer is unavailable.")
+
         deadline = asyncio.get_event_loop().time() + self._timeout_seconds
         try:
             return await self._compose_loop(message, messages, state, session_id, user_id, deadline)
@@ -307,7 +320,7 @@ class ComposerServiceImpl:
         # Discovery cache: local variable scoped to this compose() call.
         # Keyed by (tool_name, canonical_args_json). Each concurrent
         # compose() call gets its own independent cache dict.
-        discovery_cache: dict[str, Any] = {}
+        discovery_cache: dict[str, _CachedDiscoveryPayload] = {}
 
         # Validation threading: compute once for the initial state, then
         # carry forward from each ToolResult.validation. Avoids redundant
@@ -359,7 +372,7 @@ class ComposerServiceImpl:
             for tool_call in assistant_message.tool_calls:
                 tool_name = tool_call.function.name
                 try:
-                    arguments = json.loads(tool_call.function.arguments)
+                    decoded_arguments = json.loads(tool_call.function.arguments)
                 except (json.JSONDecodeError, TypeError) as exc:
                     # Track mutation intent even when args are unparseable
                     if not is_discovery_tool(tool_name):
@@ -378,6 +391,27 @@ class ComposerServiceImpl:
                     all_cache_hits = False
                     continue
 
+                if not isinstance(decoded_arguments, dict):
+                    if not is_discovery_tool(tool_name):
+                        turn_has_mutation = True
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": json.dumps(
+                                {
+                                    "error": (
+                                        f"Tool '{tool_name}' arguments must be a JSON object, got {type(decoded_arguments).__name__}."
+                                    ),
+                                }
+                            ),
+                        }
+                    )
+                    all_cache_hits = False
+                    continue
+
+                arguments = cast(dict[str, Any], decoded_arguments)
+
                 # Check discovery cache before executing
                 if is_cacheable_discovery_tool(tool_name):
                     cache_key = _make_cache_key(tool_name, arguments)
@@ -387,7 +421,12 @@ class ComposerServiceImpl:
                             {
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
-                                "content": discovery_cache[cache_key],
+                                "content": _serialize_tool_result(
+                                    _result_from_cached_discovery_payload(
+                                        state,
+                                        discovery_cache[cache_key],
+                                    )
+                                ),
                             }
                         )
                         continue
@@ -579,7 +618,7 @@ class ComposerServiceImpl:
                 # Cache cacheable discovery results
                 if is_cacheable_discovery_tool(tool_name):
                     cache_key = _make_cache_key(tool_name, arguments)
-                    discovery_cache[cache_key] = result_json
+                    discovery_cache[cache_key] = _cached_discovery_payload(result)
 
                 llm_messages.append(
                     {
@@ -735,11 +774,14 @@ class ComposerServiceImpl:
         tools: list[dict[str, Any]],
     ) -> litellm.ModelResponse:
         """Call the LLM via LiteLLM. Separated for test mocking."""
-        response = await litellm.acompletion(
-            model=self._model,
-            messages=messages,
-            tools=tools,
-        )
+        try:
+            response = await litellm.acompletion(
+                model=self._model,
+                messages=messages,
+                tools=tools,
+            )
+        except LiteLLMBadRequestError as exc:
+            raise ComposerServiceError(f"LLM request rejected ({type(exc).__name__})") from exc
         # Tier 3 boundary: LiteLLM can return empty choices on content-filter,
         # rate-limit, or malformed upstream responses.  Validate before callers
         # index into choices[0].
@@ -847,6 +889,29 @@ def _pydantic_default(obj: Any) -> Any:
 def _serialize_tool_result(result: Any) -> str:
     """Serialize a ToolResult to JSON, handling Pydantic models in data."""
     return json.dumps(result.to_dict(), default=_pydantic_default)
+
+
+def _cached_discovery_payload(result: ToolResult) -> _CachedDiscoveryPayload:
+    """Extract the state-independent fields from a cacheable discovery result."""
+    return _CachedDiscoveryPayload(
+        success=result.success,
+        affected_nodes=result.affected_nodes,
+        data=result.data,
+    )
+
+
+def _result_from_cached_discovery_payload(
+    state: CompositionState,
+    cached: _CachedDiscoveryPayload,
+) -> ToolResult:
+    """Rebuild a cached discovery result with the current state envelope."""
+    return ToolResult(
+        success=cached.success,
+        updated_state=state,
+        validation=state.validate(),
+        affected_nodes=cached.affected_nodes,
+        data=cached.data,
+    )
 
 
 def _make_cache_key(tool_name: str, arguments: dict[str, Any]) -> str:

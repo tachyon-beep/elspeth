@@ -17,10 +17,28 @@ import pytest
 import elspeth.engine.executors.declaration_contract_bootstrap  # noqa: F401
 from elspeth.contracts.declaration_contracts import (
     DeclarationContractViolation,
+    ExampleBundle,
     negative_example_bundles,
     registered_declaration_contracts,
     resolve_payload_schema_key_sets,
 )
+from elspeth.contracts.errors import PluginContractViolation
+
+_CONTRACT_VIOLATION_TYPES = (DeclarationContractViolation, PluginContractViolation)
+
+
+def _assert_exception_passed_through_dispatch_method(exc: BaseException, *, contract_name: str, bundle: ExampleBundle) -> None:
+    method_name = bundle.site.value
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_name == method_name:
+            return
+        tb = tb.tb_next
+    raise AssertionError(
+        f"Contract {contract_name!r}'s negative_example raised {type(exc).__name__}, "
+        f"but the traceback never entered dispatch method {method_name!r}. "
+        "The invariant must prove the contract body fired, not just accept a setup-time exception."
+    )
 
 
 @pytest.mark.parametrize(
@@ -38,18 +56,19 @@ def test_negative_example_fires_violation(contract) -> None:
 
     Post-H2 (ADR-010 §Semantics amendment): the harness reads the
     site-tagged ``ExampleBundle`` and invokes the method named by
-    ``bundle.site.value``. Catches AuditEvidenceBase to accommodate both
-    the DCV hierarchy AND pre-ADR-010 PluginContractViolation subclasses
-    (PassThroughContractViolation).
+    ``bundle.site.value``. It accepts only the DCV hierarchy and the
+    pre-ADR-010 PluginContractViolation hierarchy (PassThroughContractViolation);
+    generic RuntimeError must not satisfy the invariant.
     """
     for bundle in negative_example_bundles(contract):
         method = getattr(contract, bundle.site.value)
-        with pytest.raises((DeclarationContractViolation, RuntimeError)) as exc_info:
+        with pytest.raises(_CONTRACT_VIOLATION_TYPES) as exc_info:
             method(*bundle.args)
         assert exc_info.value is not None, (
             f"Contract {contract.name!r}'s runtime_check did not raise on its own negative_example — VAL is dormant for this contract."
         )
         violation = exc_info.value
+        _assert_exception_passed_through_dispatch_method(violation, contract_name=contract.name, bundle=bundle)
         if isinstance(violation, DeclarationContractViolation):
             # C1 (plan-review B1-amended): reject bare-base raises for DCV-family
             # contracts so triage SQL can filter by exception_type. The isinstance
@@ -82,10 +101,11 @@ def test_negative_example_payload_covers_required_schema_keys(contract) -> None:
     """
     for bundle in negative_example_bundles(contract):
         method = getattr(contract, bundle.site.value)
-        with pytest.raises((DeclarationContractViolation, RuntimeError)) as exc_info:
+        with pytest.raises(_CONTRACT_VIOLATION_TYPES) as exc_info:
             method(*bundle.args)
 
         violation = exc_info.value
+        _assert_exception_passed_through_dispatch_method(violation, contract_name=contract.name, bundle=bundle)
         if not isinstance(violation, DeclarationContractViolation):
             # PassThroughContractViolation predates the ADR-010 DeclarationContract
             # Violation hierarchy (kept as a dedicated subclass for triage-SQL

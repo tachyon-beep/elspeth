@@ -411,6 +411,8 @@ class Batch:
     """An aggregation batch collecting tokens.
 
     Strict contract - status and trigger_type must be enums.
+    ``retry_of_batch_id`` links a retry batch back to the failed batch whose
+    member set it is replaying.
     """
 
     batch_id: str
@@ -420,6 +422,7 @@ class Batch:
     status: BatchStatus  # Strict: enum only
     created_at: datetime
     aggregation_state_id: str | None = None
+    retry_of_batch_id: str | None = None
     trigger_type: TriggerType | None = None  # Strict: enum only
     trigger_reason: str | None = None
     completed_at: datetime | None = None

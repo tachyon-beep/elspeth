@@ -6,6 +6,7 @@ from collections.abc import Iterator
 
 import pytest
 
+import elspeth.engine.executors.declared_output_fields as declared_output_fields_module
 from elspeth.contracts.errors import FrameworkBugError
 from elspeth.contracts.runtime_val_manifest import build_runtime_val_manifest
 from elspeth.engine.executors.pass_through import PassThroughDeclarationContract
@@ -83,6 +84,70 @@ def test_manifest_records_declaration_contract_implementation_hash(
     assert baseline_entry["class_module"] == mutated_entry["class_module"]
     assert baseline_entry["dispatch_sites"] == mutated_entry["dispatch_sites"]
     assert baseline_entry["implementation_hash"] != mutated_entry["implementation_hash"]
+
+
+def test_manifest_records_delegated_declaration_helper_implementation_hash(
+    _isolate_runtime_val_registries: None,
+) -> None:
+    import elspeth.contracts.declaration_contracts as dc
+    import elspeth.contracts.tier_registry as tr
+
+    dc._FROZEN = False
+    tr._FROZEN = False
+    prepare_for_run()
+
+    baseline = build_runtime_val_manifest()
+    baseline_entry = next(entry for entry in baseline["declaration_contracts"] if entry["name"] == "declared_output_fields")
+
+    original_code = declared_output_fields_module.verify_declared_output_fields.__code__
+
+    def replacement(
+        *,
+        declared_output_fields: frozenset[str],
+        emitted_rows: object,
+        plugin_name: str,
+        node_id: str,
+        run_id: str,
+        row_id: str,
+        token_id: str,
+    ) -> None:
+        del declared_output_fields, emitted_rows, plugin_name, node_id, run_id, row_id, token_id
+        return None
+
+    declared_output_fields_module.verify_declared_output_fields.__code__ = replacement.__code__
+    try:
+        mutated = build_runtime_val_manifest()
+    finally:
+        declared_output_fields_module.verify_declared_output_fields.__code__ = original_code
+
+    mutated_entry = next(entry for entry in mutated["declaration_contracts"] if entry["name"] == "declared_output_fields")
+
+    assert baseline_entry["name"] == mutated_entry["name"]
+    assert baseline_entry["class_name"] == mutated_entry["class_name"]
+    assert baseline_entry["class_module"] == mutated_entry["class_module"]
+    assert baseline_entry["dispatch_sites"] == mutated_entry["dispatch_sites"]
+    assert baseline_entry["implementation_hash"] != mutated_entry["implementation_hash"]
+
+
+def test_manifest_rejects_source_unavailable_classes(
+    monkeypatch: pytest.MonkeyPatch,
+    _isolate_runtime_val_registries: None,
+) -> None:
+    import elspeth.contracts.declaration_contracts as dc
+    import elspeth.contracts.runtime_val_manifest as manifest_module
+    import elspeth.contracts.tier_registry as tr
+
+    dc._FROZEN = False
+    tr._FROZEN = False
+    prepare_for_run()
+
+    def source_unavailable(cls: type[object]) -> str:
+        raise OSError(f"source unavailable for {cls.__module__}.{cls.__qualname__}")
+
+    monkeypatch.setattr(manifest_module.inspect, "getsource", source_unavailable)
+
+    with pytest.raises(FrameworkBugError, match="source unavailable"):
+        build_runtime_val_manifest()
 
 
 def test_manifest_records_tier_1_implementation_hash(_isolate_runtime_val_registries: None) -> None:

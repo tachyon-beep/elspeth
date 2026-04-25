@@ -169,10 +169,15 @@ class SessionManager:
     def delete(self, session_id: str) -> None:
         """Delete a saved session."""
         path = self._session_path(session_id)
-        with self._locked_session(session_id):
-            if not path.exists():
-                raise SessionNotFoundError(session_id)
-            path.unlink()
+        if not path.exists():
+            raise SessionNotFoundError(session_id)
+        try:
+            with self._locked_session(session_id):
+                if not path.exists():
+                    raise SessionNotFoundError(session_id)
+                path.unlink()
+        except FileNotFoundError as exc:
+            raise SessionNotFoundError(session_id) from exc
 
     def list_sessions(self) -> list[dict[str, Any]]:
         """List all saved sessions with ID, name, and version."""

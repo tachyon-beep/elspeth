@@ -136,11 +136,15 @@ def _strip_docstrings(node: ast.AST) -> None:
             body.pop(0)
 
 
-def _class_source_hash(cls: type[object]) -> str | None:
+def _class_source_hash(cls: type[object]) -> str:
     try:
         source = textwrap.dedent(inspect.getsource(cls))
-    except (OSError, TypeError):
-        return None
+    except (OSError, TypeError) as exc:
+        raise FrameworkBugError(
+            "Runtime-VAL manifest cannot hash source for "
+            f"{cls.__module__}.{cls.__qualname__}: source unavailable. "
+            "Classes recorded in the resume-trust manifest must be source-available."
+        ) from exc
     tree = ast.parse(source)
     _strip_docstrings(tree)
     return _json_hash(ast.dump(tree, include_attributes=False))
@@ -156,6 +160,46 @@ def _unwrap_callable(attribute: object) -> object | None:
     if inspect.isfunction(attribute):
         return attribute
     return None
+
+
+def _callable_dependency_key(func: object) -> str:
+    return f"{getattr(func, '__module__', '<unknown>')}:{getattr(func, '__qualname__', repr(func))}"
+
+
+def _is_runtime_val_helper_dependency(candidate: object, *, owner_module: str | None) -> bool:
+    if not inspect.isfunction(candidate):
+        return False
+    module_name_obj: object = getattr(candidate, "__module__", None)
+    if type(module_name_obj) is not str or module_name_obj == "builtins":
+        return False
+    module_name = module_name_obj
+    return module_name == owner_module or module_name.startswith("elspeth.")
+
+
+def _callable_dependency_hashes(func: object, *, seen: frozenset[str] = frozenset()) -> dict[str, object]:
+    code = getattr(func, "__code__", None)
+    globals_table = getattr(func, "__globals__", None)
+    if not isinstance(code, CodeType) or not isinstance(globals_table, dict):
+        return {}
+
+    current_key = _callable_dependency_key(func)
+    next_seen = seen | frozenset({current_key})
+    owner_module = getattr(func, "__module__", None)
+    dependencies: dict[str, object] = {}
+    for name in sorted(code.co_names):
+        if name not in globals_table:
+            continue
+        candidate = globals_table[name]
+        if not _is_runtime_val_helper_dependency(candidate, owner_module=owner_module):
+            continue
+        dependency_key = _callable_dependency_key(candidate)
+        if dependency_key in next_seen:
+            continue
+        dependencies[dependency_key] = {
+            "implementation_hash": _callable_implementation_hash(candidate),
+            "dependencies": _callable_dependency_hashes(candidate, seen=next_seen),
+        }
+    return dependencies
 
 
 def _iter_relevant_method_hashes(cls: type[object], *, method_names: list[str] | None = None) -> dict[str, str]:
@@ -175,6 +219,23 @@ def _iter_relevant_method_hashes(cls: type[object], *, method_names: list[str] |
             continue
         method_hashes[name] = _callable_implementation_hash(callable_obj)
     return method_hashes
+
+
+def _iter_relevant_method_dependency_hashes(
+    cls: type[object],
+    *,
+    method_names: list[str],
+) -> dict[str, object]:
+    dependency_hashes: dict[str, object] = {}
+    for name in sorted(set(method_names)):
+        attribute = inspect.getattr_static(cls, name, None)
+        callable_obj = _unwrap_callable(attribute)
+        if callable_obj is None:
+            continue
+        dependencies = _callable_dependency_hashes(callable_obj)
+        if dependencies:
+            dependency_hashes[name] = dependencies
+    return dependency_hashes
 
 
 def _payload_schema_hash(payload_schema: object) -> str:
@@ -226,7 +287,10 @@ def _declaration_contract_implementation_hash(contract: DeclarationContract) -> 
     return _class_implementation_hash(
         cls,
         method_names=method_names,
-        extra={"payload_schema_hash": _payload_schema_hash(getattr(cls, "payload_schema", None))},
+        extra={
+            "payload_schema_hash": _payload_schema_hash(getattr(cls, "payload_schema", None)),
+            "method_dependency_hashes": _iter_relevant_method_dependency_hashes(cls, method_names=method_names),
+        },
     )
 
 

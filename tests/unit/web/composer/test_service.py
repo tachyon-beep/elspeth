@@ -25,13 +25,14 @@ from elspeth.web.composer.protocol import (
     ComposerServiceError,
     ToolArgumentError,
 )
-from elspeth.web.composer.service import ComposerServiceImpl
+from elspeth.web.composer.service import ComposerAvailability, ComposerServiceImpl
 from elspeth.web.composer.state import (
     CompositionState,
     PipelineMetadata,
     ValidationSummary,
 )
 from elspeth.web.composer.tools import ToolResult
+from elspeth.web.composer.tools import execute_tool as _execute_tool
 from elspeth.web.config import WebSettings
 
 
@@ -158,6 +159,16 @@ def _make_settings(**overrides: Any) -> WebSettings:
     }
     defaults.update(overrides)
     return WebSettings(**defaults)
+
+
+@pytest.fixture(autouse=True)
+def _composer_available_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep service tests focused on compose behavior, not local API keys."""
+
+    def _available(self: ComposerServiceImpl) -> ComposerAvailability:
+        return ComposerAvailability(available=True, model=self._model, provider="test")
+
+    monkeypatch.setattr(ComposerServiceImpl, "_compute_availability", _available)
 
 
 class TestComposerTextOnlyResponse:
@@ -747,6 +758,78 @@ class TestComposerErrorHandling:
         assert "on_success" in error_content["error"]
         assert "missing required" in error_content["error"].lower()
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("arguments", [[], None, "oops"])
+    async def test_top_level_non_object_mutation_arguments_return_tool_error(self, arguments: Any) -> None:
+        """Non-object mutation arguments are Tier-3 tool errors, not plugin crashes."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "call_bad",
+                    "name": "set_source",
+                    "arguments": arguments,
+                }
+            ],
+        )
+        text = _make_llm_response(content="Recovered.")
+
+        with (
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                wraps=_execute_tool,
+            ) as mock_execute_tool,
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_llm.side_effect = [bad_call, text]
+            result = await service.compose("Setup", [], state)
+
+        assert result.message == "Recovered."
+        mock_execute_tool.assert_not_called()
+        tool_msg = mock_llm.call_args_list[1][0][0][-1]
+        error_content = json.loads(tool_msg["content"])
+        assert "arguments must be a JSON object" in error_content["error"]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("arguments", [[], None, "oops"])
+    async def test_top_level_non_object_discovery_arguments_return_tool_error(self, arguments: Any) -> None:
+        """Non-object discovery arguments are rejected before cache lookup or execution."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        bad_call = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "call_bad",
+                    "name": "list_sources",
+                    "arguments": arguments,
+                }
+            ],
+        )
+        text = _make_llm_response(content="Recovered.")
+
+        with (
+            patch(
+                "elspeth.web.composer.service.execute_tool",
+                wraps=_execute_tool,
+            ) as mock_execute_tool,
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+        ):
+            mock_llm.side_effect = [bad_call, text]
+            result = await service.compose("Explore", [], state)
+
+        assert result.message == "Recovered."
+        mock_execute_tool.assert_not_called()
+        tool_msg = mock_llm.call_args_list[1][0][0][-1]
+        error_content = json.loads(tool_msg["content"])
+        assert "arguments must be a JSON object" in error_content["error"]
+
 
 class TestBuildMessages:
     @pytest.mark.asyncio
@@ -889,6 +972,53 @@ class TestDiscoveryCache:
         # context) and once by execute_tool (first discovery call).
         # The second discovery call is a cache hit — no catalog call.
         # Total: 2, not 3.
+        assert catalog.list_sources.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_rebuilds_result_envelope_from_current_state(self) -> None:
+        """Cacheable discovery data is reused, but validation/version stay current."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        disc1 = _make_llm_response(
+            tool_calls=[{"id": "c1", "name": "list_sources", "arguments": {}}],
+        )
+        mutate = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c2",
+                    "name": "set_source",
+                    "arguments": {
+                        "plugin": "csv",
+                        "on_success": "out",
+                        "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                        "on_validation_failure": "quarantine",
+                    },
+                }
+            ],
+        )
+        disc2 = _make_llm_response(
+            tool_calls=[{"id": "c3", "name": "list_sources", "arguments": {}}],
+        )
+        text = _make_llm_response(content="Done.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [disc1, mutate, disc2, text]
+            result = await service.compose("Build", [], state)
+
+        assert result.state.version == 2
+        cached_tool_message = mock_llm.call_args_list[3][0][0][-1]
+        cached_payload = json.loads(cached_tool_message["content"])
+        assert cached_payload["version"] == 2
+        expected_validation = ToolResult(
+            success=True,
+            updated_state=result.state,
+            validation=result.state.validate(),
+            affected_nodes=(),
+        ).to_dict()["validation"]
+        assert cached_payload["validation"] == expected_validation
         assert catalog.list_sources.call_count == 2
 
     @pytest.mark.asyncio
@@ -1224,6 +1354,58 @@ class TestEmptyChoicesValidation:
         # Confirm both LLM calls happened — the error is from the bonus
         # turn (second call), not from a tool handler fault on the first.
         assert mock_acomp.call_count == 2
+
+
+class TestComposerAvailabilityAndBadRequest:
+    """Readiness and LiteLLM bad-request failures are normalized by the service."""
+
+    @pytest.mark.asyncio
+    async def test_unavailable_composer_short_circuits_before_llm_call(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        service._availability = ComposerAvailability(
+            available=False,
+            model="bad-model",
+            provider=None,
+            reason="Composer model bad-model is unavailable.",
+        )
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            pytest.raises(ComposerServiceError, match="bad-model is unavailable"),
+        ):
+            mock_llm.return_value = _make_llm_response(content="unexpected")
+            await service.compose("Hello", [], _empty_state())
+
+        mock_llm.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_litellm_bad_request_raises_redacted_service_error(self) -> None:
+        from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        bad_request = LiteLLMBadRequestError(
+            message="bad model leaked-detail",
+            model="bad-model",
+            llm_provider="bad-provider",
+        )
+
+        with (
+            patch(
+                "elspeth.web.composer.service.litellm.acompletion",
+                new_callable=AsyncMock,
+                side_effect=bad_request,
+            ),
+            pytest.raises(ComposerServiceError) as exc_info,
+        ):
+            await service.compose("Hello", [], state)
+
+        assert str(exc_info.value) == "LLM request rejected (BadRequestError)"
+        assert "leaked-detail" not in str(exc_info.value)
 
 
 class TestPluginBugCrashesFromToolExecution:

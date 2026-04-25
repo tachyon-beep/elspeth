@@ -12,6 +12,7 @@ Subclasses implement _analyze_field() for their specific Azure API.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from threading import Lock
 from typing import Any
@@ -38,6 +39,9 @@ from elspeth.plugins.transforms.safety_utils import validate_fields_not_empty as
 
 logger = structlog.get_logger(__name__)
 
+_CAPACITY_RETRY_INITIAL_DELAY_SECONDS = 0.05
+_CAPACITY_RETRY_MAX_DELAY_SECONDS = 1.0
+
 
 def _warn_telemetry_before_start(event: Any) -> None:
     """Default telemetry callback before on_start() — warns instead of silently dropping."""
@@ -60,6 +64,7 @@ class BaseAzureSafetyConfig(TransformDataConfig):
         description="Field name(s) to analyze, or 'all' for all string fields",
     )
     max_capacity_retry_seconds: int = Field(3600, gt=0, description="Max seconds to retry capacity errors")
+    batch_wait_timeout_seconds: int = Field(3600, gt=0, description="Max seconds to wait for a batch row result")
 
     @field_validator("endpoint")
     @classmethod
@@ -124,6 +129,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         self._api_key = cfg.api_key
         self._fields = cfg.fields
         self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
+        self._batch_wait_timeout_seconds = cfg.batch_wait_timeout_seconds
 
         schema = create_schema_from_config(cfg.schema_config, schema_name, allow_coercion=False)
         self.input_schema = schema
@@ -172,7 +178,7 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
             output=output,
             name=self.name,
             max_workers=max_pending,  # Match workers to max_pending
-            batch_wait_timeout=float(self._max_capacity_retry_seconds),
+            batch_wait_timeout=float(self._batch_wait_timeout_seconds),
         )
         self._batch_initialized = True
 
@@ -288,15 +294,13 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
     ) -> TransformResult:
         """Process a single row with explicit state_id.
 
-        Iterates over configured fields, validates presence and type,
-        then delegates to _analyze_field() for API-specific analysis.
+        Validates configured fields before any external call, then delegates
+        to _analyze_field() for API-specific analysis.
         Handles shared exception types (httpx errors, MalformedResponseError).
-
-        Raises:
-            CapacityError: On rate limit errors (for worker pool retry)
         """
         fields_to_scan = get_fields_to_scan(self._fields, row)
         all_mode = self._fields == "all"
+        validated_fields: list[tuple[str, str]] = []
 
         for field_name in fields_to_scan:
             if field_name not in row:
@@ -324,46 +328,105 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
                     retryable=False,
                 )
 
-            # Call subclass-specific analysis
-            try:
-                violation = self._analyze_field(value, field_name, state_id, token_id=token_id)
-            except httpx.HTTPStatusError as e:
-                status_code = e.response.status_code
-                if is_capacity_error(status_code):
-                    # Convert to CapacityError for pooled executor retry (429/503/529)
-                    raise CapacityError(status_code, str(e)) from e
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "http_error",
-                        "status_code": status_code,
-                        "message": str(e),
-                    },
-                    retryable=False,
-                )
-            except httpx.RequestError as e:
-                # Network errors are transient — re-raise for engine retry.
-                # TransformResult.error(retryable=True) was dead code: the engine
-                # retries by catching PluginRetryableError, not by inspecting results.
-                raise PluginRetryableError(f"Azure API network error: {e}", retryable=True) from e
-            except MalformedResponseError as e:
-                # Malformed API response — fail CLOSED, non-retryable
-                # (response structure won't improve on retry)
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "malformed_response",
-                        "message": str(e),
-                    },
-                    retryable=False,
-                )
+            validated_fields.append((field_name, value))
 
+        for field_name, value in validated_fields:
+            violation = self._analyze_field_with_capacity_retry(value, field_name, state_id, token_id=token_id)
             if violation is not None:
                 return violation
 
         return TransformResult.success(
             self._align_output_row_contract(row),
             success_reason={"action": "validated"},
+        )
+
+    def _analyze_field_once(
+        self,
+        value: str,
+        field_name: str,
+        state_id: str,
+        *,
+        token_id: str | None = None,
+    ) -> TransformResult | None:
+        """Run one Azure field analysis attempt and classify non-capacity failures."""
+        try:
+            return self._analyze_field(value, field_name, state_id, token_id=token_id)
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+            if is_capacity_error(status_code):
+                raise CapacityError(status_code, str(e)) from e
+            return TransformResult.error(
+                {
+                    "reason": "api_error",
+                    "error_type": "http_error",
+                    "status_code": status_code,
+                    "message": str(e),
+                },
+                retryable=False,
+            )
+        except httpx.RequestError as e:
+            # Network errors are transient — re-raise for engine retry.
+            # TransformResult.error(retryable=True) was dead code: the engine
+            # retries by catching PluginRetryableError, not by inspecting results.
+            raise PluginRetryableError(f"Azure API network error: {e}", retryable=True) from e
+        except MalformedResponseError as e:
+            # Malformed API response — fail CLOSED, non-retryable
+            # (response structure won't improve on retry)
+            return TransformResult.error(
+                {
+                    "reason": "api_error",
+                    "error_type": "malformed_response",
+                    "message": str(e),
+                },
+                retryable=False,
+            )
+
+    def _analyze_field_with_capacity_retry(
+        self,
+        value: str,
+        field_name: str,
+        state_id: str,
+        *,
+        token_id: str | None = None,
+    ) -> TransformResult | None:
+        """Retry Azure capacity responses within max_capacity_retry_seconds."""
+        started_at = time.monotonic()
+        deadline = started_at + float(self._max_capacity_retry_seconds)
+        retry_delay = _CAPACITY_RETRY_INITIAL_DELAY_SECONDS
+
+        while True:
+            try:
+                return self._analyze_field_once(value, field_name, state_id, token_id=token_id)
+            except CapacityError as e:
+                now = time.monotonic()
+                if now >= deadline:
+                    return self._capacity_retry_timeout_result(e, started_at)
+
+                sleep_seconds = min(retry_delay, deadline - now)
+                if sleep_seconds > 0:
+                    time.sleep(sleep_seconds)
+                if time.monotonic() >= deadline:
+                    return self._capacity_retry_timeout_result(e, started_at)
+
+                retry_delay = min(retry_delay * 2.0, _CAPACITY_RETRY_MAX_DELAY_SECONDS)
+
+    def _capacity_retry_timeout_result(
+        self,
+        capacity_error: CapacityError,
+        started_at: float,
+    ) -> TransformResult:
+        """Build the same retry_timeout row result shape as the pooled executor."""
+        elapsed = time.monotonic() - started_at
+        return TransformResult.error(
+            {
+                "reason": "retry_timeout",
+                "error": str(capacity_error),
+                "error_type": type(capacity_error).__name__,
+                "elapsed_seconds": elapsed,
+                "max_seconds": self._max_capacity_retry_seconds,
+                "status_code": capacity_error.status_code,
+            },
+            retryable=False,
         )
 
     def _analyze_field(
@@ -387,8 +450,8 @@ class BaseAzureSafetyTransform(BaseTransform, BatchTransformMixin):
         """Get or create audited HTTP client for a state_id.
 
         Clients are cached to preserve call_index across retries.
-        This ensures uniqueness of (state_id, call_index) even when
-        the worker pool retries after CapacityError.
+        This ensures uniqueness of (state_id, call_index) when the local
+        capacity retry loop retries after CapacityError.
 
         Thread-safe: multiple workers can call this concurrently.
         """

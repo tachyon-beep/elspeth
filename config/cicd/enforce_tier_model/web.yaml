@@ -723,6 +723,11 @@ allow_hits:
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
+- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=ae9ab2326a1a815d
+  owner: bugfix
+  reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays, nulls, or scalars; the composer must reject non-object arguments before cache lookup or tool dispatch
+  safety: Emits a tool error back to the LLM, does not call execute_tool, marks mutation intent for budget accounting, and preserves current state
+  expires: null
 - key: "web/app.py:R6:_periodic_orphan_cleanup:fp=6f628bf40d3c4d12"
   owner: web-execution
   reason: "Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention, SQLite file I/O) so the periodic loop retries on the next interval. Catch is intentionally narrow; programmer-bug exceptions (AttributeError from a drifted attribute on ExecutionServiceImpl, TypeError from a signature change, AssertionError from an invariant guard) are NOT caught and terminate the background task so they surface at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError). Same pattern as the CRIT-2 audit-cleanup narrow catch at web/composer/service.py ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py fork_from_message (lines 968 and 987)."

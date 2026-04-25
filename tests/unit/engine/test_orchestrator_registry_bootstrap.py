@@ -17,6 +17,7 @@ import importlib
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -398,15 +399,62 @@ def test_resume_calls_prepare_for_run() -> None:
     PassThroughDeclarationContract is registered, but without an explicit
     prepare_for_run() call the registries are never frozen — leaving a window
     where register_declaration_contract() could succeed after bootstrap.
-
-    This structural test confirms the call is present without requiring
-    a full Orchestrator construction (which needs a live LandscapeDB).
     """
-    import inspect
-
+    import elspeth.engine.orchestrator.core as orchestrator_core
+    from elspeth.contracts import Checkpoint, ResumePoint
     from elspeth.engine.orchestrator.core import Orchestrator
+    from tests.fixtures.landscape import make_landscape_db
+    from tests.fixtures.stores import MockPayloadStore
 
-    source = inspect.getsource(Orchestrator.resume)
-    assert "prepare_for_run" in source, (
-        "Orchestrator.resume() must invoke prepare_for_run() to freeze registries on the recovery path (ADR-010 §Decision 3)"
+    calls: list[str] = []
+
+    class ReconstructReached(RuntimeError):
+        """Stops resume after the bootstrap ordering assertion fires."""
+
+    def fake_prepare_for_run() -> None:
+        calls.append("prepare_for_run")
+
+    def fake_reconstruct_resume_state(self, resume_point, payload_store):  # type: ignore[no-untyped-def]
+        assert calls == ["prepare_for_run"], (
+            "Orchestrator.resume() must invoke prepare_for_run() before reconstructing resume state (ADR-010 §Decision 3)"
+        )
+        calls.append("reconstruct_resume_state")
+        raise ReconstructReached
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(orchestrator_core, "prepare_for_run", fake_prepare_for_run)
+    monkeypatch.setattr(Orchestrator, "_reconstruct_resume_state", fake_reconstruct_resume_state)
+    try:
+        checkpoint = Checkpoint(
+            checkpoint_id="cp-resume-bootstrap",
+            run_id="run-resume-bootstrap",
+            token_id="tok-resume-bootstrap",
+            node_id="node-resume-bootstrap",
+            sequence_number=1,
+            created_at=datetime.now(UTC),
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
+            format_version=Checkpoint.CURRENT_FORMAT_VERSION,
+        )
+        resume_point = ResumePoint(
+            checkpoint=checkpoint,
+            token_id=checkpoint.token_id,
+            node_id=checkpoint.node_id,
+            sequence_number=checkpoint.sequence_number,
+        )
+
+        orchestrator = Orchestrator(make_landscape_db())
+
+        with pytest.raises(ReconstructReached):
+            orchestrator.resume(
+                resume_point=resume_point,
+                config=object(),  # type: ignore[arg-type]
+                graph=object(),  # type: ignore[arg-type]
+                payload_store=MockPayloadStore(),
+            )
+    finally:
+        monkeypatch.undo()
+
+    assert calls == ["prepare_for_run", "reconstruct_resume_state"], (
+        "resume() must freeze runtime-VAL registries before any recovery-state reconstruction."
     )

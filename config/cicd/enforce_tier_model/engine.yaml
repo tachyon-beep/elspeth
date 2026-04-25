@@ -106,22 +106,22 @@ allow_hits:
   reason: Cleanup of OPEN pre-phase states after begin_node_state failure must not mask original error
   safety: Logs warning with cleanup exception details; always re-raises the original error
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=2d9244047bdc6a9e
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=ee203332826e6fd2
   owner: bugfix
   reason: Offensive isinstance — validates sink.write() returns SinkWriteResult, not a bare ArtifactDescriptor or other type
   safety: Crashes immediately with PluginContractViolation identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=e385ff15af416033
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=b12197151a5f1e19
   owner: bugfix
   reason: Offensive isinstance — validates plugin return type to crash with PluginContractViolation instead of opaque AttributeError
   safety: Crashes immediately with clear error identifying the buggy sink plugin
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=c258325b17ffff20
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=24b32b1d4dc40b85
   owner: bugfix
   reason: Offensive isinstance — validates failsink.write() returns SinkWriteResult, crashing with PluginContractViolation identifying the buggy failsink plugin instead of propagating an opaque AttributeError from the downstream artifact access
   safety: Crashes immediately with PluginContractViolation naming the failsink and observed return type; no silent coercion
   expires: null
-- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=8943e75f98e1c788
+- key: engine/executors/sink.py:R5:SinkExecutor:write:fp=8c66dfa7710892e5
   owner: bugfix
   reason: Offensive isinstance — validates the artifact attached to the failsink's SinkWriteResult is an ArtifactDescriptor, crashing with PluginContractViolation identifying the buggy failsink plugin instead of propagating an opaque AttributeError from later artifact_path access
   safety: Crashes immediately with PluginContractViolation naming the failsink and observed artifact type; no silent coercion

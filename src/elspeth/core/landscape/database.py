@@ -65,6 +65,8 @@ _REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     # Batch membership run ownership - enables composite FK enforcement to both
     # batches and tokens so cross-run batch contamination fails at the database.
     ("batch_members", "run_id"),
+    # Retry lineage exactness - retry_batch() must deduplicate per failed batch.
+    ("batches", "retry_of_batch_id"),
 )
 
 # Required foreign keys for audit integrity (Tier 1 trust).
@@ -87,6 +89,7 @@ _REQUIRED_COMPOSITE_FOREIGN_KEYS: tuple[tuple[str, tuple[str, ...], str, tuple[s
     ("artifacts", ("sink_node_id", "run_id"), "nodes", ("node_id", "run_id")),
     ("batches", ("aggregation_node_id", "run_id"), "nodes", ("node_id", "run_id")),
     ("batches", ("aggregation_state_id", "run_id"), "node_states", ("state_id", "run_id")),
+    ("batches", ("retry_of_batch_id", "run_id"), "batches", ("batch_id", "run_id")),
     ("batch_members", ("batch_id", "run_id"), "batches", ("batch_id", "run_id")),
     ("batch_members", ("token_id", "run_id"), "tokens", ("token_id", "run_id")),
 )

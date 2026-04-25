@@ -685,6 +685,7 @@ class TestBatchLoader:
             "status": "draft",
             "created_at": NOW,
             "aggregation_state_id": None,
+            "retry_of_batch_id": None,
             "trigger_type": None,
             "trigger_reason": None,
             "completed_at": None,
@@ -704,6 +705,7 @@ class TestBatchLoader:
         sa_row = self._make_batch_row(
             status="completed",
             aggregation_state_id="agg-state-1",
+            retry_of_batch_id="batch-0",
             trigger_type="count",
             trigger_reason="threshold=10",
             completed_at=LATER,
@@ -712,6 +714,7 @@ class TestBatchLoader:
         result = loader.load(sa_row)
         assert result.batch_id == "batch-1"
         assert result.aggregation_state_id == "agg-state-1"
+        assert result.retry_of_batch_id == "batch-0"
         assert result.trigger_type == TriggerType.COUNT
         assert isinstance(result.trigger_type, TriggerType)
         assert result.trigger_reason == "threshold=10"

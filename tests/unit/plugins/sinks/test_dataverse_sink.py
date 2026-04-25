@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.contracts.errors import SinkTransactionalInvariantError
 from elspeth.core.canonical import canonical_json
+from elspeth.engine.executors.sink import SinkExecutor
 from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseClientError,
     DataversePageResponse,
@@ -127,6 +129,88 @@ class TestDataverseSinkConfig:
         assert "account_id" in cfg.lookups
         assert cfg.lookups["account_id"].target_entity == "accounts"
 
+    def test_lookup_target_entity_required(self) -> None:
+        with pytest.raises(PluginConfigError, match="target_entity"):
+            DataverseSinkConfig.from_dict(
+                _config(
+                    lookups={
+                        "account_id": {
+                            "target_entity": "",
+                            "target_field": "parentcustomerid",
+                        }
+                    }
+                )
+            )
+
+    def test_lookup_target_entity_whitespace_only(self) -> None:
+        with pytest.raises(PluginConfigError, match="target_entity"):
+            DataverseSinkConfig.from_dict(
+                _config(
+                    lookups={
+                        "account_id": {
+                            "target_entity": "   ",
+                            "target_field": "parentcustomerid",
+                        }
+                    }
+                )
+            )
+
+    def test_lookup_target_entity_stripped(self) -> None:
+        cfg = DataverseSinkConfig.from_dict(
+            _config(
+                lookups={
+                    "account_id": {
+                        "target_entity": "  accounts  ",
+                        "target_field": "parentcustomerid",
+                    }
+                }
+            )
+        )
+
+        assert cfg.lookups is not None
+        assert cfg.lookups["account_id"].target_entity == "accounts"
+
+    def test_lookup_target_field_required(self) -> None:
+        with pytest.raises(PluginConfigError, match="target_field"):
+            DataverseSinkConfig.from_dict(
+                _config(
+                    lookups={
+                        "account_id": {
+                            "target_entity": "accounts",
+                            "target_field": "",
+                        }
+                    }
+                )
+            )
+
+    def test_lookup_target_field_whitespace_only(self) -> None:
+        with pytest.raises(PluginConfigError, match="target_field"):
+            DataverseSinkConfig.from_dict(
+                _config(
+                    lookups={
+                        "account_id": {
+                            "target_entity": "accounts",
+                            "target_field": "   ",
+                        }
+                    }
+                )
+            )
+
+    def test_lookup_target_field_stripped(self) -> None:
+        cfg = DataverseSinkConfig.from_dict(
+            _config(
+                lookups={
+                    "account_id": {
+                        "target_entity": "accounts",
+                        "target_field": "  parentcustomerid  ",
+                    }
+                }
+            )
+        )
+
+        assert cfg.lookups is not None
+        assert cfg.lookups["account_id"].target_field == "parentcustomerid"
+
     def test_lookup_config_rejects_extra_fields(self) -> None:
         with pytest.raises(PluginConfigError):
             DataverseSinkConfig.from_dict(
@@ -186,6 +270,43 @@ class TestDataverseSinkInit:
         # field_mapping maps "email" (pipeline) -> "emailaddress1" (Dataverse)
         # So _alternate_key_pipeline_field should be "email"
         assert sink._alternate_key_pipeline_field == "email"
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_observed_schema_required_fields_populate_declared_required_fields(self, _mock_schema: MagicMock) -> None:
+        """Observed-mode required_fields must become the sink boundary contract."""
+        sink = inject_write_failure(
+            DataverseSink(
+                _config(
+                    schema={
+                        "mode": "observed",
+                        "required_fields": ["must_exist_for_contract"],
+                    }
+                )
+            )
+        )
+
+        assert sink.declared_required_fields == frozenset({"must_exist_for_contract"})
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_observed_schema_required_fields_fail_sink_boundary(self, _mock_schema: MagicMock) -> None:
+        """Missing observed required fields must fail before Dataverse write I/O."""
+        sink = inject_write_failure(
+            DataverseSink(
+                _config(
+                    schema={
+                        "mode": "observed",
+                        "required_fields": ["must_exist_for_contract"],
+                    }
+                )
+            )
+        )
+
+        with pytest.raises(SinkTransactionalInvariantError, match="must_exist_for_contract"):
+            SinkExecutor._validate_sink_input(
+                sink,
+                [{"email": "alice@example.com", "name": "Alice"}],
+                skip_schema=True,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +648,39 @@ class TestWriteLifecycle:
         assert call_kwargs["request_data"]["method"] == "PATCH"
         assert "a%40b.com" in call_kwargs["request_data"]["url"]
         assert call_kwargs["response_data"]["status_code"] == 204
+
+    @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
+    def test_success_audit_preserves_client_fingerprinted_request_headers(
+        self, _mock_schema: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DataverseClient returns audit-ready request_headers; the sink must not fingerprint them again."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "dataverse-sink-test-key")
+        monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "false")
+        sink = inject_write_failure(DataverseSink(_config()))
+
+        fingerprinted_headers = {
+            "Authorization": "<fingerprint:client-produced-fingerprint>",
+            "Accept": "application/json",
+        }
+        mock_client = MagicMock()
+        mock_client.upsert.return_value = DataversePageResponse(
+            status_code=204,
+            rows=[],
+            latency_ms=12.0,
+            headers={"content-length": "0"},
+            request_headers=fingerprinted_headers,
+            request_url="https://myorg.crm.dynamics.com/api/data/v9.2/contacts",
+            next_link=None,
+            paging_cookie=None,
+            more_records=None,
+        )
+        sink._client = mock_client
+
+        ctx = self._make_mock_ctx()
+        sink.write([{"email": "a@b.com", "name": "Alice"}], ctx)
+
+        call_kwargs = ctx.record_call.call_args_list[0].kwargs
+        assert call_kwargs["request_data"]["headers"] == fingerprinted_headers
 
     @patch("elspeth.plugins.sinks.dataverse.create_schema_from_config", return_value=MagicMock())
     def test_empty_alternate_key_value_raises(self, _mock_schema: MagicMock) -> None:

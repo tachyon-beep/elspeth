@@ -2987,6 +2987,84 @@ class TestSinkExecutor:
             assert kwargs["outcome"] == RowOutcome.FAILED
             assert kwargs["context"]["exception_type"] == "SinkRequiredFieldsViolation"
 
+    def test_layer1_boundary_failure_does_not_reclean_terminal_states(self) -> None:
+        """Layer 1 sink boundary failures already close states before re-raising.
+
+        The outer Tier-1 crash handler must not try to close those same terminal
+        states again, or a recorder terminality error can mask the original
+        SinkRequiredFieldsViolation.
+        """
+        from elspeth.core.landscape.errors import LandscapeRecordError
+
+        factory = _make_factory()
+
+        def _begin_node_state(**kwargs: Any) -> Mock:
+            return Mock(state_id=f"state_{kwargs['token_id']}")
+
+        completed_state_ids: set[str] = set()
+
+        def _complete_node_state(**kwargs: Any) -> Mock:
+            state_id = kwargs["state_id"]
+            if state_id in completed_state_ids:
+                raise LandscapeRecordError(f"Cannot complete node state {state_id}: current status 'FAILED' is already terminal.")
+            completed_state_ids.add(state_id)
+            return Mock(state_id=state_id, status=kwargs["status"])
+
+        factory.execution.begin_node_state.side_effect = _begin_node_state
+        factory.execution.complete_node_state.side_effect = _complete_node_state
+
+        executor = SinkExecutor(factory.execution, factory.data_flow, _make_span_factory(), run_id="test-run")
+        contract = _make_contract()
+        token = _make_token(data={"id": "1"}, token_id="t1", contract=contract)
+        sink = _make_sink()
+        sink.declared_required_fields = frozenset({"id", "name"})
+        ctx = make_context()
+        pending = PendingOutcome(outcome=RowOutcome.COMPLETED)
+
+        def _raise_sink_required_fields(
+            *,
+            sink: Any,
+            rows: list[dict[str, object]],
+            tokens: list[TokenInfo],
+            run_id: str,
+            node_id: str,
+            row_contracts: list[SchemaContract | None] | None,
+        ) -> None:
+            del rows, row_contracts
+            violation = SinkRequiredFieldsViolation(
+                plugin=sink.name,
+                node_id=node_id,
+                run_id=run_id,
+                row_id=tokens[0].row_id,
+                token_id=tokens[0].token_id,
+                payload={
+                    "declared": ["id", "name"],
+                    "runtime_observed": ["id"],
+                    "missing": ["name"],
+                },
+                message="Sink 'test_sink' declared required fields ['id', 'name'] but row is missing ['name']",
+            )
+            _attach_contract_name_from_dispatcher(violation, "sink_required_fields")
+            raise violation
+
+        with (
+            patch.object(SinkExecutor, "_run_sink_boundary_checks", autospec=True, side_effect=_raise_sink_required_fields),
+            pytest.raises(SinkRequiredFieldsViolation, match=r"declared required fields.*missing.*name"),
+        ):
+            executor.write(
+                sink,
+                [token],
+                ctx,
+                step_in_pipeline=5,
+                sink_name="out",
+                pending_outcome=pending,
+            )
+
+        sink.write.assert_not_called()
+        assert factory.execution.complete_node_state.call_count == 1
+        assert completed_state_ids == {"state_t1"}
+        factory.data_flow.record_token_outcome.assert_called_once()
+
     def test_missing_required_field_after_coalesce_shows_contract_context(self) -> None:
         """When a required field is missing and the contract marks it optional,
         error message includes coalesce merge context."""

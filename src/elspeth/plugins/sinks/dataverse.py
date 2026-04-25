@@ -33,7 +33,6 @@ from elspeth.plugins.infrastructure.clients.dataverse import (
     DataverseClientError,
     validate_additional_domain,
 )
-from elspeth.plugins.infrastructure.clients.fingerprinting import fingerprint_headers
 from elspeth.plugins.infrastructure.config_base import DataPluginConfig
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
@@ -47,6 +46,20 @@ class LookupConfig(BaseModel):
 
     target_entity: str  # Dataverse entity to bind to (e.g., "accounts")
     target_field: str  # Navigation property name (e.g., "parentcustomerid")
+
+    @field_validator("target_entity")
+    @classmethod
+    def validate_target_entity_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("target_entity cannot be empty")
+        return v.strip()
+
+    @field_validator("target_field")
+    @classmethod
+    def validate_target_field_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("target_field cannot be empty")
+        return v.strip()
 
 
 class DataverseSinkConfig(DataPluginConfig):
@@ -210,7 +223,7 @@ class DataverseSink(BaseSink):
 
     name = "dataverse"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:0350a7197e715d22"
+    source_file_hash: str | None = "sha256:cf259d9d2a666fb9"
     determinism = Determinism.EXTERNAL_CALL
     config_model = DataverseSinkConfig
     idempotent = True  # PATCH upsert is idempotent — safe for retries and crash recovery (engine does not yet read this flag)
@@ -239,6 +252,9 @@ class DataverseSink(BaseSink):
             allow_coercion=False,
         )
         self.input_schema = self._schema_class
+
+        # Required-field enforcement (centralized in SinkExecutor)
+        self.declared_required_fields = self._schema_config.get_effective_required_fields()
 
         # Resolve the pipeline field name for the alternate key.
         # field_mapping is pipeline_field → dataverse_column; we need the reverse.
@@ -435,7 +451,7 @@ class DataverseSink(BaseSink):
                 request_data = {
                     "method": "PATCH",
                     "url": url,
-                    "headers": fingerprint_headers(response.request_headers),
+                    "headers": response.request_headers,
                     "json": payload,
                 }
                 response_data = {"status_code": response.status_code}

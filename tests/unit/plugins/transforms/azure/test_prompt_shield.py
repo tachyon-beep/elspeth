@@ -533,6 +533,7 @@ class TestPromptShieldBatchProcessing:
             assert result.reason["field"] == "count"
             assert result.reason["actual_type"] == "int"
             assert result.retryable is False
+            assert mock_httpx_client.post.call_count == 0
         finally:
             transform.close()
 
@@ -1077,29 +1078,38 @@ class TestPromptShieldBatchProcessing:
             transform.close()
 
     @pytest.mark.parametrize("status_code", [429, 503, 529])
-    def test_capacity_http_status_raises_capacity_error_in_batch_adapter(
+    def test_capacity_http_status_retries_with_configured_budget_in_batch_adapter(
         self,
         mock_httpx_client: MagicMock,
         status_code: int,
     ) -> None:
-        """Capacity HTTP statuses propagate as CapacityError through waiter.wait()."""
+        """Capacity HTTP statuses are retried inside the configured budget."""
         import httpx
 
         from elspeth.engine.batch_adapter import SharedBatchAdapter
-        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
-        mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
+        capacity_error = httpx.HTTPStatusError(
             f"Capacity limited ({status_code})",
             request=Mock(),
             response=Mock(status_code=status_code),
         )
+        mock_httpx_client.post.side_effect = [
+            capacity_error,
+            _create_mock_http_response(
+                {
+                    "userPromptAnalysis": {"attackDetected": False},
+                    "documentsAnalysis": [{"attackDetected": False}],
+                }
+            ),
+        ]
 
         transform = AzurePromptShield(
             {
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
+                "max_capacity_retry_seconds": 1,
                 "schema": {"mode": "observed"},
             }
         )
@@ -1115,9 +1125,10 @@ class TestPromptShieldBatchProcessing:
             assert ctx.state_id is not None
             waiter = adapter.register(ctx.token.token_id, ctx.state_id)
             transform.accept(make_pipeline_row({"prompt": "test", "id": 1}), ctx)
-            with pytest.raises(CapacityError) as exc_info:
-                waiter.wait(timeout=10.0)
-            assert exc_info.value.status_code == status_code
+            result = waiter.wait(timeout=10.0)
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
+            assert mock_httpx_client.post.call_count == 2
         finally:
             transform.close()
 
@@ -1133,24 +1144,33 @@ class TestPromptShieldInternalProcessing:
             mock_client_class.return_value = mock_instance
             yield mock_instance
 
-    def test_process_single_with_state_raises_capacity_error_on_rate_limit(self, mock_httpx_client: MagicMock) -> None:
-        """Rate limit errors (HTTP 429) raise CapacityError for retry."""
+    def test_process_single_with_state_retries_rate_limit_with_configured_budget(self, mock_httpx_client: MagicMock) -> None:
+        """Rate limit errors retry locally before producing the row result."""
         import httpx
 
-        from elspeth.plugins.infrastructure.pooling import CapacityError
         from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShield
 
-        mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
+        capacity_error = httpx.HTTPStatusError(
             "Rate limited",
             request=Mock(),
             response=Mock(status_code=429),
         )
+        mock_httpx_client.post.side_effect = [
+            capacity_error,
+            _create_mock_http_response(
+                {
+                    "userPromptAnalysis": {"attackDetected": False},
+                    "documentsAnalysis": [{"attackDetected": False}],
+                }
+            ),
+        ]
 
         transform = AzurePromptShield(
             {
                 "endpoint": "https://test.cognitiveservices.azure.com",
                 "api_key": "test-key",
                 "fields": ["prompt"],
+                "max_capacity_retry_seconds": 1,
                 "schema": {"mode": "observed"},
             }
         )
@@ -1161,10 +1181,10 @@ class TestPromptShieldInternalProcessing:
         row_data = {"prompt": "test", "id": 1}
         row = make_pipeline_row(row_data)
 
-        with pytest.raises(CapacityError) as exc_info:
-            transform._process_single_with_state(row, "test-state-id")
+        result = transform._process_single_with_state(row, "test-state-id")
 
-        assert exc_info.value.status_code == 429
+        assert result.status == "success"
+        assert mock_httpx_client.post.call_count == 2
 
     def test_process_single_with_state_returns_error_on_non_rate_limit_http_error(self, mock_httpx_client: MagicMock) -> None:
         """Non-429 HTTP errors return TransformResult.error (not retryable)."""

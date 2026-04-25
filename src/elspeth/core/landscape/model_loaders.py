@@ -280,6 +280,7 @@ class BatchLoader:
             status=BatchStatus(row.status),  # Convert HERE
             created_at=row.created_at,
             aggregation_state_id=row.aggregation_state_id,
+            retry_of_batch_id=row.retry_of_batch_id,
             trigger_type=TriggerType(row.trigger_type) if row.trigger_type is not None else None,
             trigger_reason=row.trigger_reason,
             completed_at=row.completed_at,

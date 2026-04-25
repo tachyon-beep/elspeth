@@ -39,6 +39,7 @@ class AzurePromptShieldConfig(BaseAzureSafetyConfig):
             - "user_prompt": Only check for user prompt attacks (jailbreak)
             - "document": Only check for document attacks (prompt injection)
         max_capacity_retry_seconds: Timeout for capacity error retries (default 3600)
+        batch_wait_timeout_seconds: Timeout for receiving a completed row result (default 3600)
 
     Example YAML:
         transforms:
@@ -94,7 +95,7 @@ class AzurePromptShield(BaseAzureSafetyTransform):
 
     name = "azure_prompt_shield"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:c1e39f0d58a7b271"
+    source_file_hash: str | None = "sha256:19f08887d6f0065d"
     config_model = AzurePromptShieldConfig
     passes_through_input = True
 

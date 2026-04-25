@@ -281,6 +281,22 @@ class TestDispatchTool:
         assert load_result["success"] is True
         assert load_result["state"]["source"]["plugin"] == "csv"
 
+    def test_delete_missing_session_before_scratch_exists_returns_not_found(self, tmp_path: Path) -> None:
+        scratch_dir = tmp_path / "scratch"
+        session_id = "0" * 12
+
+        result = _dispatch_tool(
+            "delete_session",
+            {"session_id": session_id},
+            _empty_state(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert result["error"] == f"Session not found: {session_id}"
+        assert result["state"] == _empty_state().to_dict()
+
     def test_generate_yaml_returns_string_for_valid_state(self, scratch_dir: Path) -> None:
         result = _dispatch_tool(
             "generate_yaml",
