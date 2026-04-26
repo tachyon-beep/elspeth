@@ -13,6 +13,8 @@
 import { create } from "zustand";
 import type {
   Run,
+  RunDiagnostics,
+  RunDiagnosticsWorkingView,
   RunProgress,
   RunEvent,
   RunEventProgress,
@@ -36,6 +38,12 @@ interface ExecutionState {
   runs: Run[];
   activeRunId: string | null;
   progress: RunProgress | null;
+  diagnosticsByRunId: Record<string, RunDiagnostics>;
+  diagnosticsLoadingByRunId: Record<string, boolean>;
+  diagnosticsEvaluatingByRunId: Record<string, boolean>;
+  diagnosticsErrorByRunId: Record<string, string | null>;
+  diagnosticsExplanationByRunId: Record<string, string>;
+  diagnosticsWorkingViewByRunId: Record<string, RunDiagnosticsWorkingView>;
   validationResult: ValidationResult | null;
   isValidating: boolean;
   isExecuting: boolean;
@@ -46,6 +54,8 @@ interface ExecutionState {
   execute: (sessionId: string) => Promise<string | null>;
   cancel: (runId: string) => Promise<void>;
   loadRuns: (sessionId: string) => Promise<void>;
+  loadRunDiagnostics: (runId: string) => Promise<void>;
+  evaluateRunDiagnostics: (runId: string) => Promise<void>;
   connectWebSocket: (runId: string) => void;
   clearValidation: () => void;
   reset: () => void;
@@ -140,6 +150,12 @@ const initialExecutionState = {
   runs: [] as Run[],
   activeRunId: null as string | null,
   progress: null as RunProgress | null,
+  diagnosticsByRunId: {} as Record<string, RunDiagnostics>,
+  diagnosticsLoadingByRunId: {} as Record<string, boolean>,
+  diagnosticsEvaluatingByRunId: {} as Record<string, boolean>,
+  diagnosticsErrorByRunId: {} as Record<string, string | null>,
+  diagnosticsExplanationByRunId: {} as Record<string, string>,
+  diagnosticsWorkingViewByRunId: {} as Record<string, RunDiagnosticsWorkingView>,
   validationResult: null as ValidationResult | null,
   isValidating: false,
   isExecuting: false,
@@ -264,6 +280,94 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       set({ runs });
     } catch {
       // Non-critical -- runs list can be stale temporarily
+    }
+  },
+
+  async loadRunDiagnostics(runId: string) {
+    set((state) => ({
+      diagnosticsLoadingByRunId: {
+        ...state.diagnosticsLoadingByRunId,
+        [runId]: true,
+      },
+      diagnosticsErrorByRunId: {
+        ...state.diagnosticsErrorByRunId,
+        [runId]: null,
+      },
+    }));
+    try {
+      const diagnostics = await api.fetchRunDiagnostics(runId);
+      set((state) => ({
+        diagnosticsByRunId: {
+          ...state.diagnosticsByRunId,
+          [runId]: diagnostics,
+        },
+        diagnosticsLoadingByRunId: {
+          ...state.diagnosticsLoadingByRunId,
+          [runId]: false,
+        },
+        diagnosticsErrorByRunId: {
+          ...state.diagnosticsErrorByRunId,
+          [runId]: null,
+        },
+      }));
+    } catch (err) {
+      const apiErr = err as ApiError;
+      set((state) => ({
+        diagnosticsLoadingByRunId: {
+          ...state.diagnosticsLoadingByRunId,
+          [runId]: false,
+        },
+        diagnosticsErrorByRunId: {
+          ...state.diagnosticsErrorByRunId,
+          [runId]: apiErr.detail ?? "Failed to load run diagnostics.",
+        },
+      }));
+    }
+  },
+
+  async evaluateRunDiagnostics(runId: string) {
+    set((state) => ({
+      diagnosticsEvaluatingByRunId: {
+        ...state.diagnosticsEvaluatingByRunId,
+        [runId]: true,
+      },
+      diagnosticsErrorByRunId: {
+        ...state.diagnosticsErrorByRunId,
+        [runId]: null,
+      },
+    }));
+    try {
+      const result = await api.evaluateRunDiagnostics(runId);
+      set((state) => ({
+        diagnosticsExplanationByRunId: {
+          ...state.diagnosticsExplanationByRunId,
+          [runId]: result.explanation,
+        },
+        diagnosticsWorkingViewByRunId: {
+          ...state.diagnosticsWorkingViewByRunId,
+          [runId]: result.working_view,
+        },
+        diagnosticsEvaluatingByRunId: {
+          ...state.diagnosticsEvaluatingByRunId,
+          [runId]: false,
+        },
+        diagnosticsErrorByRunId: {
+          ...state.diagnosticsErrorByRunId,
+          [runId]: null,
+        },
+      }));
+    } catch (err) {
+      const apiErr = err as ApiError;
+      set((state) => ({
+        diagnosticsEvaluatingByRunId: {
+          ...state.diagnosticsEvaluatingByRunId,
+          [runId]: false,
+        },
+        diagnosticsErrorByRunId: {
+          ...state.diagnosticsErrorByRunId,
+          [runId]: apiErr.detail ?? "Failed to explain run diagnostics.",
+        },
+      }));
     }
   },
 

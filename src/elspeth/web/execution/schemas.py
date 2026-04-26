@@ -278,6 +278,112 @@ class DiscardSummary(_StrictResponse):
         return self
 
 
+class RunDiagnosticNodeState(_StrictResponse):
+    """Bounded node-state projection for run diagnostics.
+
+    Deliberately excludes context_before/context_after payloads. The web
+    diagnostics surface is for progress visibility, not raw row payload export.
+    """
+
+    state_id: str
+    token_id: str
+    node_id: str
+    step_index: int = Field(ge=0)
+    attempt: int = Field(ge=0)
+    status: str
+    duration_ms: float | None
+    started_at: datetime
+    completed_at: datetime | None
+    error: Any | None = None
+    success_reason: Any | None = None
+
+
+class RunDiagnosticToken(_StrictResponse):
+    """One token in the bounded diagnostics preview."""
+
+    token_id: str
+    row_id: str
+    row_index: int | None
+    branch_name: str | None
+    fork_group_id: str | None
+    join_group_id: str | None
+    expand_group_id: str | None
+    step_in_pipeline: int | None
+    created_at: datetime
+    terminal_outcome: str | None
+    states: list[RunDiagnosticNodeState]
+
+
+class RunDiagnosticOperation(_StrictResponse):
+    """Source/sink operation projection for run diagnostics."""
+
+    operation_id: str
+    node_id: str
+    operation_type: str
+    status: str
+    duration_ms: float | None
+    started_at: datetime
+    completed_at: datetime | None
+    error_message: str | None
+
+
+class RunDiagnosticArtifact(_StrictResponse):
+    """Saved artifact projection for run diagnostics."""
+
+    artifact_id: str
+    sink_node_id: str
+    artifact_type: str
+    path_or_uri: str
+    size_bytes: int = Field(ge=0)
+    created_at: datetime
+
+
+class RunDiagnosticSummary(_StrictResponse):
+    """Aggregate counts for a run diagnostics snapshot."""
+
+    token_count: int = Field(ge=0)
+    preview_limit: int = Field(ge=1, le=100)
+    preview_truncated: bool
+    state_counts: dict[str, int]
+    operation_counts: dict[str, int]
+    latest_activity_at: datetime | None
+
+
+class RunDiagnosticsResponse(_StrictResponse):
+    """REST response for run diagnostics."""
+
+    run_id: str
+    landscape_run_id: str
+    run_status: SessionRunStatus
+    summary: RunDiagnosticSummary
+    tokens: list[RunDiagnosticToken]
+    operations: list[RunDiagnosticOperation]
+    artifacts: list[RunDiagnosticArtifact]
+
+
+class RunDiagnosticsWorkingView(_StrictResponse):
+    """Operator-facing read of visible run evidence.
+
+    This is not model chain-of-thought. It is a bounded, UI-safe summary
+    of what the diagnostics snapshot visibly shows and what that likely
+    means for the running pipeline.
+    """
+
+    headline: str = Field(min_length=1)
+    evidence: list[str] = Field(default_factory=list)
+    meaning: str = Field(min_length=1)
+    next_steps: list[str] = Field(default_factory=list)
+
+
+class RunDiagnosticsEvaluationResponse(_StrictResponse):
+    """LLM-generated explanation of a diagnostics snapshot."""
+
+    run_id: str
+    generated_at: datetime
+    explanation: str = Field(min_length=1)
+    working_view: RunDiagnosticsWorkingView
+
+
 class RunStatusResponse(_StrictResponse):
     """REST response for run status queries."""
 

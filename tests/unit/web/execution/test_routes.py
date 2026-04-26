@@ -10,16 +10,23 @@ by the route handlers.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
+from starlette.routing import Route
 
+from elspeth.web.auth.models import UserIdentity
 from elspeth.web.execution.schemas import (
     DiscardSummary,
+    RunDiagnosticsResponse,
+    RunDiagnosticSummary,
     RunStatusResponse,
     ValidationCheck,
     ValidationResult,
@@ -29,6 +36,17 @@ from elspeth.web.sessions.protocol import RunAlreadyActiveError
 # ── Helpers ───────────────────────────────────────────────────────────
 
 _TEST_USER_ID = "test-user-123"
+
+
+def _request_for_app(app: FastAPI) -> Request:
+    return Request({"type": "http", "app": app, "headers": [], "method": "GET", "path": "/"})
+
+
+def _route_endpoint(app: FastAPI, name: str) -> Callable[..., Awaitable[Any]]:
+    for route in app.routes:
+        if isinstance(route, Route) and route.name == name:
+            return cast(Callable[..., Awaitable[Any]], route.endpoint)
+    raise AssertionError(f"Route endpoint {name!r} not found")
 
 
 def _create_test_app(
@@ -65,9 +83,12 @@ def _create_test_app(
     mock_settings.auth_provider = "local"
     app.state.settings = mock_settings
 
-    # Override auth dependency to return a fake user
     fake_user = UserIdentity(user_id=_TEST_USER_ID, username="testuser")
-    app.dependency_overrides[get_current_user] = lambda: fake_user
+
+    async def _fake_current_user() -> UserIdentity:
+        return fake_user
+
+    app.dependency_overrides[get_current_user] = _fake_current_user
 
     app.include_router(create_execution_router())
 
@@ -171,6 +192,215 @@ class TestExecuteEndpoint:
             # Seam Contract D: flat envelope, not nested
             assert body["error_type"] == "run_already_active"
             assert "detail" in body
+
+
+class TestRunDiagnosticsEndpoint:
+    """GET/POST /api/runs/{run_id}/diagnostics."""
+
+    @pytest.mark.asyncio
+    async def test_running_run_uses_web_run_id_as_landscape_fallback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="running",
+                started_at=datetime.now(UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=None,
+            )
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_load(*args: object, **kwargs: object) -> RunDiagnosticsResponse:
+            captured.update(kwargs)
+            return RunDiagnosticsResponse(
+                run_id=str(run_id),
+                landscape_run_id=str(run_id),
+                run_status="running",
+                summary=RunDiagnosticSummary(
+                    token_count=0,
+                    preview_limit=12,
+                    preview_truncated=False,
+                    state_counts={},
+                    operation_counts={},
+                    latest_activity_at=None,
+                ),
+                tokens=[],
+                operations=[],
+                artifacts=[],
+            )
+
+        async def fake_to_thread(func, /, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr("elspeth.web.execution.routes.load_run_diagnostics_for_settings", fake_load)
+        monkeypatch.setattr("elspeth.web.execution.routes.asyncio.to_thread", fake_to_thread)
+        app = _create_test_app(execution_service=svc)
+        endpoint = _route_endpoint(app, "get_run_diagnostics")
+        response = await endpoint(
+            run_id,
+            _request_for_app(app),
+            limit=12,
+            user=UserIdentity(user_id=_TEST_USER_ID, username="testuser"),
+            service=svc,
+        )
+
+        assert response.run_id == str(run_id)
+        assert captured["run_id"] == str(run_id)
+        assert captured["landscape_run_id"] == str(run_id)
+        assert captured["run_status"] == "running"
+        assert captured["limit"] == 12
+
+    @pytest.mark.asyncio
+    async def test_evaluate_diagnostics_calls_composer_with_bounded_snapshot(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="running",
+                started_at=datetime.now(UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=str(run_id),
+            )
+        )
+        diagnostics = RunDiagnosticsResponse(
+            run_id=str(run_id),
+            landscape_run_id=str(run_id),
+            run_status="running",
+            summary=RunDiagnosticSummary(
+                token_count=1,
+                preview_limit=50,
+                preview_truncated=False,
+                state_counts={"open": 1},
+                operation_counts={"source_load": 1},
+                latest_activity_at=None,
+            ),
+            tokens=[],
+            operations=[],
+            artifacts=[],
+        )
+        monkeypatch.setattr(
+            "elspeth.web.execution.routes.load_run_diagnostics_for_settings",
+            lambda *args, **kwargs: diagnostics,
+        )
+
+        async def fake_to_thread(func, /, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr("elspeth.web.execution.routes.asyncio.to_thread", fake_to_thread)
+        captured: dict[str, Any] = {}
+
+        class FakeComposer:
+            async def explain_run_diagnostics(self, snapshot: dict[str, object]) -> str:
+                captured.update(snapshot)
+                return (
+                    '{"headline":"The run is processing data",'
+                    '"evidence":["1 token is visible in the runtime trace.",'
+                    '"Source loading has started."],'
+                    '"meaning":"The pipeline is not idle; it has runtime records for the current row.",'
+                    '"next_steps":["Refresh diagnostics if this does not change soon."]}'
+                )
+
+        app = _create_test_app(execution_service=svc)
+        app.state.composer_service = FakeComposer()
+        endpoint = _route_endpoint(app, "evaluate_run_diagnostics")
+        response = await endpoint(
+            run_id,
+            _request_for_app(app),
+            limit=50,
+            user=UserIdentity(user_id=_TEST_USER_ID, username="testuser"),
+            service=svc,
+        )
+
+        assert response.run_id == str(run_id)
+        assert response.explanation == "The pipeline is not idle; it has runtime records for the current row."
+        assert response.working_view.headline == "The run is processing data"
+        assert response.working_view.evidence == [
+            "1 token is visible in the runtime trace.",
+            "Source loading has started.",
+        ]
+        assert response.working_view.next_steps == ["Refresh diagnostics if this does not change soon."]
+        assert captured["run_id"] == str(run_id)
+        assert captured["summary"]["token_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_evaluate_diagnostics_falls_back_for_plain_text_explanation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="running",
+                started_at=datetime.now(UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=str(run_id),
+            )
+        )
+        diagnostics = RunDiagnosticsResponse(
+            run_id=str(run_id),
+            landscape_run_id=str(run_id),
+            run_status="running",
+            summary=RunDiagnosticSummary(
+                token_count=3,
+                preview_limit=50,
+                preview_truncated=False,
+                state_counts={"completed": 2, "running": 1},
+                operation_counts={},
+                latest_activity_at=datetime.now(UTC),
+            ),
+            tokens=[],
+            operations=[],
+            artifacts=[],
+        )
+        monkeypatch.setattr(
+            "elspeth.web.execution.routes.load_run_diagnostics_for_settings",
+            lambda *args, **kwargs: diagnostics,
+        )
+
+        async def fake_to_thread(func, /, *args, **kwargs):
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr("elspeth.web.execution.routes.asyncio.to_thread", fake_to_thread)
+
+        class FakeComposer:
+            async def explain_run_diagnostics(self, snapshot: dict[str, object]) -> str:
+                return "The run is still working through the data."
+
+        app = _create_test_app(execution_service=svc)
+        app.state.composer_service = FakeComposer()
+        endpoint = _route_endpoint(app, "evaluate_run_diagnostics")
+        response = await endpoint(
+            run_id,
+            _request_for_app(app),
+            limit=50,
+            user=UserIdentity(user_id=_TEST_USER_ID, username="testuser"),
+            service=svc,
+        )
+
+        assert response.explanation == "The run is still working through the data."
+        assert response.working_view.meaning == "The run is still working through the data."
+        assert response.working_view.headline == "Runtime records are updating"
+        assert "3 tokens are visible in the runtime trace." in response.working_view.evidence
 
 
 class TestExecuteIDORAndPathTraversal:

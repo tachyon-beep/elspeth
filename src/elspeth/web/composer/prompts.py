@@ -10,6 +10,7 @@ Layer: L3 (application).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
 
@@ -140,3 +141,31 @@ def build_messages(
     messages.append({"role": "user", "content": user_message})
 
     return messages
+
+
+def build_run_diagnostics_messages(
+    snapshot: Mapping[str, object],
+    data_dir: str | None = None,
+) -> list[dict[str, str]]:
+    """Build messages for run diagnostics explanation.
+
+    Uses the same composer skill pack stack as normal composition so every
+    composer LLM engagement carries the structure and MCP-tool guidance.
+    """
+    prompt = build_system_prompt(data_dir) if data_dir is not None else SYSTEM_PROMPT
+    diagnostics_instructions = (
+        "Run diagnostics explanation mode:\n"
+        "- Explain the provided bounded run diagnostics snapshot to an operator.\n"
+        "- Use only visible evidence from tokens, node states, operations, artifacts, and status.\n"
+        "- Mention saved artifact paths when present.\n"
+        "- If there are no Landscape records yet, say the run may still be setting up.\n"
+        "- Return strict JSON only, with this exact object shape: "
+        '{"headline": string, "evidence": string[], "meaning": string, "next_steps": string[]}.\n'
+        "- Keep the headline and meaning plain-English and useful; avoid cute filler or vague progress claims.\n"
+        "- Evidence entries must cite visible evidence from the snapshot, not hidden chain-of-thought.\n"
+        "- Do not call tools, invent hidden progress, expose hidden chain-of-thought, or mention secrets."
+    )
+    return [
+        {"role": "system", "content": prompt + "\n\n" + diagnostics_instructions},
+        {"role": "user", "content": json.dumps(snapshot, indent=2, sort_keys=True, allow_nan=False)},
+    ]

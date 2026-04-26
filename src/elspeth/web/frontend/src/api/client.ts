@@ -14,9 +14,12 @@ import type {
   ChatMessage,
   CompositionState,
   CompositionStateVersion,
+  ComposerProgressSnapshot,
   PluginSchemaInfo,
   PluginSummary,
   Run,
+  RunDiagnostics,
+  RunDiagnosticsEvaluation,
   SecretInventoryItem,
   Session,
   UserProfile,
@@ -218,6 +221,19 @@ export async function fetchMessages(sessionId: string): Promise<ChatMessage[]> {
     headers: authHeaders(),
   });
   return parseResponse<ChatMessage[]>(response);
+}
+
+/** Get the latest provider-safe composer progress snapshot for a session. */
+export async function fetchComposerProgress(
+  sessionId: string,
+): Promise<ComposerProgressSnapshot> {
+  const response = await fetch(
+    `/api/sessions/${sessionId}/composer-progress`,
+    {
+      headers: authHeaders(),
+    },
+  );
+  return parseResponse<ComposerProgressSnapshot>(response);
 }
 
 /**
@@ -451,6 +467,35 @@ export async function fetchRuns(sessionId: string): Promise<Run[]> {
     headers: authHeaders(),
   });
   return parseResponse<Run[]>(response);
+}
+
+/** Fetch a bounded diagnostics snapshot for a run. */
+export async function fetchRunDiagnostics(
+  runId: string,
+  limit = 50,
+): Promise<RunDiagnostics> {
+  const response = await fetch(
+    `/api/runs/${runId}/diagnostics?limit=${encodeURIComponent(String(limit))}`,
+    {
+      headers: authHeaders(),
+    },
+  );
+  return parseResponse<RunDiagnostics>(response);
+}
+
+/** Ask the configured composer LLM to explain a diagnostics snapshot. */
+export async function evaluateRunDiagnostics(
+  runId: string,
+  limit = 50,
+): Promise<RunDiagnosticsEvaluation> {
+  const response = await fetch(
+    `/api/runs/${runId}/diagnostics/evaluate?limit=${encodeURIComponent(String(limit))}`,
+    {
+      method: "POST",
+      headers: authHeaders("application/json"),
+    },
+  );
+  return parseResponse<RunDiagnosticsEvaluation>(response);
 }
 
 // ── Blobs ──────────────────────────────────────────────────────────────────

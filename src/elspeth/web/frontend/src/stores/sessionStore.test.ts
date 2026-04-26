@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useSessionStore } from "./sessionStore";
 import { resetStore } from "@/test/store-helpers";
+import type { ChatMessage, ComposerProgressSnapshot } from "@/types/api";
 
 // Mock the API client — store tests verify state logic, not HTTP calls
 vi.mock("@/api/client", () => ({
@@ -8,7 +9,10 @@ vi.mock("@/api/client", () => ({
   createSession: vi.fn(),
   fetchMessages: vi.fn(),
   fetchCompositionState: vi.fn(),
+  fetchComposerProgress: vi.fn(),
   sendMessage: vi.fn(),
+  recompose: vi.fn(),
+  forkFromMessage: vi.fn(),
   revertToVersion: vi.fn(),
   fetchStateVersions: vi.fn(),
   archiveSession: vi.fn(),
@@ -23,6 +27,7 @@ vi.mock("./executionStore", () => ({
 
 describe("sessionStore", () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     resetStore(useSessionStore);
   });
 
@@ -118,6 +123,64 @@ describe("sessionStore", () => {
       const state = useSessionStore.getState();
       expect(state.error).toContain("couldn't complete the composition");
     });
+
+    it("polls composer progress only while a send is composing", async () => {
+      vi.useFakeTimers();
+      try {
+        const {
+          sendMessage: mockSendMessage,
+          fetchComposerProgress,
+        } = await import("@/api/client");
+        const sendDeferred =
+          deferred<{ message: ChatMessage; state: null }>();
+        const progress: ComposerProgressSnapshot = {
+          session_id: "session-1",
+          request_id: "message-1",
+          phase: "using_tools",
+          headline: "The model requested plugin schemas.",
+          evidence: ["Checking available source, transform, and sink tools."],
+          likely_next: "ELSPETH will use the schemas to choose a pipeline shape.",
+          updated_at: "2026-04-26T10:00:00Z",
+        };
+        const assistantMessage: ChatMessage = {
+          id: "assistant-1",
+          session_id: "session-1",
+          role: "assistant",
+          content: "Done",
+          tool_calls: null,
+          created_at: "2026-04-26T10:00:02Z",
+        };
+
+        (mockSendMessage as ReturnType<typeof vi.fn>).mockReturnValueOnce(
+          sendDeferred.promise,
+        );
+        (fetchComposerProgress as ReturnType<typeof vi.fn>).mockResolvedValue(
+          progress,
+        );
+
+        useSessionStore.setState({ activeSessionId: "session-1" });
+        const sendPromise = useSessionStore.getState().sendMessage("hello");
+
+        await Promise.resolve();
+        expect(fetchComposerProgress).toHaveBeenCalledTimes(1);
+        expect(fetchComposerProgress).toHaveBeenLastCalledWith("session-1");
+
+        await vi.advanceTimersByTimeAsync(1500);
+        expect(fetchComposerProgress).toHaveBeenCalledTimes(2);
+        expect(useSessionStore.getState().composerProgress).toEqual(progress);
+
+        sendDeferred.resolve({ message: assistantMessage, state: null });
+        await sendPromise;
+
+        expect(useSessionStore.getState().isComposing).toBe(false);
+        expect(useSessionStore.getState().composerProgress).toBeNull();
+
+        await vi.advanceTimersByTimeAsync(3000);
+        expect(fetchComposerProgress).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("reset", () => {
@@ -137,3 +200,17 @@ describe("sessionStore", () => {
     });
   });
 });
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+} {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (reason?: unknown) => void = () => undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}

@@ -611,7 +611,7 @@ class ExecutionServiceImpl:
             # started, this transition raises ValueError. Detect that specific
             # case and exit gracefully — the run was legitimately cancelled.
             try:
-                self._call_async(self._session_service.update_run_status(run_uuid, status="running"))
+                self._call_async(self._session_service.update_run_status(run_uuid, status="running", landscape_run_id=run_id))
             except ValueError:
                 current = self._call_async(self._session_service.get_run(run_uuid))
                 if current.status == "cancelled":
@@ -798,6 +798,7 @@ class ExecutionServiceImpl:
                 secret_resolutions=secret_resolution_inputs or None,
                 shutdown_event=shutdown_event,  # B2: NEVER omit this
                 sink_factory=_make_sink_factory(settings),
+                run_id=run_id,
             )
 
             # Orchestrator.run() returns normally ONLY on completion.
@@ -816,7 +817,6 @@ class ExecutionServiceImpl:
                     self._session_service.update_run_status(
                         run_uuid,
                         status="completed",
-                        landscape_run_id=result.run_id,
                         rows_processed=result.rows_processed,
                         rows_succeeded=result.rows_succeeded,
                         rows_failed=result.rows_failed,

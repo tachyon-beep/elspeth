@@ -32,6 +32,7 @@ from elspeth.web.blobs.routes import create_blobs_router
 from elspeth.web.blobs.service import BlobServiceImpl
 from elspeth.web.catalog.routes import catalog_router
 from elspeth.web.composer import yaml_generator as yaml_generator_module
+from elspeth.web.composer.progress import ComposerProgressRegistry
 from elspeth.web.composer.service import ComposerServiceImpl
 from elspeth.web.config import _LOCAL_HOSTS, WebSettings
 from elspeth.web.dependencies import create_catalog_service
@@ -410,6 +411,7 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
         secret_service=app.state.scoped_secret_resolver,
     )
     app.state.composer_availability = app.state.composer_service.get_availability()
+    app.state.composer_progress_registry = ComposerProgressRegistry()
 
     # --- Rate limiter (per-process in-memory) ---
     # ComposerRateLimiter is safe to construct in sync context because

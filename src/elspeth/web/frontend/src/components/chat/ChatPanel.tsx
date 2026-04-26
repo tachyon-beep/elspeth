@@ -7,7 +7,7 @@ import { ComposingIndicator } from "./ComposingIndicator";
 import { ChatInput } from "./ChatInput";
 import { TemplateCards } from "./TemplateCards";
 import { BlobManager } from "@/components/blobs/BlobManager";
-import type { BlobMetadata } from "@/types/api";
+import type { BlobMetadata, ChatMessage } from "@/types/api";
 
 interface ChatPanelProps {
   onOpenSecrets?: () => void;
@@ -23,6 +23,8 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
   const messages = useSessionStore((s) => s.messages);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
   const sessions = useSessionStore((s) => s.sessions);
+  const compositionState = useSessionStore((s) => s.compositionState);
+  const composerProgress = useSessionStore((s) => s.composerProgress);
   const clearError = useSessionStore((s) => s.clearError);
   const forkFromMessage = useSessionStore((s) => s.forkFromMessage);
 
@@ -35,6 +37,7 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [showBlobManager, setShowBlobManager] = useState(false);
   const [inputText, setInputText] = useState("");
+  const activeComposerMessage = findActiveComposerMessage(messages);
 
   function scrollToBottom() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -173,7 +176,13 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
             />
           ))
         )}
-        {isComposing && <ComposingIndicator />}
+        {isComposing && (
+          <ComposingIndicator
+            latestRequest={activeComposerMessage?.content ?? null}
+            compositionState={compositionState}
+            composerProgress={composerProgress}
+          />
+        )}
         <div ref={messagesEndRef} />
       </div>
 
@@ -204,4 +213,20 @@ export function ChatPanel({ onOpenSecrets }: ChatPanelProps) {
       />
     </div>
   );
+}
+
+function findActiveComposerMessage(messages: ChatMessage[]): ChatMessage | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user" && message.local_status === "pending") {
+      return message;
+    }
+  }
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      return message;
+    }
+  }
+  return null;
 }

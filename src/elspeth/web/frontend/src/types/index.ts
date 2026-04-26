@@ -175,6 +175,34 @@ export interface CompositionStateVersion {
   node_count: number;
 }
 
+// ── Composer Progress ──────────────────────────────────────────────────────
+
+export type ComposerProgressPhase =
+  | "idle"
+  | "starting"
+  | "calling_model"
+  | "using_tools"
+  | "validating"
+  | "saving"
+  | "complete"
+  | "failed";
+
+/**
+ * Latest provider-safe composer progress snapshot for one session.
+ *
+ * This is a status surface, not a reasoning transcript. Text is produced from
+ * visible composer lifecycle boundaries and safe tool categories only.
+ */
+export interface ComposerProgressSnapshot {
+  session_id: string;
+  request_id: string | null;
+  phase: ComposerProgressPhase;
+  headline: string;
+  evidence: string[];
+  likely_next: string | null;
+  updated_at: string;
+}
+
 // ── Plugin Catalog ──────────────────────────────────────────────────────────
 
 /** Plugin summary from the catalog listing endpoints. */
@@ -332,6 +360,87 @@ export interface RunProgress {
   rows_failed: number;
   recent_errors: RunEventError[];
   status: "running" | "completed" | "cancelled" | "failed";
+}
+
+export interface RunDiagnosticNodeState {
+  state_id: string;
+  token_id: string;
+  node_id: string;
+  step_index: number;
+  attempt: number;
+  status: string;
+  duration_ms: number | null;
+  started_at: string;
+  completed_at: string | null;
+  error: unknown | null;
+  success_reason: unknown | null;
+}
+
+export interface RunDiagnosticToken {
+  token_id: string;
+  row_id: string;
+  row_index: number | null;
+  branch_name: string | null;
+  fork_group_id: string | null;
+  join_group_id: string | null;
+  expand_group_id: string | null;
+  step_in_pipeline: number | null;
+  created_at: string;
+  terminal_outcome: string | null;
+  states: RunDiagnosticNodeState[];
+}
+
+export interface RunDiagnosticOperation {
+  operation_id: string;
+  node_id: string;
+  operation_type: string;
+  status: string;
+  duration_ms: number | null;
+  started_at: string;
+  completed_at: string | null;
+  error_message: string | null;
+}
+
+export interface RunDiagnosticArtifact {
+  artifact_id: string;
+  sink_node_id: string;
+  artifact_type: string;
+  path_or_uri: string;
+  size_bytes: number;
+  created_at: string;
+}
+
+export interface RunDiagnosticSummary {
+  token_count: number;
+  preview_limit: number;
+  preview_truncated: boolean;
+  state_counts: Record<string, number>;
+  operation_counts: Record<string, number>;
+  latest_activity_at: string | null;
+}
+
+export interface RunDiagnostics {
+  run_id: string;
+  landscape_run_id: string;
+  run_status: Run["status"];
+  summary: RunDiagnosticSummary;
+  tokens: RunDiagnosticToken[];
+  operations: RunDiagnosticOperation[];
+  artifacts: RunDiagnosticArtifact[];
+}
+
+export interface RunDiagnosticsWorkingView {
+  headline: string;
+  evidence: string[];
+  meaning: string;
+  next_steps: string[];
+}
+
+export interface RunDiagnosticsEvaluation {
+  run_id: string;
+  generated_at: string;
+  explanation: string;
+  working_view: RunDiagnosticsWorkingView;
 }
 
 // ── API Error Envelope ──────────────────────────────────────────────────────

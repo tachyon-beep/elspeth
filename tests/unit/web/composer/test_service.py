@@ -7,7 +7,7 @@ import contextlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,6 +18,7 @@ from elspeth.web.catalog.schemas import (
     PluginSchemaInfo,
     PluginSummary,
 )
+from elspeth.web.composer.progress import ComposerProgressEvent
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
@@ -171,6 +172,42 @@ def _composer_available_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ComposerServiceImpl, "_compute_availability", _available)
 
 
+@pytest.fixture(autouse=True)
+def _composer_to_thread_uses_test_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run composer to_thread seams through a deterministic test worker.
+
+    These unit tests assert the composer offloads synchronous tool and audit
+    work; they do not need to test asyncio's executor implementation. The shim
+    keeps the off-event-loop-thread property visible while avoiding local
+    executor hangs from masking composer behavior.
+    """
+
+    async def test_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+        import threading
+
+        result: list[Any] = []
+        failures: list[BaseException] = []
+
+        def run() -> None:
+            try:
+                result.append(func(*args, **kwargs))
+            except BaseException as exc:
+                failures.append(exc)
+
+        worker = threading.Thread(target=run, name="composer-test-worker")
+        worker.start()
+        while worker.is_alive():
+            await asyncio.sleep(0.001)
+        worker.join()
+        if failures:
+            raise failures[0]
+        if result:
+            return result[0]
+        return None
+
+    monkeypatch.setattr("asyncio.to_thread", test_to_thread)
+
+
 class TestComposerTextOnlyResponse:
     @pytest.mark.asyncio
     async def test_text_only_returns_immediately(self) -> None:
@@ -230,6 +267,56 @@ class TestComposerSingleToolCall:
         assert result.state.source is not None
         assert result.state.source.plugin == "csv"
         assert result.state.version == 2
+
+    @pytest.mark.asyncio
+    async def test_progress_reports_visible_boundaries_without_tool_payloads(self) -> None:
+        """Progress summaries derive from visible lifecycle/tool names, not raw args."""
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        progress_events: list[ComposerProgressEvent] = []
+
+        async def record_progress(event: ComposerProgressEvent) -> None:
+            progress_events.append(event)
+
+        tool_response = _make_llm_response(
+            content=None,
+            tool_calls=[
+                {
+                    "id": "call_secret",
+                    "name": "validate_secret_ref",
+                    "arguments": {"name": "OPENROUTER_TOP_SECRET_VALUE"},
+                }
+            ],
+        )
+        text_response = _make_llm_response(content="I checked the available credentials.")
+
+        async def inline_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
+            return func(*args, **kwargs)
+
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch("elspeth.web.composer.service.asyncio.to_thread", side_effect=inline_to_thread),
+        ):
+            mock_llm.side_effect = [tool_response, text_response]
+            result = await service.compose(
+                "Use my OpenRouter secret",
+                [],
+                state,
+                progress=record_progress,
+            )
+
+        assert result.message == "I checked the available credentials."
+        phases = [event.phase for event in progress_events]
+        assert phases[:2] == ["starting", "calling_model"]
+        assert "using_tools" in phases
+        assert "complete" in phases
+
+        progress_text = "\n".join(line for event in progress_events for line in (event.headline, event.likely_next or "", *event.evidence))
+        assert "OPENROUTER_TOP_SECRET_VALUE" not in progress_text
+        assert '"name"' not in progress_text
+        assert "checking available secret references" in progress_text.lower()
 
 
 class TestComposerMultiTurnToolCalls:
@@ -2432,7 +2519,7 @@ class TestToolArgumentError:
         site through the three-field safe channel.
         """
         with pytest.raises(TypeError):
-            ToolArgumentError("content must be a string, got int")  # type: ignore[misc]
+            cast(Any, ToolArgumentError)("content must be a string, got int")
 
     def test_empty_argument_rejected(self) -> None:
         """Blank ``argument`` produces a nonsensical audit record and must be rejected."""
@@ -2659,13 +2746,13 @@ class TestComposerErrorConstructionInvariants:
         exc = ComposerPluginCrashError(ValueError("boom"), partial_state=None)
 
         with pytest.raises(AttributeError, match="frozen"):
-            exc.original_exc = RuntimeError("replaced")  # type: ignore[misc]
+            exc.__setattr__("original_exc", RuntimeError("replaced"))
 
         with pytest.raises(AttributeError, match="frozen"):
-            exc.partial_state = _empty_state()  # type: ignore[misc]
+            exc.__setattr__("partial_state", _empty_state())
 
         with pytest.raises(AttributeError, match="frozen"):
-            exc.exc_class = "PrettyException"  # type: ignore[misc]
+            exc.__setattr__("exc_class", "PrettyException")
 
     def test_plugin_crash_error_allows_exception_chain_machinery(self) -> None:
         # __cause__, __context__, __suppress_context__, __traceback__, and
@@ -2689,13 +2776,13 @@ class TestComposerErrorConstructionInvariants:
         )
 
         with pytest.raises(AttributeError, match="frozen"):
-            exc.max_turns = 99  # type: ignore[misc]
+            exc.__setattr__("max_turns", 99)
 
         with pytest.raises(AttributeError, match="frozen"):
-            exc.budget_exhausted = "timeout"  # type: ignore[misc]
+            exc.__setattr__("budget_exhausted", "timeout")
 
         with pytest.raises(AttributeError, match="frozen"):
-            exc.partial_state = _empty_state()  # type: ignore[misc]
+            exc.__setattr__("partial_state", _empty_state())
 
     def test_plugin_crash_capture_returns_none_when_state_not_mutated(self) -> None:
         # Invariant: partial_state is None when state.version == initial_version

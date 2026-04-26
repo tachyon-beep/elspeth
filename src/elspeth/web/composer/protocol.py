@@ -6,9 +6,11 @@ pipeline composition.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, Protocol
 
+from elspeth.web.composer.progress import ComposerProgressSink
 from elspeth.web.composer.state import CompositionState
 
 
@@ -364,6 +366,7 @@ class ComposerService(Protocol):
         state: CompositionState,
         session_id: str | None = None,
         user_id: str | None = None,
+        progress: ComposerProgressSink | None = None,
     ) -> ComposerResult:
         """Run the LLM composition loop.
 
@@ -383,4 +386,7 @@ class ComposerService(Protocol):
         Raises:
             ComposerConvergenceError: If the loop exceeds max_turns.
         """
+
+    async def explain_run_diagnostics(self, snapshot: Mapping[str, object]) -> str:
+        """Explain a bounded run diagnostics snapshot without mutating state."""
         ...

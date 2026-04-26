@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useExecutionStore } from "./executionStore";
 import { connectToRun } from "@/api/websocket";
-import type { Run, RunEvent, ValidationResult } from "@/types/index";
+import type { Run, RunDiagnostics, RunEvent, ValidationResult } from "@/types/index";
 
 // Mock the API client
 vi.mock("@/api/client", () => ({
   validatePipeline: vi.fn(),
   fetchRuns: vi.fn().mockResolvedValue([]),
+  fetchRunDiagnostics: vi.fn(),
+  evaluateRunDiagnostics: vi.fn(),
 }));
 
 vi.mock("@/api/websocket", () => ({
@@ -97,6 +99,54 @@ function makeRun(overrides: Partial<Run> & { error?: string | null } = {}): Run 
   } as Run;
 }
 
+function makeDiagnostics(overrides: Partial<RunDiagnostics> = {}): RunDiagnostics {
+  return {
+    run_id: "run-1",
+    landscape_run_id: "run-1",
+    run_status: "running",
+    summary: {
+      token_count: 1,
+      preview_limit: 50,
+      preview_truncated: false,
+      state_counts: { completed: 1 },
+      operation_counts: { source_load: 1 },
+      latest_activity_at: null,
+    },
+    tokens: [
+      {
+        token_id: "token-1",
+        row_id: "row-1",
+        row_index: 0,
+        branch_name: null,
+        fork_group_id: null,
+        join_group_id: null,
+        expand_group_id: null,
+        step_in_pipeline: null,
+        created_at: "2026-04-26T05:31:58.000Z",
+        terminal_outcome: "completed",
+        states: [
+          {
+            state_id: "state-1",
+            token_id: "token-1",
+            node_id: "extract",
+            step_index: 1,
+            attempt: 0,
+            status: "completed",
+            duration_ms: 125,
+            started_at: "2026-04-26T05:31:58.000Z",
+            completed_at: "2026-04-26T05:31:59.000Z",
+            error: null,
+            success_reason: null,
+          },
+        ],
+      },
+    ],
+    operations: [],
+    artifacts: [],
+    ...overrides,
+  };
+}
+
 describe("executionStore failed run events", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -142,5 +192,52 @@ describe("executionStore failed run events", () => {
       status: "failed",
       error: "Pipeline execution failed (FrameworkBugError)",
     });
+  });
+});
+
+describe("executionStore run diagnostics", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useExecutionStore.getState().reset();
+  });
+
+  it("stores diagnostics snapshots by run id", async () => {
+    const diagnostics = makeDiagnostics();
+    const { fetchRunDiagnostics } = await import("@/api/client");
+    (fetchRunDiagnostics as ReturnType<typeof vi.fn>).mockResolvedValue(diagnostics);
+
+    await useExecutionStore.getState().loadRunDiagnostics("run-1");
+
+    const state = useExecutionStore.getState();
+    expect(state.diagnosticsByRunId["run-1"]).toEqual(diagnostics);
+    expect(state.diagnosticsLoadingByRunId["run-1"]).toBe(false);
+    expect(state.diagnosticsErrorByRunId["run-1"]).toBeNull();
+  });
+
+  it("stores LLM diagnostics explanations by run id", async () => {
+    const { evaluateRunDiagnostics } = await import("@/api/client");
+    (evaluateRunDiagnostics as ReturnType<typeof vi.fn>).mockResolvedValue({
+      run_id: "run-1",
+      generated_at: "2026-04-26T05:32:00.000Z",
+      explanation: "The run is still working and has loaded one token.",
+      working_view: {
+        headline: "The run is processing data",
+        evidence: ["1 token is visible in the runtime trace."],
+        meaning: "The run is still working and has loaded one token.",
+        next_steps: ["Refresh diagnostics if this does not change soon."],
+      },
+    });
+
+    await useExecutionStore.getState().evaluateRunDiagnostics("run-1");
+
+    const state = useExecutionStore.getState();
+    expect(state.diagnosticsExplanationByRunId["run-1"]).toContain("still working");
+    expect(state.diagnosticsWorkingViewByRunId["run-1"]).toEqual({
+      headline: "The run is processing data",
+      evidence: ["1 token is visible in the runtime trace."],
+      meaning: "The run is still working and has loaded one token.",
+      next_steps: ["Refresh diagnostics if this does not change soon."],
+    });
+    expect(state.diagnosticsEvaluatingByRunId["run-1"]).toBe(false);
   });
 });

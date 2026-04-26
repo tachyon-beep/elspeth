@@ -29,7 +29,8 @@ from sqlalchemy import Engine, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.web.catalog.protocol import CatalogService
-from elspeth.web.composer.prompts import build_messages
+from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressSink
+from elspeth.web.composer.prompts import build_messages, build_run_diagnostics_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
@@ -203,6 +204,35 @@ class ComposerServiceImpl:
         """Return the boot-time composer availability snapshot."""
         return self._availability
 
+    async def explain_run_diagnostics(self, snapshot: Mapping[str, object]) -> str:
+        """Return a plain-language explanation of a bounded run snapshot.
+
+        The explanation is advisory UI text only: it does not call composer
+        tools, mutate CompositionState, or persist chat messages.
+        """
+        if not self._availability.available:
+            raise ComposerServiceError(self._availability.reason or "Composer is unavailable.")
+
+        try:
+            messages = build_run_diagnostics_messages(snapshot, data_dir=self._data_dir)
+        except OSError as exc:
+            raise ComposerServiceError(f"Failed to load deployment skill ({type(exc).__name__})") from exc
+
+        try:
+            response = await asyncio.wait_for(
+                self._call_text_llm(messages),
+                timeout=self._timeout_seconds,
+            )
+        except TimeoutError:
+            raise ComposerServiceError("Run diagnostics explanation timed out") from None
+        except LiteLLMAPIError as exc:
+            raise ComposerServiceError(f"LLM unavailable ({type(exc).__name__})") from exc
+
+        content = cast(str | None, response.choices[0].message.content)
+        if content is None or not content.strip():
+            raise ComposerServiceError("LLM returned an empty diagnostics explanation")
+        return content.strip()
+
     async def compose(
         self,
         message: str,
@@ -210,6 +240,7 @@ class ComposerServiceImpl:
         state: CompositionState,
         session_id: str | None = None,
         user_id: str | None = None,
+        progress: ComposerProgressSink | None = None,
     ) -> ComposerResult:
         """Run the LLM composition loop with dual-counter budget.
 
@@ -231,8 +262,17 @@ class ComposerServiceImpl:
 
         deadline = asyncio.get_event_loop().time() + self._timeout_seconds
         try:
-            return await self._compose_loop(message, messages, state, session_id, user_id, deadline)
+            return await self._compose_loop(message, messages, state, session_id, user_id, deadline, progress)
         except ComposerConvergenceError:
+            await _emit_progress(
+                progress,
+                ComposerProgressEvent(
+                    phase="failed",
+                    headline="The composer could not finish this request.",
+                    evidence=("The bounded composer loop stopped before a final answer.",),
+                    likely_next="Try a smaller request or retry after reviewing the current pipeline.",
+                ),
+            )
             # Has its own partial_state; route handler persists. Do not intercept.
             raise
         except ComposerPluginCrashError as crash:
@@ -289,6 +329,26 @@ class ComposerServiceImpl:
                         original_exc_class=crash.exc_class,
                         audit_exc_class=type(audit_failure).__name__,
                     )
+            await _emit_progress(
+                progress,
+                ComposerProgressEvent(
+                    phase="failed",
+                    headline="The composer could not safely finish this request.",
+                    evidence=("A pipeline tool failed on the server side.",),
+                    likely_next="Review the visible error message, then retry after the issue is resolved.",
+                ),
+            )
+            raise
+        except (ComposerServiceError, LiteLLMAPIError):
+            await _emit_progress(
+                progress,
+                ComposerProgressEvent(
+                    phase="failed",
+                    headline="The composer could not finish this request.",
+                    evidence=("The model call or prompt preparation failed safely.",),
+                    likely_next="Retry once the composer service is available.",
+                ),
+            )
             raise
 
     async def _compose_loop(
@@ -299,6 +359,7 @@ class ComposerServiceImpl:
         session_id: str | None = None,
         user_id: str | None = None,
         deadline: float = 0.0,
+        progress: ComposerProgressSink | None = None,
     ) -> ComposerResult:
         """Inner composition loop with dual-counter budget tracking.
 
@@ -316,6 +377,18 @@ class ComposerServiceImpl:
         initial_version = state.version
         llm_messages = self._build_messages(messages, state, message)
         tools = self._get_litellm_tools()
+        await _emit_progress(
+            progress,
+            ComposerProgressEvent(
+                phase="starting",
+                headline="I'm reading your request and current pipeline.",
+                evidence=(
+                    "The current pipeline state is prepared for the composer.",
+                    "The pipeline composer skill pack and deployment overlay are included.",
+                ),
+                likely_next="ELSPETH will ask the model for the next safe pipeline action.",
+            ),
+        )
 
         composition_turns_used = 0
         discovery_turns_used = 0
@@ -332,6 +405,7 @@ class ComposerServiceImpl:
         last_validation: ValidationSummary | None = None
 
         while True:
+            await _emit_progress(progress, _model_call_progress_event(message))
             response = await self._call_llm_before_deadline(
                 llm_messages,
                 tools,
@@ -343,10 +417,26 @@ class ComposerServiceImpl:
 
             # If no tool calls, the LLM is done — return text response
             if not assistant_message.tool_calls:
+                await _emit_progress(
+                    progress,
+                    ComposerProgressEvent(
+                        phase="complete",
+                        headline="The composer response is ready.",
+                        evidence=("The model did not request any more pipeline tools.",),
+                        likely_next="ELSPETH will save any accepted pipeline update.",
+                    ),
+                )
                 return ComposerResult(
                     message=assistant_message.content or "",
                     state=state,
                 )
+
+            await _emit_progress(
+                progress,
+                _tool_batch_progress_event(
+                    tuple(tool_call.function.name for tool_call in assistant_message.tool_calls),
+                ),
+            )
 
             # Append the assistant message (with tool_calls metadata)
             llm_messages.append(
@@ -420,6 +510,15 @@ class ComposerServiceImpl:
                     cache_key = _make_cache_key(tool_name, arguments)
                     if cache_key in discovery_cache:
                         # Cache hit — return cached result, no budget charge
+                        await _emit_progress(
+                            progress,
+                            ComposerProgressEvent(
+                                phase="using_tools",
+                                headline="I'm reusing recently checked tool information.",
+                                evidence=("The same discovery request was already answered for this compose step.",),
+                                likely_next="ELSPETH will continue from the cached tool result.",
+                            ),
+                        )
                         llm_messages.append(
                             {
                                 "role": "tool",
@@ -462,6 +561,7 @@ class ComposerServiceImpl:
                     )
                     continue
 
+                await _emit_progress(progress, _tool_started_progress_event(tool_name))
                 # All tool calls are offloaded to the thread pool via
                 # asyncio.to_thread() to avoid blocking the event loop.
                 # to_thread (not run_in_executor) because it propagates
@@ -526,6 +626,15 @@ class ComposerServiceImpl:
                     # ``raise ToolArgumentError(...) from exc`` get the
                     # cause preserved on ``__cause__`` for debug/audit but
                     # NOT echoed to the LLM.
+                    await _emit_progress(
+                        progress,
+                        ComposerProgressEvent(
+                            phase="using_tools",
+                            headline="A tool request needed correction.",
+                            evidence=("The tool rejected the request shape without exposing raw values.",),
+                            likely_next="ELSPETH will ask the model to adjust the visible tool request.",
+                        ),
+                    )
                     safe_message = exc.args[0] if exc.args else "tool argument error"
                     llm_messages.append(
                         {
@@ -617,6 +726,7 @@ class ComposerServiceImpl:
                 state = result.updated_state
                 last_validation = result.validation
                 result_json = _serialize_tool_result(result)
+                await _emit_progress(progress, _tool_completed_progress_event(tool_name, result.success))
 
                 # Cache cacheable discovery results
                 if is_cacheable_discovery_tool(tool_name):
@@ -651,6 +761,7 @@ class ComposerServiceImpl:
                 if composition_turns_used >= self._max_composition_turns:
                     # B-4D-3 fix: give the LLM one last chance to see the
                     # tool results and produce a text response.
+                    await _emit_progress(progress, _model_call_progress_event(message))
                     response = await self._call_llm_before_deadline(
                         llm_messages,
                         tools,
@@ -660,6 +771,15 @@ class ComposerServiceImpl:
                     )
                     assistant_message = response.choices[0].message
                     if not assistant_message.tool_calls:
+                        await _emit_progress(
+                            progress,
+                            ComposerProgressEvent(
+                                phase="complete",
+                                headline="The composer response is ready.",
+                                evidence=("The model stopped requesting pipeline tools.",),
+                                likely_next="ELSPETH will save any accepted pipeline update.",
+                            ),
+                        )
                         return ComposerResult(
                             message=assistant_message.content or "",
                             state=state,
@@ -792,6 +912,22 @@ class ComposerServiceImpl:
             raise ComposerServiceError("LLM returned empty choices array — cannot continue composition")
         return response
 
+    async def _call_text_llm(
+        self,
+        messages: list[dict[str, str]],
+    ) -> litellm.ModelResponse:
+        """Call the LLM for non-tool text generation."""
+        try:
+            response = await litellm.acompletion(
+                model=self._model,
+                messages=messages,
+            )
+        except LiteLLMBadRequestError as exc:
+            raise ComposerServiceError(f"LLM request rejected ({type(exc).__name__})") from exc
+        if not response.choices:
+            raise ComposerServiceError("LLM returned empty choices array — cannot explain run diagnostics")
+        return response
+
     async def _call_llm_before_deadline(
         self,
         messages: list[dict[str, Any]],
@@ -890,6 +1026,143 @@ def _infer_provider_from_model_name(model: str) -> str | None:
     if "/" not in model:
         return None
     return model.split("/", 1)[0]
+
+
+async def _emit_progress(
+    progress: ComposerProgressSink | None,
+    event: ComposerProgressEvent,
+) -> None:
+    """Emit provider-safe progress when a sink is available."""
+    if progress is None:
+        return
+    await progress(event)
+
+
+def _model_call_progress_event(message: str) -> ComposerProgressEvent:
+    headline = "I'm asking the model to choose the next safe pipeline update."
+    normalized = message.lower()
+    if "html" in normalized and "json" in normalized:
+        headline = "I'm asking the model to choose an HTML input and JSON output."
+    return ComposerProgressEvent(
+        phase="calling_model",
+        headline=headline,
+        evidence=("The composer is using the prepared prompt and visible pipeline state.",),
+        likely_next="The model may answer directly or request safe pipeline tools.",
+    )
+
+
+def _tool_batch_progress_event(tool_names: tuple[str, ...]) -> ComposerProgressEvent:
+    if any(_is_schema_or_catalog_tool(name) for name in tool_names):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="The model requested plugin schemas.",
+            evidence=("Checking available source, transform, and sink tools.",),
+            likely_next="ELSPETH will use visible schemas to guide the pipeline shape.",
+        )
+    if any(name in {"get_pipeline_state", "preview_pipeline", "diff_pipeline"} for name in tool_names):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="The model is checking the current pipeline.",
+            evidence=("Reading the visible pipeline graph and validation summary.",),
+            likely_next="ELSPETH will compare the request with the current setup.",
+        )
+    if any(_is_secret_tool(name) for name in tool_names):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="The model is checking available secret references.",
+            evidence=("Checking available secret references without reading secret values.",),
+            likely_next="ELSPETH will keep any credential references deferred.",
+        )
+    if any(not is_discovery_tool(name) for name in tool_names):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="The model is updating the pipeline graph.",
+            evidence=("A pipeline-editing tool was requested.",),
+            likely_next="ELSPETH will validate the result before saving it.",
+        )
+    return ComposerProgressEvent(
+        phase="using_tools",
+        headline="The model requested composer tool information.",
+        evidence=("Checking visible composer tool results.",),
+        likely_next="ELSPETH will continue from the tool response.",
+    )
+
+
+def _tool_started_progress_event(tool_name: str) -> ComposerProgressEvent:
+    if _is_schema_or_catalog_tool(tool_name):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="I'm checking available source, transform, and sink tools.",
+            evidence=("Reading plugin names and schemas only.",),
+            likely_next="ELSPETH will choose compatible pipeline components.",
+        )
+    if _is_secret_tool(tool_name):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="I'm checking available secret references.",
+            evidence=("Secret names can be checked; secret values stay hidden.",),
+            likely_next="ELSPETH will wire only deferred secret references if needed.",
+        )
+    if is_discovery_tool(tool_name):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="I'm checking the current pipeline and tool context.",
+            evidence=("Reading visible composer state.",),
+            likely_next="ELSPETH will use the result to decide the next action.",
+        )
+    return ComposerProgressEvent(
+        phase="using_tools",
+        headline="I'm updating the pipeline graph.",
+        evidence=("A pipeline-editing tool is running.",),
+        likely_next="ELSPETH will validate the updated pipeline.",
+    )
+
+
+def _tool_completed_progress_event(tool_name: str, success: bool) -> ComposerProgressEvent:
+    if not success:
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="A composer tool reported a visible blocker.",
+            evidence=("The tool result was returned without exposing raw request values.",),
+            likely_next="ELSPETH will ask the model to adjust the pipeline request.",
+        )
+    if is_discovery_tool(tool_name):
+        return ComposerProgressEvent(
+            phase="using_tools",
+            headline="The requested tool information is ready.",
+            evidence=(_safe_tool_evidence(tool_name),),
+            likely_next="ELSPETH will continue with the visible result.",
+        )
+    return ComposerProgressEvent(
+        phase="validating",
+        headline="The composer has updated the pipeline and is validating the result.",
+        evidence=("A pipeline-editing tool completed successfully.",),
+        likely_next="ELSPETH will save the updated pipeline if it is accepted.",
+    )
+
+
+def _is_schema_or_catalog_tool(tool_name: str) -> bool:
+    return tool_name in {
+        "list_sources",
+        "list_transforms",
+        "list_sinks",
+        "get_plugin_schema",
+        "list_models",
+    }
+
+
+def _is_secret_tool(tool_name: str) -> bool:
+    return tool_name in {"list_secret_refs", "validate_secret_ref", "wire_secret_ref"}
+
+
+def _safe_tool_evidence(tool_name: str) -> str:
+    if _is_schema_or_catalog_tool(tool_name):
+        return "Checking available source, transform, and sink tools."
+    if _is_secret_tool(tool_name):
+        return "Checking available secret references without reading secret values."
+    if tool_name in {"get_pipeline_state", "preview_pipeline", "diff_pipeline"}:
+        return "Reading the visible pipeline graph and validation summary."
+    return "Using visible composer tool output."
 
 
 def _pydantic_default(obj: Any) -> Any:

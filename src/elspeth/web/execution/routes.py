@@ -15,18 +15,21 @@ run's parent session.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from typing import Literal, cast
 from uuid import UUID
 
 import pydantic
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider
 from elspeth.web.blobs.protocol import BlobNotFoundError
+from elspeth.web.composer.protocol import ComposerService, ComposerServiceError
 from elspeth.web.config import WebSettings
+from elspeth.web.execution.diagnostics import load_run_diagnostics_for_settings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError
 from elspeth.web.execution.schemas import (
@@ -34,6 +37,9 @@ from elspeth.web.execution.schemas import (
     CancelledData,
     CompletedData,
     FailedData,
+    RunDiagnosticsEvaluationResponse,
+    RunDiagnosticsResponse,
+    RunDiagnosticsWorkingView,
     RunEvent,
     RunResultsResponse,
     RunStatusResponse,
@@ -47,11 +53,11 @@ slog = structlog.get_logger()
 # ── Dependency providers (using app.state, matching existing pattern) ──
 
 
-def _get_execution_service(request: Request) -> ExecutionService:
+async def _get_execution_service(request: Request) -> ExecutionService:
     return cast(ExecutionService, request.app.state.execution_service)
 
 
-def _get_session_service(request: Request) -> SessionServiceProtocol:
+async def _get_session_service(request: Request) -> SessionServiceProtocol:
     return cast(SessionServiceProtocol, request.app.state.session_service)
 
 
@@ -154,6 +160,111 @@ def _build_terminal_run_event(current: RunStatusResponse) -> RunEvent:
         event_type=event_type,
         data=payload,
     )
+
+
+def _counted(label: str, count: int) -> str:
+    """Return a small English count phrase."""
+    if count == 1:
+        return f"1 {label}"
+    return f"{count} {label}s"
+
+
+def _summarize_counts(prefix: str, counts: dict[str, int]) -> str | None:
+    """Render snapshot counts without implying hidden progress."""
+    if not counts:
+        return None
+    details = ", ".join(f"{name}={count}" for name, count in sorted(counts.items()))
+    return f"{prefix} include {details}."
+
+
+def _diagnostics_evidence(diagnostics: RunDiagnosticsResponse) -> list[str]:
+    """Build plain-English evidence from the visible diagnostics snapshot."""
+    evidence: list[str] = []
+    token_count = diagnostics.summary.token_count
+    if token_count > 0:
+        evidence.append(f"{_counted('token', token_count)} {'is' if token_count == 1 else 'are'} visible in the runtime trace.")
+        if diagnostics.summary.preview_truncated:
+            evidence.append(f"The preview is limited to the first {_counted('token', diagnostics.summary.preview_limit)}.")
+
+    state_summary = _summarize_counts("Node states", diagnostics.summary.state_counts)
+    if state_summary is not None:
+        evidence.append(state_summary)
+
+    operation_summary = _summarize_counts("Operation records", diagnostics.summary.operation_counts)
+    if operation_summary is not None:
+        evidence.append(operation_summary)
+
+    for artifact in diagnostics.artifacts[:3]:
+        evidence.append(f"Saved output is visible at {artifact.path_or_uri}.")
+    if len(diagnostics.artifacts) > 3:
+        additional_artifacts = len(diagnostics.artifacts) - 3
+        evidence.append(
+            f"{_counted('additional saved output', additional_artifacts)} {'is' if additional_artifacts == 1 else 'are'} visible."
+        )
+
+    if diagnostics.summary.latest_activity_at is not None:
+        evidence.append(f"Latest recorded activity is {diagnostics.summary.latest_activity_at.isoformat()}.")
+
+    if not evidence:
+        evidence.append("No tokens, operations, or saved outputs are visible yet.")
+    return evidence
+
+
+def _fallback_diagnostics_working_view(
+    explanation: str,
+    diagnostics: RunDiagnosticsResponse,
+) -> RunDiagnosticsWorkingView:
+    """Synthesize a working view when the LLM returns plain text."""
+    has_runtime_records = bool(
+        diagnostics.summary.token_count or diagnostics.summary.state_counts or diagnostics.summary.operation_counts or diagnostics.artifacts
+    )
+    if diagnostics.artifacts:
+        headline = "The run has produced saved output"
+    elif has_runtime_records:
+        headline = "Runtime records are updating"
+    else:
+        headline = "No runtime records are visible yet"
+
+    if explanation.strip():
+        meaning = explanation.strip()
+    elif has_runtime_records:
+        meaning = "The run has visible runtime records, so the server is doing work beyond showing the spinner."
+    else:
+        meaning = "The run may still be setting up; no bounded runtime records are visible in Landscape yet."
+
+    next_steps: list[str] = []
+    if diagnostics.artifacts:
+        next_steps.append("Check the saved output path when the run completes.")
+    if diagnostics.run_status in RUN_STATUS_NON_TERMINAL_VALUES:
+        next_steps.append("Refresh diagnostics if the visible evidence does not change soon.")
+
+    return RunDiagnosticsWorkingView(
+        headline=headline,
+        evidence=_diagnostics_evidence(diagnostics),
+        meaning=meaning,
+        next_steps=next_steps,
+    )
+
+
+def _strip_json_code_fence(text: str) -> str:
+    """Accept fenced JSON defensively while the prompt still forbids it."""
+    lines = text.strip().splitlines()
+    if len(lines) >= 3 and lines[0].strip().startswith("```") and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return text.strip()
+
+
+def _parse_run_diagnostics_working_view(
+    explanation: str,
+    diagnostics: RunDiagnosticsResponse,
+) -> tuple[str, RunDiagnosticsWorkingView]:
+    """Parse the composer JSON response, falling back to visible evidence."""
+    stripped = explanation.strip()
+    try:
+        working_view = RunDiagnosticsWorkingView.model_validate_json(_strip_json_code_fence(stripped))
+    except pydantic.ValidationError:
+        return stripped, _fallback_diagnostics_working_view(stripped, diagnostics)
+    return working_view.meaning, working_view
 
 
 # ── Router ─────────────────────────────────────────────────────────────
@@ -260,6 +371,79 @@ def create_execution_router() -> APIRouter:
             if status.landscape_run_id in discard_summaries:
                 status = status.model_copy(update={"discard_summary": discard_summaries[status.landscape_run_id]})
         return status
+
+    @router.get(
+        "/api/runs/{run_id}/diagnostics",
+        response_model=RunDiagnosticsResponse,
+    )
+    async def get_run_diagnostics(
+        run_id: UUID,
+        request: Request,
+        limit: int = Query(50, ge=1, le=100),
+        user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
+    ) -> RunDiagnosticsResponse:
+        """Return a bounded Landscape diagnostics snapshot for a run."""
+        await _verify_run_ownership(run_id, user, request)
+        try:
+            status = await service.get_status(run_id)
+        except ValueError:
+            raise _run_not_found_http() from None
+
+        landscape_run_id = status.landscape_run_id or status.run_id
+        return await asyncio.to_thread(
+            load_run_diagnostics_for_settings,
+            request.app.state.settings,
+            run_id=status.run_id,
+            landscape_run_id=landscape_run_id,
+            run_status=status.status,
+            limit=limit,
+        )
+
+    @router.post(
+        "/api/runs/{run_id}/diagnostics/evaluate",
+        response_model=RunDiagnosticsEvaluationResponse,
+    )
+    async def evaluate_run_diagnostics(
+        run_id: UUID,
+        request: Request,
+        limit: int = Query(50, ge=1, le=100),
+        user: UserIdentity = Depends(get_current_user),  # noqa: B008
+        service: ExecutionService = Depends(_get_execution_service),  # noqa: B008
+    ) -> RunDiagnosticsEvaluationResponse:
+        """Ask the configured LLM to explain the current diagnostics snapshot."""
+        await _verify_run_ownership(run_id, user, request)
+        try:
+            status = await service.get_status(run_id)
+        except ValueError:
+            raise _run_not_found_http() from None
+
+        landscape_run_id = status.landscape_run_id or status.run_id
+        diagnostics = await asyncio.to_thread(
+            load_run_diagnostics_for_settings,
+            request.app.state.settings,
+            run_id=status.run_id,
+            landscape_run_id=landscape_run_id,
+            run_status=status.status,
+            limit=limit,
+        )
+
+        composer: ComposerService = request.app.state.composer_service
+        try:
+            explanation = await composer.explain_run_diagnostics(diagnostics.model_dump(mode="json"))
+        except ComposerServiceError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_type": "run_diagnostics_explanation_failed", "detail": str(exc)},
+            ) from exc
+
+        explanation, working_view = _parse_run_diagnostics_working_view(explanation, diagnostics)
+        return RunDiagnosticsEvaluationResponse(
+            run_id=status.run_id,
+            generated_at=datetime.now(UTC),
+            explanation=explanation,
+            working_view=working_view,
+        )
 
     @router.post("/api/runs/{run_id}/cancel")
     async def cancel_run(

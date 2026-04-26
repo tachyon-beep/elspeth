@@ -12,6 +12,8 @@ export type {
   EdgeSpec,
   CompositionState,
   CompositionStateVersion,
+  ComposerProgressSnapshot,
+  ComposerProgressPhase,
   PluginSummary,
   ValidationResult,
   ValidationError,

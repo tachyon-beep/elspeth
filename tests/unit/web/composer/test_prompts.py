@@ -22,6 +22,7 @@ from elspeth.web.composer.prompts import (
     SYSTEM_PROMPT,
     build_context_string,
     build_messages,
+    build_run_diagnostics_messages,
     build_system_prompt,
 )
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, SourceSpec
@@ -235,6 +236,50 @@ class TestBuildSystemPrompt:
         # SYSTEM_PROMPT fast path.
         result = build_system_prompt("")
         assert result == SYSTEM_PROMPT
+
+
+class TestBuildRunDiagnosticsMessages:
+    """Message construction for run diagnostics explanations."""
+
+    def test_includes_core_composer_skill_pack(self) -> None:
+        messages = build_run_diagnostics_messages(
+            {"run_id": "run-1", "summary": {"token_count": 1}},
+            data_dir=None,
+        )
+
+        assert messages[0]["role"] == "system"
+        assert SYSTEM_PROMPT in messages[0]["content"]
+        assert "run diagnostics" in messages[0]["content"].lower()
+        assert messages[1]["role"] == "user"
+        assert '"run_id": "run-1"' in messages[1]["content"]
+
+    def test_includes_deployment_skill_overlay(self, tmp_path: Path) -> None:
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "pipeline_composer.md").write_text("Deployment composer rules")
+
+        messages = build_run_diagnostics_messages(
+            {"run_id": "run-1", "summary": {"token_count": 1}},
+            data_dir=str(tmp_path),
+        )
+
+        assert SYSTEM_PROMPT in messages[0]["content"]
+        assert "Deployment composer rules" in messages[0]["content"]
+
+    def test_requests_structured_visible_working_view(self) -> None:
+        messages = build_run_diagnostics_messages(
+            {"run_id": "run-1", "summary": {"token_count": 1}},
+            data_dir=None,
+        )
+
+        system_content = messages[0]["content"]
+        assert "strict JSON" in system_content
+        assert '"headline"' in system_content
+        assert '"evidence"' in system_content
+        assert '"meaning"' in system_content
+        assert '"next_steps"' in system_content
+        assert "visible evidence" in system_content
+        assert "hidden chain-of-thought" in system_content
 
 
 class TestBuildMessagesWithDataDir:

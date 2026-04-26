@@ -13,11 +13,11 @@
 // to run it."
 // ============================================================================
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useExecutionStore } from "@/stores/executionStore";
 import { useSessionStore } from "@/stores/sessionStore";
 import { ProgressView } from "@/components/execution/ProgressView";
-import type { Run } from "@/types/index";
+import type { Run, RunDiagnostics, RunDiagnosticsWorkingView } from "@/types/index";
 
 // ── Status badge CSS class mapping ───────────────────────────────────────────
 // Uses .status-badge + .status-badge-{status} classes from App.css
@@ -43,14 +43,77 @@ function formatDuration(startedAt: string, finishedAt: string | null): string {
   return `${min}m ${sec}s`;
 }
 
+function counted(label: string, count: number): string {
+  return count === 1 ? `1 ${label}` : `${count} ${label}s`;
+}
+
+function summarizeCounts(prefix: string, counts: Record<string, number>): string | null {
+  const entries = Object.entries(counts).sort(([left], [right]) => left.localeCompare(right));
+  if (entries.length === 0) {
+    return null;
+  }
+  return `${prefix} include ${entries.map(([name, count]) => `${name}=${count}`).join(", ")}.`;
+}
+
+function buildVisibleEvidence(diagnostics: RunDiagnostics): string[] {
+  const evidence: string[] = [];
+  const tokenCount = diagnostics.summary.token_count;
+  if (tokenCount > 0) {
+    evidence.push(`${counted("token", tokenCount)} ${tokenCount === 1 ? "is" : "are"} visible in the runtime trace.`);
+    if (diagnostics.summary.preview_truncated) {
+      evidence.push(`The preview is limited to the first ${counted("token", diagnostics.summary.preview_limit)}.`);
+    }
+  }
+
+  const stateSummary = summarizeCounts("Node states", diagnostics.summary.state_counts);
+  if (stateSummary) {
+    evidence.push(stateSummary);
+  }
+
+  const operationSummary = summarizeCounts("Operation records", diagnostics.summary.operation_counts);
+  if (operationSummary) {
+    evidence.push(operationSummary);
+  }
+
+  diagnostics.artifacts.slice(0, 3).forEach((artifact) => {
+    evidence.push(`Saved output is visible at ${artifact.path_or_uri}.`);
+  });
+
+  if (evidence.length === 0) {
+    evidence.push("No tokens, operations, or saved outputs are visible yet.");
+  }
+  return evidence;
+}
+
+function buildPendingWorkingView(diagnostics: RunDiagnostics): RunDiagnosticsWorkingView {
+  return {
+    headline: "Reading current run evidence",
+    evidence: buildVisibleEvidence(diagnostics),
+    meaning: "The LLM is reading the same run records shown here and preparing a plain-English explanation.",
+    next_steps: [],
+  };
+}
+
 // ── RunsView component ───────────────────────────────────────────────────────
 
 export function RunsView() {
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
   const runs = useExecutionStore((s) => s.runs);
   const activeRunId = useExecutionStore((s) => s.activeRunId);
   const progress = useExecutionStore((s) => s.progress);
+  const diagnosticsByRunId = useExecutionStore((s) => s.diagnosticsByRunId);
+  const diagnosticsLoadingByRunId = useExecutionStore((s) => s.diagnosticsLoadingByRunId);
+  const diagnosticsEvaluatingByRunId = useExecutionStore((s) => s.diagnosticsEvaluatingByRunId);
+  const diagnosticsErrorByRunId = useExecutionStore((s) => s.diagnosticsErrorByRunId);
+  const diagnosticsExplanationByRunId = useExecutionStore((s) => s.diagnosticsExplanationByRunId);
+  const diagnosticsWorkingViewByRunId = useExecutionStore((s) => s.diagnosticsWorkingViewByRunId);
   const loadRuns = useExecutionStore((s) => s.loadRuns);
+  const loadRunDiagnostics = useExecutionStore((s) => s.loadRunDiagnostics);
+  const evaluateRunDiagnostics = useExecutionStore((s) => s.evaluateRunDiagnostics);
   const activeSessionId = useSessionStore((s) => s.activeSessionId);
+  const hasActiveRun = runs.some((run) => run.status === "pending" || run.status === "running");
+  const expandedRun = expandedRunId ? runs.find((run) => run.id === expandedRunId) : undefined;
+  const expandedRunIsActive = expandedRun?.status === "pending" || expandedRun?.status === "running";
 
   // Load runs when the view mounts or session changes
   useEffect(() => {
@@ -58,6 +121,26 @@ export function RunsView() {
       loadRuns(activeSessionId);
     }
   }, [activeSessionId, loadRuns]);
+
+  useEffect(() => {
+    if (!activeSessionId || !hasActiveRun) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadRuns(activeSessionId);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [activeSessionId, hasActiveRun, loadRuns]);
+
+  useEffect(() => {
+    if (!expandedRunId || !expandedRunIsActive) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void loadRunDiagnostics(expandedRunId);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [expandedRunId, expandedRunIsActive, loadRunDiagnostics]);
 
   // Empty state
   if (runs.length === 0) {
@@ -156,6 +239,27 @@ export function RunsView() {
                     ? "running..."
                     : formatDuration(run.started_at, run.finished_at)}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextRunId = expandedRunId === run.id ? null : run.id;
+                    setExpandedRunId(nextRunId);
+                    if (nextRunId) {
+                      void loadRunDiagnostics(run.id);
+                    }
+                  }}
+                  style={{
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--color-bg)",
+                    color: "var(--color-text)",
+                    fontSize: 12,
+                    padding: "2px 7px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {expandedRunId === run.id ? "Hide" : "Inspect"}
+                </button>
               </div>
 
               {run.status === "failed" && run.error && (
@@ -176,6 +280,19 @@ export function RunsView() {
                   {run.error}
                 </div>
               )}
+
+              {expandedRunId === run.id && (
+                <RunDiagnosticsPanel
+                  diagnostics={diagnosticsByRunId[run.id]}
+                  error={diagnosticsErrorByRunId[run.id] ?? null}
+                  explanation={diagnosticsExplanationByRunId[run.id] ?? null}
+                  isEvaluating={diagnosticsEvaluatingByRunId[run.id] ?? false}
+                  isLoading={diagnosticsLoadingByRunId[run.id] ?? false}
+                  workingView={diagnosticsWorkingViewByRunId[run.id] ?? null}
+                  onExplain={() => void evaluateRunDiagnostics(run.id)}
+                  onRefresh={() => void loadRunDiagnostics(run.id)}
+                />
+              )}
             </div>
 
             {/* Show live progress inline for the active running run */}
@@ -183,6 +300,173 @@ export function RunsView() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+interface RunDiagnosticsPanelProps {
+  diagnostics: RunDiagnostics | undefined;
+  error: string | null;
+  explanation: string | null;
+  isEvaluating: boolean;
+  isLoading: boolean;
+  workingView: RunDiagnosticsWorkingView | null;
+  onExplain: () => void;
+  onRefresh: () => void;
+}
+
+function RunDiagnosticsPanel({
+  diagnostics,
+  error,
+  explanation,
+  isEvaluating,
+  isLoading,
+  workingView,
+  onExplain,
+  onRefresh,
+}: RunDiagnosticsPanelProps) {
+  const visibleWorkingView =
+    workingView ?? (isEvaluating && diagnostics ? buildPendingWorkingView(diagnostics) : null);
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        paddingTop: 10,
+        borderTop: "1px solid var(--color-border)",
+        fontSize: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ color: "var(--color-text-muted)" }}>
+          {diagnostics
+            ? `${diagnostics.summary.token_count.toLocaleString()} tokens`
+            : isLoading
+              ? "Loading diagnostics..."
+              : "Diagnostics not loaded"}
+          {diagnostics?.summary.preview_truncated ? `, first ${diagnostics.summary.preview_limit}` : ""}
+        </span>
+        <span style={{ display: "flex", gap: 6 }}>
+          <button type="button" onClick={onRefresh} disabled={isLoading}>
+            Refresh
+          </button>
+          <button type="button" onClick={onExplain} disabled={isEvaluating || isLoading || !diagnostics}>
+            {isEvaluating ? "Explaining..." : "Explain"}
+          </button>
+        </span>
+      </div>
+
+      {error && (
+        <div role="alert" style={{ color: "var(--color-error)", marginBottom: 8 }}>
+          {error}
+        </div>
+      )}
+
+      {diagnostics && (
+        <>
+          {diagnostics.operations.length > 0 && (
+            <div style={{ marginBottom: 8, color: "var(--color-text-muted)" }}>
+              {diagnostics.operations.map((operation) => (
+                <span key={operation.operation_id} style={{ marginRight: 10 }}>
+                  {operation.operation_type} {operation.status}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {diagnostics.tokens.length > 0 && (
+            <div style={{ display: "grid", gap: 6, marginBottom: 8 }}>
+              {diagnostics.tokens.map((token) => (
+                <div
+                  key={token.token_id}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "minmax(90px, 1fr) minmax(80px, 1.2fr)",
+                    gap: 8,
+                    alignItems: "start",
+                  }}
+                >
+                  <span style={{ overflowWrap: "anywhere" }}>{token.token_id}</span>
+                  <span style={{ color: "var(--color-text-muted)", overflowWrap: "anywhere" }}>
+                    row {token.row_index ?? "-"}
+                    {token.terminal_outcome ? `, ${token.terminal_outcome}` : ""}
+                    {token.states.map((state) => (
+                      <span key={state.state_id} style={{ marginLeft: 8 }}>
+                        {state.node_id} {state.status}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {diagnostics.artifacts.length > 0 && (
+            <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
+              {diagnostics.artifacts.map((artifact) => (
+                <span key={artifact.artifact_id} style={{ overflowWrap: "anywhere" }}>
+                  {artifact.path_or_uri}
+                </span>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {visibleWorkingView && (
+        <div
+          style={{
+            padding: "8px 10px",
+            borderLeft: "3px solid var(--color-border)",
+            backgroundColor: "var(--color-surface-hover)",
+            borderRadius: "var(--radius-sm)",
+            lineHeight: 1.45,
+            overflowWrap: "anywhere",
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 5 }}>
+            {visibleWorkingView.headline}
+          </div>
+          {visibleWorkingView.evidence.length > 0 && (
+            <ul style={{ margin: "0 0 6px 16px", padding: 0 }}>
+              {visibleWorkingView.evidence.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+          <div>{visibleWorkingView.meaning}</div>
+          {visibleWorkingView.next_steps.length > 0 && (
+            <ul style={{ margin: "6px 0 0 16px", padding: 0 }}>
+              {visibleWorkingView.next_steps.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {!visibleWorkingView && explanation && (
+        <div
+          style={{
+            padding: "7px 9px",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-sm)",
+            lineHeight: 1.45,
+            overflowWrap: "anywhere",
+          }}
+        >
+          {explanation}
+        </div>
+      )}
     </div>
   );
 }

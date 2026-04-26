@@ -5,6 +5,7 @@ import type {
   ChatMessage,
   CompositionState,
   CompositionStateVersion,
+  ComposerProgressSnapshot,
   ApiError,
   ValidationResult,
 } from "@/types/api";
@@ -17,11 +18,25 @@ function getExecutionStore() {
   return useExecutionStore.getState();
 }
 
+const COMPOSER_PROGRESS_POLL_INTERVAL_MS = 1500;
+
+let composerProgressPollTimer: ReturnType<typeof setInterval> | null = null;
+let composerProgressPollSessionId: string | null = null;
+
+function clearComposerProgressPollTimer(): void {
+  if (composerProgressPollTimer !== null) {
+    clearInterval(composerProgressPollTimer);
+    composerProgressPollTimer = null;
+  }
+  composerProgressPollSessionId = null;
+}
+
 interface SessionState {
   sessions: Session[];
   activeSessionId: string | null;
   messages: ChatMessage[];
   compositionState: CompositionState | null;
+  composerProgress: ComposerProgressSnapshot | null;
   isComposing: boolean;
   stateVersions: CompositionStateVersion[];
   error: string | null;
@@ -35,6 +50,9 @@ interface SessionState {
   selectSession: (id: string) => Promise<void>;
   archiveSession: (id: string) => Promise<void>;
   sendMessage: (content: string, signal?: AbortSignal) => Promise<void>;
+  loadComposerProgress: (sessionId?: string) => Promise<void>;
+  startComposerProgressPolling: (sessionId: string) => void;
+  stopComposerProgressPolling: (sessionId?: string) => void;
   sendValidationFeedback: (result: ValidationResult) => Promise<void>;
   retryMessage: (messageId: string, signal?: AbortSignal) => Promise<void>;
   forkFromMessage: (messageId: string, newContent: string) => Promise<void>;
@@ -51,6 +69,7 @@ const initialState = {
   activeSessionId: null as string | null,
   messages: [] as ChatMessage[],
   compositionState: null as CompositionState | null,
+  composerProgress: null as ComposerProgressSnapshot | null,
   isComposing: false,
   stateVersions: [] as CompositionStateVersion[],
   isLoadingVersions: false,
@@ -73,11 +92,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   async createSession() {
     try {
       const session = await api.createSession();
+      clearComposerProgressPollTimer();
       set((state) => ({
         sessions: [session, ...state.sessions],
         activeSessionId: session.id,
         messages: [],
         compositionState: null,
+        composerProgress: null,
         stateVersions: [],
         error: null,
         selectedNodeId: null, // Clear selection for new session
@@ -94,6 +115,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         const sessions = state.sessions.filter((s) => s.id !== id);
         // If we archived the active session, clear selection
         const wasActive = state.activeSessionId === id;
+        if (wasActive) {
+          clearComposerProgressPollTimer();
+        }
         return {
           sessions,
           ...(wasActive
@@ -101,6 +125,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
                 activeSessionId: null,
                 messages: [],
                 compositionState: null,
+                composerProgress: null,
                 stateVersions: [],
                 isComposing: false,
                 selectedNodeId: null,
@@ -117,11 +142,13 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     // R4-H3: Clear validation when switching sessions to prevent
     // stale validation from a previous session being visible
     getExecutionStore().clearValidation();
+    clearComposerProgressPollTimer();
 
     set({
       activeSessionId: id,
       messages: [],
       compositionState: null,
+      composerProgress: null,
       stateVersions: [],
       isComposing: false,
       error: null,
@@ -159,8 +186,10 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((state) => ({
       isComposing: true,
       error: null,
+      composerProgress: null,
       messages: [...state.messages, optimisticMessage],
     }));
+    get().startComposerProgressPolling(activeSessionId);
 
     try {
       const stateId = get().compositionState?.id;
@@ -230,6 +259,52 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             : existing,
         ),
       }));
+    } finally {
+      get().stopComposerProgressPolling(activeSessionId);
+    }
+  },
+
+  async loadComposerProgress(sessionId?: string) {
+    const targetSessionId = sessionId ?? get().activeSessionId;
+    if (!targetSessionId) return;
+
+    try {
+      const progress = await api.fetchComposerProgress(targetSessionId);
+      const current = get();
+      if (
+        current.activeSessionId !== targetSessionId ||
+        !current.isComposing
+      ) {
+        return;
+      }
+      set({ composerProgress: progress.phase === "idle" ? null : progress });
+    } catch {
+      // Composer progress is advisory. Keep the local heuristic fallback.
+    }
+  },
+
+  startComposerProgressPolling(sessionId: string) {
+    clearComposerProgressPollTimer();
+    composerProgressPollSessionId = sessionId;
+    set({ composerProgress: null });
+    void get().loadComposerProgress(sessionId);
+    composerProgressPollTimer = setInterval(() => {
+      if (composerProgressPollSessionId !== sessionId) return;
+      void useSessionStore.getState().loadComposerProgress(sessionId);
+    }, COMPOSER_PROGRESS_POLL_INTERVAL_MS);
+  },
+
+  stopComposerProgressPolling(sessionId?: string) {
+    if (
+      sessionId !== undefined &&
+      composerProgressPollSessionId !== null &&
+      composerProgressPollSessionId !== sessionId
+    ) {
+      return;
+    }
+    clearComposerProgressPollTimer();
+    if (sessionId === undefined || get().activeSessionId === sessionId) {
+      set({ composerProgress: null });
     }
   },
 
@@ -267,12 +342,14 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set((state) => ({
       isComposing: true,
       error: null,
+      composerProgress: null,
       messages: state.messages.map((existing) =>
         existing.id === messageId
           ? { ...existing, local_status: "pending" }
           : existing,
       ),
     }));
+    get().startComposerProgressPolling(activeSessionId);
 
     try {
       // Use recompose (not sendMessage) — the user message is already
@@ -330,6 +407,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
             : existing,
         ),
       }));
+    } finally {
+      get().stopComposerProgressPolling(activeSessionId);
     }
   },
 
@@ -337,6 +416,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
+    clearComposerProgressPollTimer();
     set({ isComposing: true, error: null });
     try {
       const result = await api.forkFromMessage(
@@ -352,6 +432,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         activeSessionId: result.session.id,
         messages: result.messages,
         compositionState: result.composition_state,
+        composerProgress: null,
         stateVersions: [],
         isComposing: false,
         selectedNodeId: null, // Clear selection for forked session
@@ -362,6 +443,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     } catch {
       set({
         isComposing: false,
+        composerProgress: null,
         error: "Failed to fork conversation. Please try again.",
       });
     }
@@ -436,6 +518,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   reset() {
+    clearComposerProgressPollTimer();
     set(initialState);
   },
 }));

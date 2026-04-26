@@ -355,6 +355,7 @@ class TestB2ShutdownEvent:
         mock_load: MagicMock,
         mock_orch_cls: MagicMock,
         service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
     ) -> None:
         mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
@@ -366,19 +367,19 @@ class TestB2ShutdownEvent:
         mock_instantiate.return_value = mock_bundle
         mock_graph = MagicMock()
         mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        shutdown_event = threading.Event()
+        run_id = uuid4()
+
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
-        mock_result.run_id = "landscape-run-123"
+        mock_result.run_id = str(run_id)
         mock_result.rows_processed = 10
         mock_result.rows_succeeded = 10
         mock_result.rows_failed = 0
         mock_result.rows_routed = 0
         mock_result.rows_quarantined = 0
         mock_orch.run.return_value = mock_result
-
-        shutdown_event = threading.Event()
-        run_id = uuid4()
 
         service._run_pipeline(str(run_id), "source:\n  plugin: csv", shutdown_event)
 
@@ -387,6 +388,13 @@ class TestB2ShutdownEvent:
         assert orch_run_call[1].get("shutdown_event") is shutdown_event, (
             "B2 VIOLATION: shutdown_event not passed to orchestrator.run(). This will cause ValueError: signal only works in main thread."
         )
+        assert orch_run_call[1].get("run_id") == str(run_id), (
+            "Run diagnostics require the web run UUID to be the Landscape run_id while the run is still active."
+        )
+
+        running_calls = [call for call in mock_session_service.update_run_status.await_args_list if call.kwargs.get("status") == "running"]
+        assert running_calls
+        assert running_calls[0].kwargs.get("landscape_run_id") == str(run_id)
 
 
 # ── B3: LandscapeDB and PayloadStore Construction ─────────────────────
@@ -1208,11 +1216,12 @@ class TestCompletionPathExternalCancellation:
         mock_result.run_id = "landscape-run-blob-cancel"
         mock_orch.run.return_value = mock_result
 
-        blob_state = {"status": "pending", "calls": []}
+        blob_state = {"status": "pending"}
+        blob_calls: list[bool] = []
 
         async def finalize_run_output_blobs(run_id: UUID, success: bool) -> BlobFinalizationResult:
             del run_id
-            cast(list[bool], blob_state["calls"]).append(success)
+            blob_calls.append(success)
             if blob_state["status"] == "pending":
                 blob_state["status"] = "ready" if success else "error"
             return BlobFinalizationResult(finalized=[], errors=[])
@@ -1230,7 +1239,7 @@ class TestCompletionPathExternalCancellation:
 
         service._run_pipeline(str(uuid4()), "source:\n  plugin: csv", threading.Event())
 
-        assert blob_state["calls"] == [False]
+        assert blob_calls == [False]
         assert blob_state["status"] == "error"
 
     @patch("elspeth.web.execution.service.Orchestrator")

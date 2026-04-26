@@ -1200,6 +1200,8 @@ class Orchestrator:
         config: PipelineConfig,
         payload_store: PayloadStore,
         secret_resolutions: list[SecretResolutionInput] | None,
+        *,
+        run_id: str | None = None,
     ) -> tuple[RecorderFactory, Any]:
         """Execute the DATABASE phase: create factory, begin run, record secrets.
 
@@ -1207,6 +1209,7 @@ class Orchestrator:
             config: Pipeline configuration.
             payload_store: PayloadStore for audit compliance.
             secret_resolutions: Optional secret resolution records.
+            run_id: Optional caller-supplied run ID for audit correlation.
 
         Returns:
             Tuple of (factory, run) where run has run_id and config_hash attributes.
@@ -1235,6 +1238,7 @@ class Orchestrator:
                 canonical_version=self._canonical_version,
                 source_schema_json=source_schema_json,
                 schema_contract=source_contract,
+                run_id=run_id,
             )
 
             # Record secret resolutions in audit trail (deferred from pre-run loading)
@@ -1338,6 +1342,7 @@ class Orchestrator:
         preflight_results: PreflightResult | None = None,
         shutdown_event: threading.Event | None = None,
         sink_factory: Callable[[str], SinkProtocol] | None = None,
+        run_id: str | None = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -1360,6 +1365,8 @@ class Orchestrator:
             sink_factory: Creates a fresh sink instance by name. Required when
                 landscape export is enabled (the pipeline's sinks are already
                 closed by the time export runs).
+            run_id: Optional caller-supplied Landscape run ID. When omitted,
+                Landscape generates a run ID.
 
         Raises:
             OrchestrationInvariantError: If graph or payload_store is not provided
@@ -1385,6 +1392,7 @@ class Orchestrator:
             config,
             payload_store,
             secret_resolutions,
+            run_id=run_id,
         )
 
         # Record pre-flight results (deferred from bootstrap_and_run)

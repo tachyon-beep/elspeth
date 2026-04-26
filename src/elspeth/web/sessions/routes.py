@@ -7,6 +7,7 @@ Session-scoped endpoints verify ownership before any business logic.
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 from uuid import UUID
 
 import structlog
@@ -20,6 +21,12 @@ from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
+from elspeth.web.composer.progress import (
+    ComposerProgressEvent,
+    ComposerProgressRegistry,
+    ComposerProgressSink,
+    ComposerProgressSnapshot,
+)
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
@@ -92,6 +99,35 @@ def _get_session_compose_lock_registry(request: Request) -> _SessionComposeLockR
         registry = _SessionComposeLockRegistry()
         request.app.state.session_compose_lock_registry = registry
     return registry
+
+
+def _get_composer_progress_registry(request: Request) -> ComposerProgressRegistry:
+    """Return the app-scoped composer progress registry."""
+    return cast(ComposerProgressRegistry, request.app.state.composer_progress_registry)
+
+
+def _composer_progress_sink(
+    registry: ComposerProgressRegistry,
+    *,
+    session_id: str,
+    request_id: str | None,
+) -> ComposerProgressSink:
+    """Bind a registry sink to one session/request."""
+
+    async def _publish(event: ComposerProgressEvent) -> None:
+        await registry.publish(session_id=session_id, request_id=request_id, event=event)
+
+    return _publish
+
+
+async def _publish_progress(
+    registry: ComposerProgressRegistry,
+    *,
+    session_id: str,
+    request_id: str | None,
+    event: ComposerProgressEvent,
+) -> None:
+    await registry.publish(session_id=session_id, request_id=request_id, event=event)
 
 
 def _session_response(session: SessionRecord) -> SessionResponse:
@@ -449,6 +485,20 @@ def create_session_router() -> APIRouter:
         session = await _verify_session_ownership(session_id, user, request)
         return _session_response(session)
 
+    @router.get(
+        "/{session_id}/composer-progress",
+        response_model=ComposerProgressSnapshot,
+    )
+    async def get_composer_progress(
+        session_id: UUID,
+        request: Request,
+        user: UserIdentity = Depends(get_current_user),  # noqa: B008
+    ) -> ComposerProgressSnapshot:
+        """Return the latest provider-safe composer progress for a session."""
+        session = await _verify_session_ownership(session_id, user, request)
+        registry = _get_composer_progress_registry(request)
+        return await registry.get_latest(str(session.id))
+
     @router.delete("/{session_id}", status_code=204)
     async def delete_session(
         session_id: UUID,
@@ -481,6 +531,8 @@ def create_session_router() -> APIRouter:
             execution_service.cleanup_session_lock(str(session.id))
             compose_lock_registry = _get_session_compose_lock_registry(request)
             await compose_lock_registry.cleanup_session_lock(str(session.id))
+            progress_registry = _get_composer_progress_registry(request)
+            await progress_registry.clear(str(session.id))
 
     @router.post(
         "/{session_id}/messages",
@@ -572,6 +624,23 @@ def create_session_router() -> APIRouter:
                 body.content,
                 composition_state_id=pre_send_state_id,
             )
+            progress_registry = _get_composer_progress_registry(request)
+            progress_sink = _composer_progress_sink(
+                progress_registry,
+                session_id=str(session.id),
+                request_id=str(user_msg.id),
+            )
+            await _publish_progress(
+                progress_registry,
+                session_id=str(session.id),
+                request_id=str(user_msg.id),
+                event=ComposerProgressEvent(
+                    phase="starting",
+                    headline="I'm reading your request and current pipeline.",
+                    evidence=("The request was accepted for this session.",),
+                    likely_next="ELSPETH will prepare the composer prompt with the current pipeline.",
+                ),
+            )
 
             # 3. Pre-fetch chat history as plain dicts (seam contract B)
             # Pass limit=None to fetch the full conversation — the default
@@ -598,8 +667,20 @@ def create_session_router() -> APIRouter:
                     state,
                     session_id=str(session_id),
                     user_id=str(user.user_id),
+                    progress=progress_sink,
                 )
             except ComposerConvergenceError as exc:
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not finish this request.",
+                        evidence=("The bounded composer loop stopped before a final answer.",),
+                        likely_next="Try a smaller request or retry from the visible user message.",
+                    ),
+                )
                 response_body = await _handle_convergence_error(exc, service, session.id, "convergence")
                 raise HTTPException(status_code=422, detail=response_body) from exc
             except LiteLLMAuthError as exc:
@@ -623,6 +704,17 @@ def create_session_router() -> APIRouter:
                     session_id=str(session_id),
                     exc_class=type(exc).__name__,
                 )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer model is not available.",
+                        evidence=("The model provider rejected the composer request.",),
+                        likely_next="Check the composer provider configuration before retrying.",
+                    ),
+                )
                 raise HTTPException(
                     status_code=502,
                     detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
@@ -637,6 +729,17 @@ def create_session_router() -> APIRouter:
                     "compose_llm_unavailable",
                     session_id=str(session_id),
                     exc_class=type(exc).__name__,
+                )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer model is temporarily unavailable.",
+                        evidence=("The model provider did not complete the request.",),
+                        likely_next="Retry when the provider is available.",
+                    ),
                 )
                 raise HTTPException(
                     status_code=502,
@@ -668,8 +771,30 @@ def create_session_router() -> APIRouter:
                     str(user.user_id),
                     "compose",
                 )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not safely finish this request.",
+                        evidence=("A pipeline tool failed on the server side.",),
+                        likely_next="Review the visible error message, then retry after the issue is resolved.",
+                    ),
+                )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
             except ComposerServiceError as exc:
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not finish this request.",
+                        evidence=("Prompt preparation or composer service setup failed.",),
+                        likely_next="Retry once the composer service is available.",
+                    ),
+                )
                 raise HTTPException(
                     status_code=502,
                     detail={"error_type": "composer_error", "detail": str(exc)},
@@ -679,6 +804,17 @@ def create_session_router() -> APIRouter:
             state_response: CompositionStateResponse | None = None
             post_compose_state_id: UUID | None = pre_send_state_id
             if result.state.version != state.version:
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="validating",
+                        headline="The composer has updated the pipeline and is validating the result.",
+                        evidence=("The updated pipeline state is being checked before persistence.",),
+                        likely_next="ELSPETH will save the validated pipeline snapshot.",
+                    ),
+                )
                 state_d = result.state.to_dict()
                 validation = result.state.validate()
                 state_data = CompositionStateData(
@@ -689,6 +825,17 @@ def create_session_router() -> APIRouter:
                     metadata_=state_d["metadata"],
                     is_valid=validation.is_valid,
                     validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+                )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="saving",
+                        headline="ELSPETH is saving the pipeline update.",
+                        evidence=("A new composition state version is being stored for this session.",),
+                        likely_next="The assistant response will appear after the save completes.",
+                    ),
                 )
                 new_state_record = await service.save_composition_state(
                     session.id,
@@ -703,6 +850,19 @@ def create_session_router() -> APIRouter:
                 "assistant",
                 result.message,
                 composition_state_id=post_compose_state_id,
+            )
+            await _publish_progress(
+                progress_registry,
+                session_id=str(session.id),
+                request_id=str(user_msg.id),
+                event=ComposerProgressEvent(
+                    phase="complete",
+                    headline="The composer has updated the pipeline."
+                    if result.state.version != state.version
+                    else "The composer response is ready.",
+                    evidence=("The assistant response has been saved for this session.",),
+                    likely_next="Review the response and current pipeline.",
+                ),
             )
 
             # 7. Return response
@@ -764,6 +924,24 @@ def create_session_router() -> APIRouter:
                 )
 
             last_user_content = records[-1].content
+            request_id = str(records[-1].id)
+            progress_registry = _get_composer_progress_registry(request)
+            progress_sink = _composer_progress_sink(
+                progress_registry,
+                session_id=str(session.id),
+                request_id=request_id,
+            )
+            await _publish_progress(
+                progress_registry,
+                session_id=str(session.id),
+                request_id=request_id,
+                event=ComposerProgressEvent(
+                    phase="starting",
+                    headline="I'm rereading your request and current pipeline.",
+                    evidence=("The retry was accepted for this session.",),
+                    likely_next="ELSPETH will prepare the composer prompt with the current pipeline.",
+                ),
+            )
             # Exclude the last user message — the composer receives it
             # separately via the message arg and appends it in _build_messages.
             chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
@@ -777,8 +955,20 @@ def create_session_router() -> APIRouter:
                     state,
                     session_id=str(session_id),
                     user_id=str(user.user_id),
+                    progress=progress_sink,
                 )
             except ComposerConvergenceError as exc:
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not finish this retry.",
+                        evidence=("The bounded composer loop stopped before a final answer.",),
+                        likely_next="Try a smaller request or edit the visible user message.",
+                    ),
+                )
                 response_body = await _handle_convergence_error(exc, service, session.id, "recompose_convergence")
                 raise HTTPException(status_code=422, detail=response_body) from exc
             except LiteLLMAuthError as exc:
@@ -793,6 +983,17 @@ def create_session_router() -> APIRouter:
                     session_id=str(session_id),
                     exc_class=type(exc).__name__,
                 )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer model is not available.",
+                        evidence=("The model provider rejected the composer request.",),
+                        likely_next="Check the composer provider configuration before retrying.",
+                    ),
+                )
                 raise HTTPException(
                     status_code=502,
                     detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
@@ -802,6 +1003,17 @@ def create_session_router() -> APIRouter:
                     "recompose_llm_unavailable",
                     session_id=str(session_id),
                     exc_class=type(exc).__name__,
+                )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer model is temporarily unavailable.",
+                        evidence=("The model provider did not complete the request.",),
+                        likely_next="Retry when the provider is available.",
+                    ),
                 )
                 raise HTTPException(
                     status_code=502,
@@ -819,8 +1031,30 @@ def create_session_router() -> APIRouter:
                     str(user.user_id),
                     "recompose",
                 )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not safely finish this retry.",
+                        evidence=("A pipeline tool failed on the server side.",),
+                        likely_next="Review the visible error message, then retry after the issue is resolved.",
+                    ),
+                )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
             except ComposerServiceError as exc:
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not finish this retry.",
+                        evidence=("Prompt preparation or composer service setup failed.",),
+                        likely_next="Retry once the composer service is available.",
+                    ),
+                )
                 raise HTTPException(
                     status_code=502,
                     detail={"error_type": "composer_error", "detail": str(exc)},
@@ -830,6 +1064,17 @@ def create_session_router() -> APIRouter:
             state_response: CompositionStateResponse | None = None
             post_compose_state_id: UUID | None = pre_send_state_id
             if result.state.version != state.version:
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="validating",
+                        headline="The composer has updated the pipeline and is validating the result.",
+                        evidence=("The updated pipeline state is being checked before persistence.",),
+                        likely_next="ELSPETH will save the validated pipeline snapshot.",
+                    ),
+                )
                 state_d = result.state.to_dict()
                 validation = result.state.validate()
                 state_data = CompositionStateData(
@@ -840,6 +1085,17 @@ def create_session_router() -> APIRouter:
                     metadata_=state_d["metadata"],
                     is_valid=validation.is_valid,
                     validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+                )
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="saving",
+                        headline="ELSPETH is saving the pipeline update.",
+                        evidence=("A new composition state version is being stored for this session.",),
+                        likely_next="The assistant response will appear after the save completes.",
+                    ),
                 )
                 new_state_record = await service.save_composition_state(
                     session.id,
@@ -854,6 +1110,19 @@ def create_session_router() -> APIRouter:
                 "assistant",
                 result.message,
                 composition_state_id=post_compose_state_id,
+            )
+            await _publish_progress(
+                progress_registry,
+                session_id=str(session.id),
+                request_id=request_id,
+                event=ComposerProgressEvent(
+                    phase="complete",
+                    headline="The composer has updated the pipeline."
+                    if result.state.version != state.version
+                    else "The composer response is ready.",
+                    evidence=("The assistant response has been saved for this session.",),
+                    likely_next="Review the response and current pipeline.",
+                ),
             )
 
             return MessageWithStateResponse(

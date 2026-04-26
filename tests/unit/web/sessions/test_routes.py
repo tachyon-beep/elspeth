@@ -6,6 +6,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import AsyncMock
 
 import pytest
@@ -27,11 +28,19 @@ from elspeth.core.landscape.schema import (
 )
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
+from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressRegistry
 from elspeth.web.composer.protocol import ComposerPluginCrashError, ComposerResult
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.config import WebSettings
+from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 from elspeth.web.sessions.engine import create_session_engine
-from elspeth.web.sessions.protocol import CompositionStateData
+from elspeth.web.sessions.protocol import (
+    ChatMessageRecord,
+    ChatMessageRole,
+    CompositionStateData,
+    CompositionStateRecord,
+    SessionRecord,
+)
 from elspeth.web.sessions.routes import create_session_router
 from elspeth.web.sessions.schema import initialize_session_schema
 from elspeth.web.sessions.service import SessionServiceImpl
@@ -79,8 +88,9 @@ class _BlockingRecordingComposer:
         *,
         session_id: str | None = None,
         user_id: str | None = None,
+        progress=None,
     ) -> ComposerResult:
-        del state, session_id, user_id
+        del state, session_id, user_id, progress
 
         self.calls.append(
             {
@@ -98,6 +108,161 @@ class _BlockingRecordingComposer:
             reply = "Reply to second"
 
         return ComposerResult(message=reply, state=_EMPTY_STATE)
+
+
+class _ProgressAwareComposer:
+    """Composer stub that proves routes provide a progress sink."""
+
+    def __init__(self, response_text: str = "Progress-aware reply") -> None:
+        self.response_text = response_text
+        self.progress_sink_seen = False
+
+    async def compose(
+        self,
+        message: str,
+        chat_messages: list[dict[str, object]],
+        state: CompositionState,
+        *,
+        session_id: str | None = None,
+        user_id: str | None = None,
+        progress=None,
+    ) -> ComposerResult:
+        del message, chat_messages, session_id, user_id
+        assert progress is not None, "session routes must pass a composer progress sink"
+        self.progress_sink_seen = True
+        await progress(
+            ComposerProgressEvent(
+                phase="calling_model",
+                headline="I'm asking the model to choose a pipeline update.",
+                evidence=("The route supplied a session-scoped progress sink.",),
+                likely_next="ELSPETH will save any accepted pipeline update.",
+            )
+        )
+        updated_state = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="progress test"),
+            version=state.version + 1,
+        )
+        return ComposerResult(message=self.response_text, state=updated_state)
+
+
+class _ProgressRouteSessionService:
+    """Minimal async session service for progress route tests."""
+
+    def __init__(self, *, user_id: str = "alice", auth_provider_type: str = "local") -> None:
+        now = datetime.now(UTC)
+        self.session = SessionRecord(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            auth_provider_type=auth_provider_type,
+            title="Pipeline",
+            created_at=now,
+            updated_at=now,
+        )
+        self.messages: list[ChatMessageRecord] = []
+        self.current_state: CompositionStateRecord | None = None
+
+    async def get_session(self, session_id: uuid.UUID) -> SessionRecord:
+        if session_id != self.session.id:
+            raise ValueError("Session not found")
+        return self.session
+
+    async def get_current_state(self, session_id: uuid.UUID) -> CompositionStateRecord | None:
+        if session_id != self.session.id:
+            raise ValueError("Session not found")
+        return self.current_state
+
+    async def add_message(
+        self,
+        session_id: uuid.UUID,
+        role: ChatMessageRole,
+        content: str,
+        tool_calls=None,
+        composition_state_id: uuid.UUID | None = None,
+    ) -> ChatMessageRecord:
+        if session_id != self.session.id:
+            raise ValueError("Session not found")
+        message = ChatMessageRecord(
+            id=uuid.uuid4(),
+            session_id=session_id,
+            role=role,
+            content=content,
+            tool_calls=tool_calls,
+            created_at=datetime.now(UTC),
+            composition_state_id=composition_state_id,
+        )
+        self.messages.append(message)
+        return message
+
+    async def get_messages(
+        self,
+        session_id: uuid.UUID,
+        limit: int | None = 100,
+        offset: int = 0,
+    ) -> list[ChatMessageRecord]:
+        if session_id != self.session.id:
+            raise ValueError("Session not found")
+        del offset
+        if limit is None:
+            return list(self.messages)
+        return list(self.messages[:limit])
+
+    async def save_composition_state(
+        self,
+        session_id: uuid.UUID,
+        data: CompositionStateData,
+    ) -> CompositionStateRecord:
+        if session_id != self.session.id:
+            raise ValueError("Session not found")
+        version = 1 if self.current_state is None else self.current_state.version + 1
+        record = CompositionStateRecord(
+            id=uuid.uuid4(),
+            session_id=session_id,
+            version=version,
+            source=data.source,
+            nodes=data.nodes,
+            edges=data.edges,
+            outputs=data.outputs,
+            metadata_=data.metadata_,
+            is_valid=data.is_valid,
+            validation_errors=data.validation_errors,
+            created_at=datetime.now(UTC),
+            derived_from_state_id=self.current_state.id if self.current_state is not None else None,
+        )
+        self.current_state = record
+        return record
+
+
+def _make_progress_route_app(
+    tmp_path: Path,
+    *,
+    user_id: str = "alice",
+) -> tuple[FastAPI, _ProgressRouteSessionService]:
+    app = FastAPI()
+    service = _ProgressRouteSessionService(user_id=user_id)
+    identity = UserIdentity(user_id=user_id, username=user_id)
+
+    async def mock_user():
+        return identity
+
+    app.dependency_overrides[get_current_user] = mock_user
+    app.state.session_service = service
+    app.state.settings = WebSettings(
+        data_dir=tmp_path,
+        composer_max_composition_turns=15,
+        composer_max_discovery_turns=10,
+        composer_timeout_seconds=85.0,
+        composer_rate_limit_per_minute=10,
+    )
+    app.state.composer_service = None
+    app.state.rate_limiter = ComposerRateLimiter(limit=100)
+    app.state.execution_service = AsyncMock()
+    app.state.composer_progress_registry = ComposerProgressRegistry()
+    app.include_router(create_session_router())
+    return app, service
 
 
 def _make_app(
@@ -469,7 +634,7 @@ class TestSessionCRUDRoutes:
         }
 
 
-def _collect_ownership_call_site_identities(module: object, helper_name: str) -> set[str]:
+def _collect_ownership_call_site_identities(module: ModuleType, helper_name: str) -> set[str]:
     """Walk ``module``'s AST and return enclosing function names for each call to ``helper_name``.
 
     Shared implementation for the IDOR drift guards across the three
@@ -486,6 +651,8 @@ def _collect_ownership_call_site_identities(module: object, helper_name: str) ->
     """
     import ast
 
+    if module.__file__ is None:
+        raise AssertionError(f"Module {module.__name__!r} has no source file")
     source = Path(module.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
 
@@ -1351,7 +1518,7 @@ class TestLiteLLMErrorRedaction:
             ("__cause__", cls._CANARY_CAUSE),
         )
 
-    def _make_auth_error(self):
+    def _make_auth_error(self) -> Exception:
         from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 
         exc = LiteLLMAuthError(
@@ -1365,7 +1532,7 @@ class TestLiteLLMErrorRedaction:
         exc.__cause__ = RuntimeError(f"upstream: {self._CANARY_CAUSE}")
         return exc
 
-    def _make_api_error(self):
+    def _make_api_error(self) -> Exception:
         from litellm.exceptions import APIError as LiteLLMAPIError
 
         exc = LiteLLMAPIError(
@@ -2251,6 +2418,85 @@ class TestNewStateHasNoLineage:
         assert resp.status_code == 200
         body = resp.json()
         assert body["derived_from_state_id"] is None
+
+
+class TestComposerProgressRoutes:
+    @pytest.mark.asyncio
+    async def test_progress_endpoint_returns_latest_snapshot_for_owned_session(self, tmp_path) -> None:
+        app, service = _make_progress_route_app(tmp_path)
+        registry = app.state.composer_progress_registry
+        await registry.publish(
+            session_id=str(service.session.id),
+            request_id="message-1",
+            event=ComposerProgressEvent(
+                phase="using_tools",
+                headline="The model requested plugin schemas.",
+                evidence=("Checking available source, transform, and sink tools.",),
+                likely_next="ELSPETH will use the schemas to choose a pipeline shape.",
+            ),
+        )
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(f"/api/sessions/{service.session.id}/composer-progress")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["session_id"] == str(service.session.id)
+        assert body["request_id"] == "message-1"
+        assert body["phase"] == "using_tools"
+        assert body["headline"] == "The model requested plugin schemas."
+        assert body["evidence"] == ["Checking available source, transform, and sink tools."]
+
+    @pytest.mark.asyncio
+    async def test_progress_endpoint_enforces_session_ownership(self, tmp_path) -> None:
+        app, service = _make_progress_route_app(tmp_path)
+
+        async def bob_user():
+            return UserIdentity(user_id="bob", username="bob")
+
+        app.dependency_overrides[get_current_user] = bob_user
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get(f"/api/sessions/{service.session.id}/composer-progress")
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_send_message_marks_terminal_progress_with_user_message_id(self, tmp_path) -> None:
+        app, service = _make_progress_route_app(tmp_path)
+        composer = _ProgressAwareComposer()
+        app.state.composer_service = composer
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                f"/api/sessions/{service.session.id}/messages",
+                json={"content": "Exploit HTML into JSON"},
+            )
+            messages = (await client.get(f"/api/sessions/{service.session.id}/messages")).json()
+            progress = (await client.get(f"/api/sessions/{service.session.id}/composer-progress")).json()
+
+        assert response.status_code == 200
+        assert composer.progress_sink_seen is True
+        user_message_id = next(message["id"] for message in messages if message["role"] == "user")
+        assert progress["request_id"] == user_message_id
+        assert progress["phase"] == "complete"
+        assert progress["headline"] == "The composer has updated the pipeline."
+
+    @pytest.mark.asyncio
+    async def test_recompose_marks_terminal_progress_with_last_user_message_id(self, tmp_path) -> None:
+        app, service = _make_progress_route_app(tmp_path)
+        composer = _ProgressAwareComposer("Retry reply")
+        app.state.composer_service = composer
+        user_msg = await service.add_message(service.session.id, "user", "Exploit HTML into JSON")
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(f"/api/sessions/{service.session.id}/recompose")
+            progress = (await client.get(f"/api/sessions/{service.session.id}/composer-progress")).json()
+
+        assert response.status_code == 200
+        assert composer.progress_sink_seen is True
+        assert progress["request_id"] == str(user_msg.id)
+        assert progress["phase"] == "complete"
 
 
 class TestPaginationRoutes:
