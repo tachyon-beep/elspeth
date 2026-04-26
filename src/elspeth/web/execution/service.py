@@ -586,6 +586,8 @@ class ExecutionServiceImpl:
         local memory — never persisted.
         """
         landscape_db: LandscapeDB | None = None
+        rate_limit_registry: Any | None = None
+        telemetry_manager: Any | None = None
         run_uuid = UUID(run_id)
         try:
             # Early shutdown check: if cancel()/shutdown() fired before we
@@ -750,7 +752,38 @@ class ExecutionServiceImpl:
             event_bus = EventBus()
             event_bus.subscribe(ProgressEvent, _safe_broadcast)
 
-            orchestrator = Orchestrator(db=landscape_db, event_bus=event_bus)
+            # Match the CLI run path's runtime infrastructure. External-call
+            # plugins such as web_scrape require a RateLimitRegistry during
+            # on_start(), and the orchestrator also consumes runtime
+            # concurrency/checkpoint/telemetry configs.
+            from elspeth.contracts.config.runtime import (
+                RuntimeCheckpointConfig,
+                RuntimeConcurrencyConfig,
+                RuntimeRateLimitConfig,
+                RuntimeTelemetryConfig,
+            )
+            from elspeth.core.checkpoint import CheckpointManager
+            from elspeth.core.rate_limit import RateLimitRegistry
+            from elspeth.telemetry import create_telemetry_manager
+
+            rate_limit_config = RuntimeRateLimitConfig.from_settings(settings.rate_limit)
+            concurrency_config = RuntimeConcurrencyConfig.from_settings(settings.concurrency)
+            checkpoint_config = RuntimeCheckpointConfig.from_settings(settings.checkpoint)
+            telemetry_config = RuntimeTelemetryConfig.from_settings(settings.telemetry)
+
+            rate_limit_registry = RateLimitRegistry(rate_limit_config)
+            telemetry_manager = create_telemetry_manager(telemetry_config)
+            checkpoint_manager = CheckpointManager(landscape_db) if checkpoint_config.enabled else None
+
+            orchestrator = Orchestrator(
+                db=landscape_db,
+                event_bus=event_bus,
+                rate_limit_registry=rate_limit_registry,
+                concurrency_config=concurrency_config,
+                checkpoint_manager=checkpoint_manager,
+                checkpoint_config=checkpoint_config,
+                telemetry_manager=telemetry_manager,
+            )
 
             # B2 fix: ALWAYS pass shutdown_event — suppresses signal handler
             # installation from background thread (Python forbids
@@ -924,6 +957,10 @@ class ExecutionServiceImpl:
                 self._shutdown_events.pop(run_id, None)
             if landscape_db is not None:
                 landscape_db.close()
+            if rate_limit_registry is not None:
+                rate_limit_registry.close()
+            if telemetry_manager is not None:
+                telemetry_manager.close()
             self._broadcaster.cleanup_run(run_id)
 
     # Exceptions that can escape finalize_run_output_blobs itself

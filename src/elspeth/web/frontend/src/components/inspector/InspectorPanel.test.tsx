@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { InspectorPanel } from "./InspectorPanel";
 import { useSessionStore } from "@/stores/sessionStore";
@@ -18,6 +18,8 @@ vi.mock("@/api/client", () => ({
   archiveSession: vi.fn(),
   validatePipeline: vi.fn(),
   executePipeline: vi.fn(),
+  fetchRuns: vi.fn().mockResolvedValue([]),
+  fetchYaml: vi.fn().mockResolvedValue({ yaml: "source:\n  plugin: text\n" }),
   cancelExecution: vi.fn(),
   listSources: vi.fn().mockResolvedValue([]),
   listTransforms: vi.fn().mockResolvedValue([]),
@@ -26,8 +28,7 @@ vi.mock("@/api/client", () => ({
 }));
 
 vi.mock("@/api/websocket", () => ({
-  connectWebSocket: vi.fn(),
-  disconnectWebSocket: vi.fn(),
+  connectToRun: vi.fn().mockReturnValue({ close: vi.fn() }),
 }));
 
 function makeState(
@@ -291,5 +292,72 @@ describe("Version selector and catalog", () => {
     // Click again to close
     await user.click(catalogBtn);
     expect(screen.queryByText("Plugin Catalog")).not.toBeInTheDocument();
+  });
+});
+
+describe("InspectorPanel execution feedback", () => {
+  beforeEach(async () => {
+    const { executePipeline, fetchRuns } = await import("@/api/client");
+    (executePipeline as ReturnType<typeof vi.fn>).mockReset();
+    (fetchRuns as ReturnType<typeof vi.fn>).mockReset();
+    (fetchRuns as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+    useSessionStore.setState({
+      activeSessionId: "session-1",
+      compositionState: {
+        id: "state-1",
+        version: 1,
+        source: { plugin: "text", options: {} },
+        nodes: [],
+        edges: [],
+        outputs: [{ name: "out", plugin: "json", options: {} }],
+        metadata: { name: null, description: null },
+      },
+      stateVersions: [],
+      isLoadingVersions: false,
+    });
+    useExecutionStore.setState({
+      runs: [],
+      activeRunId: null,
+      validationResult: {
+        is_valid: true,
+        summary: "All checks passed",
+        checks: [],
+        errors: [],
+        warnings: [],
+      },
+      isValidating: false,
+      isExecuting: false,
+      progress: null,
+      error: null,
+    });
+  });
+
+  it("switches to Runs after Execute starts a run", async () => {
+    const { executePipeline } = await import("@/api/client");
+    (executePipeline as ReturnType<typeof vi.fn>).mockResolvedValue({
+      run_id: "run-1",
+    });
+
+    render(<InspectorPanel />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole("tab", { name: "YAML" }));
+    expect(screen.getByRole("tab", { name: "YAML" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Execute pipeline" }));
+
+    await waitFor(() =>
+      expect(executePipeline).toHaveBeenCalledWith("session-1"),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Runs" })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
   });
 });

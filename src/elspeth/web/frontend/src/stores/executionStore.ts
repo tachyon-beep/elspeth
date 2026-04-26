@@ -43,7 +43,7 @@ interface ExecutionState {
   error: string | null;
 
   validate: (sessionId: string) => Promise<void>;
-  execute: (sessionId: string) => Promise<void>;
+  execute: (sessionId: string) => Promise<string | null>;
   cancel: (runId: string) => Promise<void>;
   loadRuns: (sessionId: string) => Promise<void>;
   connectWebSocket: (runId: string) => void;
@@ -171,6 +171,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
       // Connect WebSocket for live progress
       get().connectWebSocket(run_id);
+      return run_id;
     } catch (err) {
       const apiErr = err as ApiError;
       const message =
@@ -182,6 +183,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
         isExecuting: false,
         error: message,
       });
+      return null;
     }
   },
 

@@ -26,6 +26,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from elspeth.core.config import (
+    CheckpointSettings,
+    ConcurrencySettings,
+    RateLimitSettings,
+    TelemetrySettings,
+)
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.sessions.protocol import RunAlreadyActiveError
@@ -51,6 +57,23 @@ def mock_settings() -> MagicMock:
     settings.get_landscape_url.return_value = "sqlite:///test_audit.db"
     settings.get_payload_store_path.return_value = Path("/tmp/test_payloads")
     settings.landscape_passphrase = None
+    return settings
+
+
+def _mock_pipeline_settings() -> MagicMock:
+    """Return settings-shaped test data for patched pipeline loading.
+
+    _run_pipeline() now builds the same runtime infrastructure as the CLI path,
+    so tests that patch YAML loading must still provide real config-contract
+    objects for the runtime conversion boundary.
+    """
+    settings = MagicMock()
+    settings.gates = []
+    settings.coalesce = []
+    settings.rate_limit = RateLimitSettings(enabled=False)
+    settings.concurrency = ConcurrencySettings()
+    settings.checkpoint = CheckpointSettings(enabled=False)
+    settings.telemetry = TelemetrySettings(enabled=False)
     return settings
 
 
@@ -170,6 +193,143 @@ class TestExecutionFlow:
         assert status.rows_routed == 0
 
 
+class TestWebRuntimeInfrastructure:
+    """Regression coverage for web execution's orchestrator runtime wiring."""
+
+    def test_web_scrape_pipeline_receives_rate_limit_registry(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Web execution must provide runtime infrastructure required by external-call transforms."""
+        import socket
+        from datetime import UTC, datetime
+
+        import httpx
+
+        from elspeth.contracts import CallStatus, CallType
+        from elspeth.contracts.audit import Call
+        from elspeth.contracts.contexts import TransformContext
+        from elspeth.core.security.web import SSRFSafeRequest
+        from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+
+        source_path = tmp_path / "input.txt"
+        source_path.write_text("https://example.com/page\n", encoding="utf-8")
+        output_path = tmp_path / "out.jsonl"
+        mock_settings.get_landscape_url.return_value = f"sqlite:///{tmp_path / 'audit.db'}"
+        mock_settings.get_payload_store_path.return_value = tmp_path / "payloads"
+
+        def fake_getaddrinfo(
+            host: str,
+            port: object,
+            family: int = 0,
+            type: int = 0,
+            proto: int = 0,
+            flags: int = 0,
+        ) -> list[tuple[object, ...]]:
+            assert host == "example.com"
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+        def fake_fetch_url(
+            self: WebScrapeTransform,
+            safe_request: SSRFSafeRequest,
+            ctx: TransformContext,
+        ) -> tuple[httpx.Response, str, Call]:
+            del self
+            return (
+                httpx.Response(
+                    200,
+                    text="<html><body><h1>ok</h1></body></html>",
+                    request=httpx.Request("GET", safe_request.connection_url),
+                ),
+                safe_request.original_url,
+                Call(
+                    call_id="call-web-runtime",
+                    call_index=0,
+                    call_type=CallType.HTTP,
+                    status=CallStatus.SUCCESS,
+                    request_hash="request-hash",
+                    created_at=datetime.now(UTC),
+                    state_id=ctx.state_id or "state-web-runtime",
+                    request_ref="request-ref",
+                    response_hash="response-hash",
+                    response_ref="response-ref",
+                    latency_ms=1.0,
+                ),
+            )
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        monkeypatch.setattr(WebScrapeTransform, "_fetch_url", fake_fetch_url)
+
+        pipeline_yaml = f"""
+source:
+  plugin: text
+  on_success: scrape_in
+  options:
+    path: {source_path}
+    column: url
+    on_validation_failure: discard
+    schema:
+      mode: fixed
+      fields:
+      - "url: str"
+transforms:
+- name: scrape_page
+  plugin: web_scrape
+  input: scrape_in
+  on_success: scraped
+  on_error: errors
+  options:
+    schema:
+      mode: flexible
+      fields:
+      - "url: str"
+    required_input_fields:
+    - url
+    url_field: url
+    content_field: html
+    fingerprint_field: html_fingerprint
+    format: raw
+    fingerprint_mode: content
+    strip_elements: []
+    http:
+      abuse_contact: tests@example.com
+      scraping_reason: test runtime wiring
+      timeout: 30
+      allowed_hosts: public_only
+sinks:
+  scraped:
+    plugin: json
+    on_write_failure: discard
+    options:
+      path: {output_path}
+      format: jsonl
+      mode: write
+      schema:
+        mode: observed
+  errors:
+    plugin: json
+    on_write_failure: discard
+    options:
+      path: {tmp_path / "errors.jsonl"}
+      format: jsonl
+      mode: write
+      schema:
+        mode: observed
+"""
+
+        service._run_pipeline(str(uuid4()), pipeline_yaml, threading.Event())
+
+        completed_calls = [
+            call for call in mock_session_service.update_run_status.await_args_list if call.kwargs.get("status") == "completed"
+        ]
+        assert completed_calls
+        assert output_path.exists()
+
+
 # ── B2: shutdown_event Always Passed ───────────────────────────────────
 
 
@@ -196,7 +356,7 @@ class TestB2ShutdownEvent:
         mock_orch_cls: MagicMock,
         service: ExecutionServiceImpl,
     ) -> None:
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -256,7 +416,7 @@ class TestB3Construction:
         service: ExecutionServiceImpl,
         mock_settings: MagicMock,
     ) -> None:
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -486,7 +646,7 @@ class TestCancelMechanism:
         broadcasts 'cancelled' and updates status accordingly."""
         from elspeth.contracts.errors import GracefulShutdownError
 
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -545,7 +705,7 @@ class TestCancelMechanism:
         """
         from elspeth.contracts.errors import GracefulShutdownError
 
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -602,7 +762,7 @@ class TestCancelMechanism:
         """Race guard: if shutdown_event is set AFTER orchestrator completes
         (returns normally), the run must still be classified as 'completed',
         not 'cancelled'."""
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -911,6 +1071,7 @@ class TestCompletionPathExternalCancellation:
         mock_bundle.aggregations = {}
         mock_instantiate.return_value = mock_bundle
         mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
@@ -971,6 +1132,7 @@ class TestCompletionPathExternalCancellation:
         mock_bundle.aggregations = {}
         mock_instantiate.return_value = mock_bundle
         mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
@@ -1034,7 +1196,7 @@ class TestCompletionPathExternalCancellation:
         mock_bundle.aggregations = {}
         mock_instantiate.return_value = mock_bundle
         mock_graph_cls.from_plugin_instances.return_value = MagicMock()
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
@@ -1094,6 +1256,7 @@ class TestCompletionPathExternalCancellation:
         mock_bundle.aggregations = {}
         mock_instantiate.return_value = mock_bundle
         mock_graph_cls.from_plugin_instances.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_orch = MagicMock()
         mock_orch_cls.return_value = mock_orch
         mock_result = MagicMock()
@@ -1905,7 +2068,7 @@ class TestEdgeCompatibility:
     ) -> None:
         """_run_pipeline must call graph.validate_edge_compatibility()
         after graph.validate() to catch schema mismatches."""
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -1948,7 +2111,7 @@ class TestEdgeCompatibility:
         """If edge compatibility fails, the pipeline must not execute."""
         from elspeth.core.dag.models import GraphValidationError
 
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -2110,7 +2273,7 @@ class TestTerminalOrderingInvariant:
         be broadcast — not completed-then-failed."""
         from elspeth.web.blobs.protocol import BlobNotFoundError
 
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()
@@ -2176,7 +2339,7 @@ class TestTerminalOrderingInvariant:
         """When a run completes but the DB status is already 'cancelled'
         (external orphan cleanup raced), exactly one terminal event must
         be emitted — not completed-then-cancelled."""
-        mock_load.return_value = MagicMock()
+        mock_load.return_value = _mock_pipeline_settings()
         mock_bundle = MagicMock()
         mock_bundle.source = MagicMock()
         mock_bundle.source_settings = MagicMock()

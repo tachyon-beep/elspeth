@@ -598,37 +598,37 @@ allow_hits:
   reason: Check for live shutdown event before fallback handling
   safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=57d917af18beacf6
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=9fcfb853b30428ef
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=4d7c76e0fe5ba071
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=c3ef7a6d2f046d8e
   owner: web-execution
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=7f793a5fc8be7a01
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=7c1e5f4218ba6dd9
   owner: web-execution
   reason: Progress broadcasting via call_soon_threadsafe raises RuntimeError when event loop is closed during shutdown
   safety: Only RuntimeError caught (narrowed from bare Exception); logged with canonical exc_class; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=5586f6db239eafa9
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=de0ef042754df56a
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=be6cc403b8cdde40
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=459e8e18a3148d55
   owner: web-execution
-  reason: Error classification — SecretResolutionError triggers safe message
-  safety: Secret names not leaked to client
+  reason: Signal classification — KeyboardInterrupt/SystemExit skip async status update during interpreter or loop shutdown
+  safety: Non-signal BaseException paths still update failed status; signal paths emit a structured warning and rely on orphan cleanup
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=441f1ebb41c04d86
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=bcc423aab5ea70ee
   owner: web-execution
   reason: Status update after pipeline failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb. Logs exc_class only (no str(status_err)) to avoid leaking SQL + bound parameters or `__cause__` text with DB credentials. The sanitized client_msg already reached the DB update call above, so the slog's exc_class is the complete triage surface.
   safety: Logged; original exception re-raised
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=0ead0f9d12aab1d8
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=9b1317e5d9065f3e
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent

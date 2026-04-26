@@ -371,9 +371,12 @@ export function InspectorPanel() {
     }
   }, [activeSessionId, canValidate, validate, injectSystemMessage, sendValidationFeedback]);
 
-  const handleExecute = useCallback(() => {
+  const handleExecute = useCallback(async () => {
     if (activeSessionId && canExecute) {
-      execute(activeSessionId);
+      const runId = await execute(activeSessionId);
+      if (runId) {
+        setActiveTab("runs");
+      }
     }
   }, [activeSessionId, canExecute, execute]);
 
