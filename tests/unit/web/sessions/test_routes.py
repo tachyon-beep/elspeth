@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -14,6 +15,16 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.pool import StaticPool
 from starlette.testclient import TestClient
 
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.schema import (
+    nodes_table,
+    rows_table,
+    runs_table,
+    token_outcomes_table,
+    tokens_table,
+    transform_errors_table,
+    validation_errors_table,
+)
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.composer.protocol import ComposerPluginCrashError, ComposerResult
@@ -143,6 +154,129 @@ def _make_app(
     return app, service
 
 
+def _insert_discard_audit_records(settings: WebSettings, run_id: str) -> None:
+    """Create audit records that route three rows to the virtual discard sink."""
+    (settings.data_dir / "runs").mkdir(parents=True, exist_ok=True)
+    now = datetime.now(UTC)
+    with (
+        LandscapeDB.from_url(settings.get_landscape_url()) as db,
+        db.connection() as conn,
+    ):
+        conn.execute(
+            runs_table.insert().values(
+                run_id=run_id,
+                started_at=now,
+                completed_at=now,
+                config_hash="cfg",
+                settings_json="{}",
+                canonical_version="test",
+                status="completed",
+            )
+        )
+        conn.execute(
+            nodes_table.insert(),
+            [
+                {
+                    "node_id": "source",
+                    "run_id": run_id,
+                    "plugin_name": "csv",
+                    "node_type": "source",
+                    "plugin_version": "test",
+                    "determinism": "deterministic",
+                    "config_hash": "source-cfg",
+                    "config_json": "{}",
+                    "registered_at": now,
+                },
+                {
+                    "node_id": "transform",
+                    "run_id": run_id,
+                    "plugin_name": "mapper",
+                    "node_type": "transform",
+                    "plugin_version": "test",
+                    "determinism": "deterministic",
+                    "config_hash": "transform-cfg",
+                    "config_json": "{}",
+                    "registered_at": now,
+                },
+            ],
+        )
+        conn.execute(
+            rows_table.insert(),
+            [
+                {
+                    "row_id": "row-transform",
+                    "run_id": run_id,
+                    "source_node_id": "source",
+                    "row_index": 0,
+                    "source_data_hash": "hash-transform",
+                    "created_at": now,
+                },
+                {
+                    "row_id": "row-sink",
+                    "run_id": run_id,
+                    "source_node_id": "source",
+                    "row_index": 1,
+                    "source_data_hash": "hash-sink",
+                    "created_at": now,
+                },
+            ],
+        )
+        conn.execute(
+            tokens_table.insert(),
+            [
+                {
+                    "token_id": "token-transform",
+                    "row_id": "row-transform",
+                    "run_id": run_id,
+                    "created_at": now,
+                },
+                {
+                    "token_id": "token-sink",
+                    "row_id": "row-sink",
+                    "run_id": run_id,
+                    "created_at": now,
+                },
+            ],
+        )
+        conn.execute(
+            validation_errors_table.insert().values(
+                error_id="verr_discard",
+                run_id=run_id,
+                node_id="source",
+                row_hash="hash-validation",
+                row_data_json="{}",
+                error="invalid row",
+                schema_mode="fixed",
+                destination="discard",
+                created_at=now,
+            )
+        )
+        conn.execute(
+            transform_errors_table.insert().values(
+                error_id="terr_discard",
+                run_id=run_id,
+                token_id="token-transform",
+                transform_id="transform",
+                row_hash="hash-transform",
+                row_data_json="{}",
+                error_details_json='{"reason":"validation_failed"}',
+                destination="discard",
+                created_at=now,
+            )
+        )
+        conn.execute(
+            token_outcomes_table.insert().values(
+                outcome_id="tout_discard",
+                run_id=run_id,
+                token_id="token-sink",
+                outcome="failed",
+                is_terminal=1,
+                recorded_at=now,
+                sink_name="__discard__",
+            )
+        )
+
+
 class TestSessionCRUDRoutes:
     """Tests for session create, list, get, delete endpoints."""
 
@@ -264,6 +398,75 @@ class TestSessionCRUDRoutes:
 
         del_resp = client.delete(f"/api/sessions/{session_id}")
         assert del_resp.status_code == 204
+
+    @pytest.mark.asyncio
+    async def test_list_session_runs_includes_failed_run_error(self, tmp_path) -> None:
+        """Failed run cards need the stored terminal error, not just status."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        create_resp = client.post("/api/sessions", json={"title": "Failed Run"})
+        session_id = uuid.UUID(create_resp.json()["id"])
+
+        state = await service.save_composition_state(
+            session_id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session_id, state.id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(
+            run.id,
+            "failed",
+            error="Pipeline execution failed (FrameworkBugError)",
+            rows_processed=1,
+        )
+
+        runs_resp = client.get(f"/api/sessions/{session_id}/runs")
+
+        assert runs_resp.status_code == 200
+        runs = runs_resp.json()
+        assert len(runs) == 1
+        assert runs[0]["status"] == "failed"
+        assert runs[0]["error"] == "Pipeline execution failed (FrameworkBugError)"
+
+    @pytest.mark.asyncio
+    async def test_list_session_runs_includes_virtual_discard_summary(self, tmp_path) -> None:
+        """Run cards must show rows routed to the virtual discard sink."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+
+        create_resp = client.post("/api/sessions", json={"title": "Discarded Rows"})
+        session_id = uuid.UUID(create_resp.json()["id"])
+
+        state = await service.save_composition_state(
+            session_id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session_id, state.id)
+        landscape_run_id = "lscape-discard-summary"
+        _insert_discard_audit_records(app.state.settings, landscape_run_id)
+        await service.update_run_status(run.id, "running")
+        await service.update_run_status(
+            run.id,
+            "completed",
+            landscape_run_id=landscape_run_id,
+            rows_processed=3,
+            rows_succeeded=0,
+            rows_failed=1,
+            rows_routed=0,
+            rows_quarantined=2,
+        )
+
+        runs_resp = client.get(f"/api/sessions/{session_id}/runs")
+
+        assert runs_resp.status_code == 200
+        runs = runs_resp.json()
+        assert runs[0]["discard_summary"] == {
+            "total": 3,
+            "validation_errors": 1,
+            "transform_errors": 1,
+            "sink_discards": 1,
+        }
 
 
 def _collect_ownership_call_site_identities(module: object, helper_name: str) -> set[str]:

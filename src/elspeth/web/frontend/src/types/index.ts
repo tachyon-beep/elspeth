@@ -253,6 +253,14 @@ export type PipelineStatus = "valid" | "valid-with-warnings" | "invalid";
 
 // ── Execution ───────────────────────────────────────────────────────────────
 
+/** Counts routed to the virtual discard sink. */
+export interface DiscardSummary {
+  total: number;
+  validation_errors: number;
+  transform_errors: number;
+  sink_discards: number;
+}
+
 /** An execution run. */
 export interface Run {
   id: string;
@@ -260,9 +268,11 @@ export interface Run {
   status: "pending" | "running" | "completed" | "failed" | "cancelled";
   rows_processed: number;
   rows_failed: number;
+  error: string | null;
   started_at: string;
   finished_at: string | null;
   composition_version: number;
+  discard_summary?: DiscardSummary | null;
 }
 
 /**

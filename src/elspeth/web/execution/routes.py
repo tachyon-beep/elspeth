@@ -246,9 +246,20 @@ def create_execution_router() -> APIRouter:
         """Return current run status."""
         await _verify_run_ownership(run_id, user, request)
         try:
-            return await service.get_status(run_id)
+            status = await service.get_status(run_id)
         except ValueError:
             raise _run_not_found_http() from None
+        if status.landscape_run_id is not None and status.discard_summary is None:
+            from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
+
+            discard_summaries = await asyncio.to_thread(
+                load_discard_summaries_for_settings,
+                request.app.state.settings,
+                (status.landscape_run_id,),
+            )
+            if status.landscape_run_id in discard_summaries:
+                status = status.model_copy(update={"discard_summary": discard_summaries[status.landscape_run_id]})
+        return status
 
     @router.post("/api/runs/{run_id}/cancel")
     async def cancel_run(
@@ -282,6 +293,16 @@ def create_execution_router() -> APIRouter:
             status = await service.get_status(run_id)
         except ValueError:
             raise _run_not_found_http() from None
+        if status.landscape_run_id is not None and status.discard_summary is None:
+            from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
+
+            discard_summaries = await asyncio.to_thread(
+                load_discard_summaries_for_settings,
+                request.app.state.settings,
+                (status.landscape_run_id,),
+            )
+            if status.landscape_run_id in discard_summaries:
+                status = status.model_copy(update={"discard_summary": discard_summaries[status.landscape_run_id]})
         if status.status in RUN_STATUS_NON_TERMINAL_VALUES:
             raise HTTPException(
                 status_code=409,
@@ -302,6 +323,7 @@ def create_execution_router() -> APIRouter:
             rows_quarantined=status.rows_quarantined,
             landscape_run_id=status.landscape_run_id,
             error=status.error,
+            discard_summary=status.discard_summary,
         )
 
     # ── WebSocket Endpoint ─────────────────────────────────────────────

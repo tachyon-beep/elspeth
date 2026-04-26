@@ -23,7 +23,9 @@ export function ProgressView() {
   if (!progress || !activeRunId) return null;
 
   const isTerminal =
-    progress.status === "completed" || progress.status === "cancelled";
+    progress.status === "completed" ||
+    progress.status === "cancelled" ||
+    progress.status === "failed";
 
   return (
     <div className="progress-container">
@@ -81,7 +83,9 @@ export function ProgressView() {
                   backgroundColor:
                     progress.status === "completed"
                       ? "var(--color-success)"
-                      : "var(--color-warning)",
+                      : progress.status === "failed"
+                        ? "var(--color-error)"
+                        : "var(--color-warning)",
                 }
               : {}
           }
@@ -123,6 +127,15 @@ export function ProgressView() {
           className="progress-cancelled-msg"
         >
           Pipeline execution was cancelled.
+        </div>
+      )}
+
+      {progress.status === "failed" && progress.recent_errors.length === 0 && (
+        <div
+          role="alert"
+          className="progress-failed-msg"
+        >
+          Pipeline execution failed.
         </div>
       )}
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useExecutionStore } from "./executionStore";
-import type { ValidationResult } from "@/types/index";
+import { connectToRun } from "@/api/websocket";
+import type { Run, RunEvent, ValidationResult } from "@/types/index";
 
 // Mock the API client
 vi.mock("@/api/client", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/api/websocket", () => ({
 
 describe("executionStore.validate", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     useExecutionStore.getState().reset();
   });
 
@@ -78,5 +80,67 @@ describe("executionStore.validate", () => {
     expect(state.validationResult).toBeNull();
     expect(state.isValidating).toBe(false);
     expect(state.error).toContain("internal error");
+  });
+});
+
+function makeRun(overrides: Partial<Run> & { error?: string | null } = {}): Run {
+  return {
+    id: "run-1",
+    session_id: "session-1",
+    status: "running",
+    rows_processed: 0,
+    rows_failed: 0,
+    started_at: "2026-04-26T05:31:57.000Z",
+    finished_at: null,
+    composition_version: 1,
+    ...overrides,
+  } as Run;
+}
+
+describe("executionStore failed run events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useExecutionStore.getState().reset();
+  });
+
+  it("preserves terminal failed event detail in progress and run list", () => {
+    const close = vi.fn();
+    (connectToRun as ReturnType<typeof vi.fn>).mockReturnValue({ close });
+    useExecutionStore.setState({
+      runs: [makeRun()],
+      activeRunId: "run-1",
+      progress: {
+        rows_processed: 0,
+        rows_failed: 0,
+        recent_errors: [],
+        status: "running",
+      },
+    });
+
+    useExecutionStore.getState().connectWebSocket("run-1");
+    const handlers = (connectToRun as ReturnType<typeof vi.fn>).mock.calls[0][2];
+    const failedEvent: RunEvent = {
+      run_id: "run-1",
+      timestamp: "2026-04-26T05:31:58.000Z",
+      event_type: "failed",
+      data: {
+        detail: "Pipeline execution failed (FrameworkBugError)",
+        node_id: null,
+      },
+    };
+
+    handlers.onFailed(failedEvent, failedEvent.data);
+
+    const state = useExecutionStore.getState();
+    expect(state.progress?.status).toBe("failed");
+    expect(state.progress?.recent_errors[0]).toEqual({
+      message: "Pipeline execution failed (FrameworkBugError)",
+      node_id: null,
+      row_id: null,
+    });
+    expect(state.runs[0]).toMatchObject({
+      status: "failed",
+      error: "Pipeline execution failed (FrameworkBugError)",
+    });
   });
 });

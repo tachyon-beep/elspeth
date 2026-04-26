@@ -891,6 +891,13 @@ def create_session_router() -> APIRouter:
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
         runs = await service.list_runs_for_session(session.id)
+        from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
+
+        discard_summaries = await asyncio.to_thread(
+            load_discard_summaries_for_settings,
+            request.app.state.settings,
+            (run.landscape_run_id for run in runs),
+        )
 
         # Resolve composition_version from each run's state_id.
         # A missing state is Tier 1 data corruption — crash, don't hide.
@@ -904,6 +911,9 @@ def create_session_router() -> APIRouter:
         for run in runs:
             state = await service.get_state_in_session(run.state_id, session.id)
             version = state.version
+            discard_summary = None
+            if run.landscape_run_id is not None and run.landscape_run_id in discard_summaries:
+                discard_summary = discard_summaries[run.landscape_run_id]
             responses.append(
                 RunResponse(
                     id=str(run.id),
@@ -911,9 +921,11 @@ def create_session_router() -> APIRouter:
                     status=run.status,
                     rows_processed=run.rows_processed,
                     rows_failed=run.rows_failed,
+                    error=run.error,
                     started_at=run.started_at,
                     finished_at=run.finished_at,
                     composition_version=version,
+                    discard_summary=discard_summary,
                 )
             )
         return responses

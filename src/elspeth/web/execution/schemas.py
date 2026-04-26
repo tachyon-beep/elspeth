@@ -249,6 +249,35 @@ if _mapping_keys != _literal_values:
 del _event_type_literal, _mapping_keys, _literal_values
 
 
+class DiscardSummary(_StrictResponse):
+    """Counts routed to the virtual ``discard`` sink.
+
+    The backing records live in three audit surfaces:
+    ``validation_errors.destination='discard'``,
+    ``transform_errors.destination='discard'``, and terminal
+    ``token_outcomes.sink_name='__discard__'`` rows for sink-write
+    diversions.  ``total`` is stored explicitly in the response so clients
+    can render the visible virtual sink without duplicating the arithmetic.
+    """
+
+    total: int = Field(ge=0)
+    validation_errors: int = Field(ge=0)
+    transform_errors: int = Field(ge=0)
+    sink_discards: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _check_total(self) -> Self:
+        expected = self.validation_errors + self.transform_errors + self.sink_discards
+        if self.total != expected:
+            raise ValueError(
+                f"Discard summary total mismatch: total={self.total} "
+                f"!= validation_errors({self.validation_errors}) "
+                f"+ transform_errors({self.transform_errors}) "
+                f"+ sink_discards({self.sink_discards}) = {expected}"
+            )
+        return self
+
+
 class RunStatusResponse(_StrictResponse):
     """REST response for run status queries."""
 
@@ -263,6 +292,7 @@ class RunStatusResponse(_StrictResponse):
     rows_quarantined: int = Field(ge=0)
     error: str | None
     landscape_run_id: str | None
+    discard_summary: DiscardSummary | None = None
 
     @model_validator(mode="after")
     def _check_row_decomposition(self) -> Self:
@@ -304,6 +334,7 @@ class RunResultsResponse(_StrictResponse):
     rows_quarantined: int = Field(ge=0)
     landscape_run_id: str | None
     error: str | None
+    discard_summary: DiscardSummary | None = None
 
     @model_validator(mode="after")
     def _check_row_decomposition(self) -> Self:

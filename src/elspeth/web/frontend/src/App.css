@@ -2748,6 +2748,16 @@ summary:focus-visible {
   border: 1px solid var(--color-warning-border);
 }
 
+.progress-failed-msg {
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-sm);
+  background-color: var(--color-error-bg);
+  color: var(--color-error);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  border: 1px solid var(--color-error-border);
+}
+
 .progress-errors-title {
   font-size: var(--font-size-xs);
   font-weight: 600;

@@ -13,6 +13,7 @@ from elspeth.web.execution.schemas import (
     RUN_STATUS_TERMINAL_VALUES,
     CancelledData,
     CompletedData,
+    DiscardSummary,
     ErrorData,
     FailedData,
     ProgressData,
@@ -23,6 +24,29 @@ from elspeth.web.execution.schemas import (
     ValidationError,
     ValidationResult,
 )
+
+
+class TestDiscardSummary:
+    """Virtual discard sink summary is derived Tier 1 response data."""
+
+    def test_accepts_matching_total(self) -> None:
+        summary = DiscardSummary(
+            total=6,
+            validation_errors=1,
+            transform_errors=2,
+            sink_discards=3,
+        )
+
+        assert summary.total == 6
+
+    def test_rejects_mismatched_total(self) -> None:
+        with pytest.raises(pydantic.ValidationError, match="Discard summary total mismatch"):
+            DiscardSummary(
+                total=5,
+                validation_errors=1,
+                transform_errors=2,
+                sink_discards=3,
+            )
 
 
 class TestValidationResult:

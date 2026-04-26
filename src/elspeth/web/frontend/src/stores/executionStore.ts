@@ -58,7 +58,7 @@ let wsConnection: WebSocketConnection | null = null;
 /**
  * Apply a RunEvent to the current progress state.
  * Accumulates exceptions (keeping the most recent N) and updates
- * row counters. Terminal events ("completed", "cancelled") update
+ * row counters. Terminal events ("completed", "cancelled", "failed") update
  * the run status in the runs list.
  */
 function applyRunEvent(
@@ -67,11 +67,23 @@ function applyRunEvent(
 ): Partial<ExecutionState> {
   const data = event.data;
 
-  // Accumulate errors for "error" events, keeping the most recent N.
+  // Accumulate recoverable row errors and terminal failure detail, keeping
+  // the most recent N. Terminal failure detail arrives as RunEventFailed.detail
+  // rather than a RunEventError payload, but it is the user-facing reason.
   // New errors come first (newest-first display).
+  const terminalFailure: RunEventError | null =
+    event.event_type === "failed"
+      ? {
+          message: (data as RunEventFailed).detail,
+          node_id: (data as RunEventFailed).node_id,
+          row_id: null,
+        }
+      : null;
   const newErrors =
     event.event_type === "error"
       ? [data as RunEventError, ...(state.progress?.recent_errors ?? [])]
+      : terminalFailure
+        ? [terminalFailure, ...(state.progress?.recent_errors ?? [])]
       : [...(state.progress?.recent_errors ?? [])];
   const recentErrors = newErrors.slice(0, MAX_RECENT_ERRORS);
 
@@ -107,6 +119,11 @@ function applyRunEvent(
             status: newProgress.status as Run["status"],
             rows_processed: rowsProcessed,
             rows_failed: rowsFailed,
+            error:
+              event.event_type === "failed"
+                ? (data as RunEventFailed).detail
+                : r.error,
+            finished_at: event.timestamp,
           }
         : r,
     );

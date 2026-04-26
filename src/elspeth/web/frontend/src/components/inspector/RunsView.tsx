@@ -35,7 +35,7 @@ const STATUS_BADGE_CLASSES: Record<Run["status"], string> = {
 function formatDuration(startedAt: string, finishedAt: string | null): string {
   const start = new Date(startedAt).getTime();
   const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
-  const diffSec = Math.floor((end - start) / 1000);
+  const diffSec = Math.max(0, Math.floor((end - start) / 1000));
 
   if (diffSec < 60) return `${diffSec}s`;
   const min = Math.floor(diffSec / 60);
@@ -79,6 +79,14 @@ export function RunsView() {
       {runs.map((run) => {
         const isActive =
           run.id === activeRunId && progress?.status === "running";
+        const discardTotal = run.discard_summary?.total ?? 0;
+        const discardTitle = run.discard_summary
+          ? [
+              `Validation ${run.discard_summary.validation_errors.toLocaleString()}`,
+              `transform ${run.discard_summary.transform_errors.toLocaleString()}`,
+              `sink ${run.discard_summary.sink_discards.toLocaleString()}`,
+            ].join(", ")
+          : undefined;
 
         return (
           <div key={run.id}>
@@ -96,6 +104,8 @@ export function RunsView() {
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "center",
+                  gap: 8,
+                  flexWrap: "wrap",
                   marginBottom: 4,
                 }}
               >
@@ -107,6 +117,7 @@ export function RunsView() {
                   style={{
                     fontSize: 11,
                     color: "var(--color-text-muted)",
+                    whiteSpace: "nowrap",
                   }}
                 >
                   v{run.composition_version}
@@ -118,6 +129,7 @@ export function RunsView() {
                 style={{
                   display: "flex",
                   gap: 12,
+                  flexWrap: "wrap",
                   fontSize: 12,
                   color: "var(--color-text-muted)",
                 }}
@@ -131,12 +143,39 @@ export function RunsView() {
                     </span>
                   )}
                 </span>
+                {discardTotal > 0 && (
+                  <span
+                    title={discardTitle}
+                    style={{ color: "var(--color-warning)" }}
+                  >
+                    {discardTotal.toLocaleString()} discarded
+                  </span>
+                )}
                 <span>
                   {run.status === "running"
                     ? "running..."
                     : formatDuration(run.started_at, run.finished_at)}
                 </span>
               </div>
+
+              {run.status === "failed" && run.error && (
+                <div
+                  role="alert"
+                  style={{
+                    marginTop: 8,
+                    padding: "7px 9px",
+                    border: "1px solid var(--color-error-border)",
+                    borderRadius: "var(--radius-sm)",
+                    backgroundColor: "var(--color-error-bg)",
+                    color: "var(--color-error)",
+                    fontSize: 12,
+                    lineHeight: 1.4,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {run.error}
+                </div>
+              )}
             </div>
 
             {/* Show live progress inline for the active running run */}
