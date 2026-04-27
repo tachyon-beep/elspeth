@@ -193,6 +193,75 @@ class TestExecuteEndpoint:
             assert body["error_type"] == "run_already_active"
             assert "detail" in body
 
+    @pytest.mark.asyncio
+    async def test_execute_returns_422_with_structured_semantic_payload(self) -> None:
+        """Semantic contract violations surface as 422 with structured payload.
+
+        Without the dedicated handler, ``SemanticContractViolationError``
+        falls through to the bare ``except ValueError`` branch and the
+        client receives 404 with detail=str(exc) — losing the structured
+        ``entries`` and ``contracts`` records the frontend uses to
+        render banners and per-node hints.
+        """
+        from elspeth.contracts.plugin_semantics import (
+            ContentKind,
+            FieldSemanticFacts,
+            FieldSemanticRequirement,
+            SemanticEdgeContract,
+            SemanticOutcome,
+            TextFraming,
+            UnknownSemanticPolicy,
+        )
+        from elspeth.web.composer.state import ValidationEntry
+        from elspeth.web.execution.errors import SemanticContractViolationError
+
+        facts = FieldSemanticFacts(
+            field_name="content",
+            content_kind=ContentKind.PLAIN_TEXT,
+            text_framing=TextFraming.COMPACT,
+            fact_code="web_scrape.content.compact",
+        )
+        req = FieldSemanticRequirement(
+            field_name="content",
+            accepted_content_kinds=frozenset({ContentKind.PLAIN_TEXT}),
+            accepted_text_framings=frozenset({TextFraming.NEWLINE_FRAMED}),
+            requirement_code="line_explode.source_field.line_framed_text",
+            unknown_policy=UnknownSemanticPolicy.FAIL,
+        )
+        contract = SemanticEdgeContract(
+            from_id="scrape",
+            to_id="explode",
+            consumer_plugin="line_explode",
+            producer_plugin="web_scrape",
+            producer_field="content",
+            consumer_field="content",
+            producer_facts=facts,
+            requirement=req,
+            outcome=SemanticOutcome.CONFLICT,
+        )
+        entry = ValidationEntry(
+            "node:explode",
+            "Semantic contract violation: 'scrape' -> 'explode'.",
+            "high",
+        )
+        exc = SemanticContractViolationError(entries=(entry,), contracts=(contract,))
+
+        svc = MagicMock()
+        svc.execute = AsyncMock(side_effect=exc)
+        app = _create_test_app(execution_service=svc)
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(f"/api/sessions/{uuid4()}/execute")
+        assert resp.status_code == 422
+        body = resp.json()
+        detail = body["detail"]
+        assert detail["kind"] == "semantic_contract_violation"
+        assert detail["errors"][0]["component"] == "node:explode"
+        assert detail["errors"][0]["severity"] == "high"
+        assert detail["semantic_contracts"][0]["outcome"] == "conflict"
+        assert detail["semantic_contracts"][0]["consumer_plugin"] == "line_explode"
+        assert detail["semantic_contracts"][0]["from_id"] == "scrape"
+        assert detail["semantic_contracts"][0]["requirement_code"] == "line_explode.source_field.line_framed_text"
+
 
 class TestRunDiagnosticsEndpoint:
     """GET/POST /api/runs/{run_id}/diagnostics."""

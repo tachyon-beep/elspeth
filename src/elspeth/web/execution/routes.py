@@ -31,6 +31,7 @@ from elspeth.web.blobs.protocol import BlobNotFoundError
 from elspeth.web.composer.protocol import ComposerService, ComposerServiceError
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.diagnostics import load_run_diagnostics_for_settings
+from elspeth.web.execution.errors import SemanticContractViolationError
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError
 from elspeth.web.execution.schemas import (
@@ -333,6 +334,46 @@ def create_execution_router() -> APIRouter:
             # 500 while cross-session-blob returned a 404 — the HTTP
             # status itself was a side channel.
             raise HTTPException(status_code=404, detail="Blob not found") from None
+        except SemanticContractViolationError as exc:
+            # Structured 422 with the same payload shape /validate
+            # surfaces. Status 422 (Unprocessable Entity) — the
+            # request was syntactically valid but the composition
+            # fails plugin-declared semantic contracts. The
+            # bare-ValueError branch below maps to 404 because most
+            # other ValueErrors at this site are state-not-found
+            # cases that echo the caller's own input; semantic
+            # violations are NOT state-not-found and need their own
+            # status. SemanticContractViolationError IS a
+            # ValueError, so this handler MUST sit above the bare
+            # ``except ValueError`` (the catch-order discipline hook
+            # enforces that).
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "kind": "semantic_contract_violation",
+                    "errors": [
+                        {
+                            "component": entry.component,
+                            "message": entry.message,
+                            "severity": entry.severity,
+                        }
+                        for entry in exc.entries
+                    ],
+                    "semantic_contracts": [
+                        {
+                            "from_id": contract.from_id,
+                            "to_id": contract.to_id,
+                            "consumer_plugin": contract.consumer_plugin,
+                            "producer_plugin": contract.producer_plugin,
+                            "producer_field": contract.producer_field,
+                            "consumer_field": contract.consumer_field,
+                            "outcome": contract.outcome.value,
+                            "requirement_code": contract.requirement.requirement_code,
+                        }
+                        for contract in exc.contracts
+                    ],
+                },
+            ) from exc
         except ValueError as exc:
             # Remaining ValueError sources are non-IDOR: the user's
             # OWN session having no composition state (when state_id
