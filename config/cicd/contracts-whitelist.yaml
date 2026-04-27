@@ -592,6 +592,7 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_execute_clear_source:args"
   - "src/elspeth/web/composer/tools.py:_handle_clear_source:arguments"
   - "src/elspeth/web/composer/tools.py:_execute_explain_validation_error:args"
+  - "src/elspeth/web/composer/tools.py:_execute_get_plugin_assistance:args"
   - "src/elspeth/web/composer/tools.py:_execute_list_models:args"
   - "src/elspeth/web/composer/tools.py:_execute_preview_pipeline:args"
   - "src/elspeth/web/composer/tools.py:diff_states:return"
@@ -608,6 +609,7 @@ allowed_dict_patterns:
   - "src/elspeth/web/composer/tools.py:_serialize_node:return"
   - "src/elspeth/web/composer/tools.py:_serialize_output:return"
   - "src/elspeth/web/composer/tools.py:_serialize_edge:return"
+  - "src/elspeth/web/composer/tools.py:_serialize_plugin_assistance_example:return"
   # Prevalidation helpers — options dicts are user-authored plugin config (Tier 3)
   - "src/elspeth/web/composer/tools.py:_compute_validation_delta:return"
   - "src/elspeth/web/composer/tools.py:_validate_sink_path:options"

@@ -349,7 +349,7 @@ allow_hits:
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=c399be4a3eb701ff
+- key: web/composer/tools.py:R6:_execute_list_models:fp=fecd21d55f79c9d3
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication

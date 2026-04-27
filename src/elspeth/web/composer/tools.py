@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 from uuid import uuid4
 
 from sqlalchemy import Engine, delete, func, select, update
@@ -331,7 +331,7 @@ def get_expression_grammar() -> str:
 def get_tool_definitions() -> list[dict[str, Any]]:
     """Return JSON Schema tool definitions for the LLM.
 
-    Returns 32 tools: 9 discovery + 13 mutation + 7 blob tools + 3 secret tools.
+    Returns 33 tools: 10 discovery + 13 mutation + 7 blob tools + 3 secret tools.
     """
     return [
         # Discovery tools
@@ -719,6 +719,36 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["error_text"],
+            },
+        },
+        {
+            "name": "get_plugin_assistance",
+            "description": (
+                "Retrieve plugin-owned guidance for a specific issue code. "
+                "When validation surfaces a semantic_contracts entry with a "
+                "requirement_code (e.g. 'line_explode.source_field.line_framed_text'), "
+                "call this tool with the consumer plugin name and that requirement_code "
+                "to get the structured fix guidance the plugin published — summary, "
+                "suggested_fixes, and example before/after configurations. The skill "
+                "no longer hardcodes plugin-specific framing advice; it lives on the "
+                "plugin and is exposed here."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "plugin_name": {
+                        "type": "string",
+                        "description": "Transform plugin name (e.g. 'web_scrape', 'line_explode').",
+                    },
+                    "issue_code": {
+                        "type": "string",
+                        "description": (
+                            "Stable issue identifier owned by the plugin. Validators "
+                            "emit these as requirement_code on semantic_contracts entries."
+                        ),
+                    },
+                },
+                "required": ["plugin_name", "issue_code"],
             },
         },
         {
@@ -3225,6 +3255,91 @@ def _execute_explain_validation_error(
     )
 
 
+def _serialize_plugin_assistance_example(
+    example: Any,
+) -> dict[str, Any]:
+    """Serialize a PluginAssistanceExample for LLM consumption.
+
+    Mirrors the serialize-at-the-boundary pattern used by
+    ``_semantic_edge_contract_to_payload`` (composer_mcp/server.py) and
+    ``serialize_semantic_contracts`` (web/execution/_semantic_helpers.py):
+    L0 contract types intentionally have no ``.to_dict()``; the rendering
+    site owns the JSON shape so contracts stay free of encoding concerns.
+    """
+    return {
+        "title": example.title,
+        "before": deep_thaw(example.before) if example.before is not None else None,
+        "after": deep_thaw(example.after) if example.after is not None else None,
+    }
+
+
+def _execute_get_plugin_assistance(
+    args: dict[str, Any],
+    state: CompositionState,
+    catalog: CatalogService,
+    data_dir: str | None = None,
+) -> ToolResult:
+    """Return plugin-owned guidance for a specific issue code.
+
+    Plugins (transforms only — ``get_agent_assistance`` lives on
+    ``BaseTransform``) publish deterministic ``PluginAssistance`` records
+    keyed by issue code. The semantic validator emits ``requirement_code``
+    values like ``line_explode.source_field.line_framed_text``; the agent
+    can echo that code into this tool to retrieve the structured fix prose
+    + example before/after configs without the skill having to mirror them.
+
+    When the plugin has no assistance for the requested code, returns
+    success with a "no assistance published" payload (summary=None,
+    empty suggestion list) rather than failing — the absence is itself
+    a useful signal to the agent.
+
+    Unknown plugin name raises ``PluginNotFoundError`` from the manager,
+    which surfaces here as a tool failure with the original message
+    so the agent can correct the call.
+    """
+    from elspeth.plugins.infrastructure.base import BaseTransform
+    from elspeth.plugins.infrastructure.manager import (
+        PluginNotFoundError,
+        get_shared_plugin_manager,
+    )
+
+    plugin_name = args["plugin_name"]
+    issue_code = args["issue_code"]
+
+    manager = get_shared_plugin_manager()
+    try:
+        # Assistance only lives on transforms today (BaseTransform.get_agent_assistance).
+        # If a future Phase teaches sources/sinks to publish assistance,
+        # this dispatch can branch on a plugin_type arg — for now, keeping
+        # the surface minimal matches plugin-as-system-code reality.
+        plugin_cls = cast(type[BaseTransform], manager.get_transform_by_name(plugin_name))
+    except PluginNotFoundError as exc:
+        return _failure_result(state, str(exc))
+
+    assistance = plugin_cls.get_agent_assistance(issue_code=issue_code)
+
+    if assistance is None:
+        payload: dict[str, Any] = {
+            "plugin_name": plugin_name,
+            "issue_code": issue_code,
+            "summary": None,
+            "suggested_fixes": [],
+            "examples": [],
+            "composer_hints": [],
+        }
+        return _discovery_result(state, payload)
+
+    payload = {
+        "plugin_name": assistance.plugin_name,
+        "issue_code": assistance.issue_code,
+        "summary": assistance.summary,
+        "suggested_fixes": list(assistance.suggested_fixes),
+        "examples": [_serialize_plugin_assistance_example(ex) for ex in assistance.examples],
+        "composer_hints": list(assistance.composer_hints),
+    }
+    return _discovery_result(state, payload)
+
+
 def _execute_list_models(
     args: dict[str, Any],
     state: CompositionState,
@@ -3461,6 +3576,7 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
     "get_plugin_schema": _handle_get_plugin_schema,
     "get_expression_grammar": _handle_get_expression_grammar,
     "explain_validation_error": _execute_explain_validation_error,
+    "get_plugin_assistance": _execute_get_plugin_assistance,
     "list_models": _execute_list_models,
     "get_pipeline_state": _execute_get_pipeline_state,
     "preview_pipeline": _execute_preview_pipeline,

@@ -1890,6 +1890,7 @@ class TestToolRegistry:
             "get_plugin_schema",
             "get_expression_grammar",
             "explain_validation_error",
+            "get_plugin_assistance",
             "list_models",
             "get_pipeline_state",
             "preview_pipeline",
@@ -5104,6 +5105,104 @@ class TestListModels:
         providers = result.data.get("providers", {})
         # Must not contain the non-round-trippable "(no provider)" label
         assert "(no provider)" not in providers
+
+
+# ---------------------------------------------------------------------------
+# get_plugin_assistance tool tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetPluginAssistance:
+    def test_returns_structured_payload_for_known_issue_code(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_plugin_assistance",
+            {
+                "plugin_name": "web_scrape",
+                "issue_code": "web_scrape.content.compact_text",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        # ToolResult.to_dict deep-thaws ``data`` for LLM consumption; tests
+        # exercise the wire shape rather than the frozen in-memory form.
+        payload = result.to_dict()["data"]
+        assert payload["plugin_name"] == "web_scrape"
+        assert payload["issue_code"] == "web_scrape.content.compact_text"
+        assert "summary" in payload
+        assert isinstance(payload["summary"], str)
+        assert payload["summary"]
+        assert isinstance(payload["suggested_fixes"], list)
+        assert payload["suggested_fixes"]
+        assert isinstance(payload["examples"], list)
+        # web_scrape declares two PluginAssistanceExample entries for this code.
+        assert len(payload["examples"]) == 2
+        for example in payload["examples"]:
+            assert isinstance(example["title"], str)
+            # before/after are dicts when present (post-thaw).
+            assert example["before"] is None or isinstance(example["before"], dict)
+            assert example["after"] is None or isinstance(example["after"], dict)
+        assert isinstance(payload["composer_hints"], list)
+
+    def test_line_explode_assistance_returns_structured_payload(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_plugin_assistance",
+            {
+                "plugin_name": "line_explode",
+                "issue_code": "line_explode.source_field.line_framed_text",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        payload = result.data
+        assert payload["plugin_name"] == "line_explode"
+        assert payload["issue_code"] == "line_explode.source_field.line_framed_text"
+        assert payload["summary"]
+        assert payload["suggested_fixes"]
+
+    def test_unknown_issue_code_returns_explicit_no_assistance(self) -> None:
+        """Plugin returns None for unknown issue codes -> tool returns success
+        with explicit summary=None and empty suggestion list so the agent sees
+        that nothing was published rather than a hard failure."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_plugin_assistance",
+            {
+                "plugin_name": "web_scrape",
+                "issue_code": "web_scrape.unrecognized.code",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        payload = result.to_dict()["data"]
+        assert payload["plugin_name"] == "web_scrape"
+        assert payload["issue_code"] == "web_scrape.unrecognized.code"
+        assert payload["summary"] is None
+        assert payload["suggested_fixes"] == []
+        assert payload["examples"] == []
+        assert payload["composer_hints"] == []
+
+    def test_unknown_plugin_name_returns_failure(self) -> None:
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "get_plugin_assistance",
+            {
+                "plugin_name": "no_such_plugin_xyz",
+                "issue_code": "anything",
+            },
+            state,
+            catalog,
+        )
+        assert result.success is False
+        assert "no_such_plugin_xyz" in result.data["error"]
 
 
 # ---------------------------------------------------------------------------

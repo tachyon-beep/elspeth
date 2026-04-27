@@ -186,6 +186,10 @@ class TestBuildToolDefs:
         for expected in ("new_session", "save_session", "load_session", "list_sessions", "generate_yaml", "delete_session"):
             assert expected in names, f"Session tool '{expected}' missing"
 
+    def test_get_plugin_assistance_tool_registered(self) -> None:
+        names = {t["name"] for t in _build_tool_defs()}
+        assert "get_plugin_assistance" in names
+
     def test_blob_and_secret_tools_excluded(self) -> None:
         names = {t["name"] for t in _build_tool_defs()}
         for excluded in (
