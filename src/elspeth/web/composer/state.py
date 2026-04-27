@@ -346,57 +346,6 @@ def _runtime_consumer_connections(nodes: tuple[NodeSpec, ...]) -> set[str]:
     return consumers
 
 
-def validate_transform_framing_contracts(nodes: tuple[NodeSpec, ...]) -> tuple[ValidationEntry, ...]:
-    """Validate cross-transform framing contracts that schemas cannot express.
-
-    ``line_explode`` only knows how to split newline-framed strings. A
-    ``web_scrape`` transform in ``format: text`` mode uses a space
-    ``text_separator`` by default, compacting DOM text into one long logical
-    line. That pairing produces a successful one-row run instead of the
-    requested line explosion unless the scrape is explicitly newline-framed.
-
-    Retained as a thin shim during Phase 0-5; deleted in Phase 6 once the
-    semantic validator owns this case.
-    """
-    from elspeth.web.composer._producer_resolver import ProducerResolver
-
-    errors: list[ValidationEntry] = []
-    resolver = ProducerResolver.build(source=None, nodes=nodes, sink_names=frozenset())
-
-    for node in nodes:
-        if node.node_type != "transform" or node.plugin != "line_explode":
-            continue
-        if "source_field" not in node.options:
-            continue
-        source_field = node.options["source_field"]
-        upstream_producer = resolver.walk_to_real_producer(node.input)
-        if upstream_producer is None or upstream_producer.plugin_name != "web_scrape":
-            continue
-        if "content_field" not in upstream_producer.options:
-            continue
-        content_field = upstream_producer.options["content_field"]
-        if content_field != source_field:
-            continue
-        scrape_format = upstream_producer.options["format"] if "format" in upstream_producer.options else "markdown"
-        if scrape_format != "text":
-            continue
-        text_separator = upstream_producer.options["text_separator"] if "text_separator" in upstream_producer.options else " "
-        if type(text_separator) is str and "\n" in text_separator:
-            continue
-        errors.append(
-            ValidationEntry(
-                f"node:{node.id}",
-                f"line_explode '{node.id}' consumes web_scrape text content field '{source_field}' from "
-                f"'{upstream_producer.producer_id}', but format='text' requires text_separator to contain '\\n' before "
-                "page contents can be split into lines. Set text_separator: '\\n' on the web_scrape transform "
-                "or use format: markdown.",
-                "high",
-            )
-        )
-
-    return tuple(errors)
-
-
 def _validate_runtime_route_destinations(
     source: SourceSpec | None,
     nodes: tuple[NodeSpec, ...],
@@ -1448,9 +1397,6 @@ class CompositionState:
                         "high",
                     )
                 )
-
-        # Legacy framing check (deleted in Phase 6).
-        errors.extend(validate_transform_framing_contracts(self.nodes))
 
         # Generic semantic-contract check.
         from elspeth.web.composer._semantic_validator import validate_semantic_contracts

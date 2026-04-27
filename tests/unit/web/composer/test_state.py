@@ -2245,7 +2245,14 @@ class TestSchemaContractValidation:
         return state
 
     def test_line_explode_rejects_compact_web_scrape_text(self) -> None:
-        """A text scrape with the default space separator is not line-framed."""
+        """A text scrape with the default space separator is not line-framed.
+
+        After Phase 6 the message no longer mentions ``text_separator`` or
+        ``\\n`` — fix prose belongs in PluginAssistance, addressed by
+        requirement_code. The state-level surface only has to surface the
+        structured violation; the agent retrieves prose via
+        ``get_plugin_assistance``.
+        """
         state = self._make_web_scrape_to_line_explode_state()
 
         result = state.validate()
@@ -2254,8 +2261,7 @@ class TestSchemaContractValidation:
         assert any(
             error.component == "node:split_lines"
             and "line_explode" in error.message
-            and "text_separator" in error.message
-            and "\\n" in error.message
+            and "line_explode.source_field.line_framed_text" in error.message
             for error in result.errors
         )
 
@@ -2267,7 +2273,7 @@ class TestSchemaContractValidation:
         result = state.validate()
 
         assert result.is_valid, result.errors
-        assert not any("line_explode" in error.message and "text_separator" in error.message for error in result.errors)
+        assert not any("line_explode.source_field.line_framed_text" in error.message for error in result.errors)
 
     def test_line_explode_accepts_markdown_web_scrape_content(self) -> None:
         state = self._make_web_scrape_to_line_explode_state(
