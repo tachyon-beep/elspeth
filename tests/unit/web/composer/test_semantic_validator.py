@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from elspeth.contracts.plugin_semantics import (
     ContentKind,
     SemanticOutcome,
@@ -394,3 +396,51 @@ class TestValidateSemanticContracts:
         assert contracts[0].from_id == "scrape"  # walked through gate
         assert contracts[0].consumer_plugin == "line_explode"
         assert contracts[0].producer_plugin == "web_scrape"
+
+
+class TestParityWithLegacyFramingValidator:
+    """The old hardcoded validator and the new generic one MUST agree on
+    Wardline-shape pipelines while both exist (Phase 0-5).
+
+    Deleted in Phase 6 along with the legacy validator.
+    """
+
+    @pytest.mark.parametrize(
+        "text_separator,scrape_format,expect_blocked",
+        [
+            (" ", "text", True),  # Wardline regression case
+            ("\t", "text", True),  # tab is not newline
+            ("\n", "text", False),  # explicitly newline-framed
+            (" \n ", "text", False),  # contains newline
+            (" ", "markdown", False),  # markdown is line-compatible
+            (" ", "raw", True),  # raw HTML is not text — fails semantic
+        ],
+    )
+    def test_parity(self, text_separator, scrape_format, expect_blocked):
+        from elspeth.web.composer.state import (
+            validate_transform_framing_contracts,
+        )
+
+        state = _wardline_state(
+            text_separator=text_separator,
+            scrape_format=scrape_format,
+        )
+
+        legacy_errors = validate_transform_framing_contracts(state.nodes)
+        semantic_errors, _ = validate_semantic_contracts(state)
+
+        # Note: the legacy validator only handles format=text; format=raw
+        # is a NEW case the semantic validator catches that the legacy
+        # validator never did. For format=raw we EXPECT divergence and
+        # assert only the semantic side blocks.
+        if scrape_format == "raw":
+            assert legacy_errors == ()
+            assert len(semantic_errors) == 1
+            return
+
+        # For format=text and format=markdown, parity is required.
+        legacy_blocked = bool(legacy_errors)
+        semantic_blocked = bool(semantic_errors)
+        assert legacy_blocked == expect_blocked
+        assert semantic_blocked == expect_blocked
+        assert legacy_blocked == semantic_blocked
