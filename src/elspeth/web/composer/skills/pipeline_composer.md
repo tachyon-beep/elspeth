@@ -455,7 +455,7 @@ Gotchas:
 **web_scrape** — Fetch and extract content from a URL in each row.
 Gotchas:
 - You must specify `url_field` — the name of the row field containing the URL to fetch. There is no default.
-- `format: text` defaults to compact text with spaces between DOM text nodes. If the next step is `line_explode`, set `text_separator: "\n"` or use `format: markdown`; otherwise the page may arrive as one long line.
+- When the validator surfaces a `semantic_contracts` violation (e.g. `requirement_code: line_explode.source_field.line_framed_text`) on the `web_scrape -> line_explode` edge, call `get_plugin_assistance(plugin_name="line_explode", issue_code="line_explode.source_field.line_framed_text")` to get the current guidance from the plugin itself. The skill no longer hardcodes specific framing advice — it lives on the plugin and is exposed via the discovery tool.
 
 **llm** — Send row data to an LLM using a Jinja2 template.
 Gotchas:
@@ -473,7 +473,7 @@ Gotchas:
 **line_explode** — Split one string field into multiple rows, one per line.
 Gotchas:
 - Set `source_field` to the string field to split and choose `output_field`/`index_field` names that do not collide with existing fields.
-- For scraped pages, use `web_scrape` with `text_separator: "\n"` or `format: markdown` before `line_explode`; compact text may otherwise arrive as a single long line.
+- When `web_scrape` feeds `line_explode` and validation reports a `semantic_contracts` violation with `requirement_code: line_explode.source_field.line_framed_text`, call `get_plugin_assistance(plugin_name="line_explode", issue_code="line_explode.source_field.line_framed_text")` for the structured fix prose and before/after examples. The plugin owns the guidance; the skill no longer mirrors it.
 
 **field_mapper** — Rename fields in each row.
 

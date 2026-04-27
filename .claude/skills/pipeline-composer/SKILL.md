@@ -250,7 +250,7 @@ Gotchas:
 Minimal config: `{"source_field": "content", "output_field": "line", "include_index": true, "index_field": "line_index"}`
 Gotchas:
 - Choose `output_field`/`index_field` names that do not collide with existing fields.
-- For scraped pages, use `web_scrape` with `text_separator: "\n"` or `format: markdown` first; compact text can otherwise arrive as one long line.
+- When `web_scrape` feeds `line_explode` and validation reports a `semantic_contracts` violation with `requirement_code: line_explode.source_field.line_framed_text`, call `get_plugin_assistance(plugin_name="line_explode", issue_code="line_explode.source_field.line_framed_text")` for the structured fix prose and before/after examples. The plugin owns the guidance; the skill no longer mirrors it.
 
 **field_mapper** — Rename fields in each row.
 Minimal config: `{"mapping": {"old_name": "new_name"}}`
