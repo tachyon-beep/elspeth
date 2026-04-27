@@ -13,7 +13,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
-from typing import Any, Literal, NamedTuple, Self, TypedDict
+from typing import Any, Literal, Self, TypedDict
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.contracts.guarantee_propagation import compose_propagation
@@ -295,12 +295,6 @@ class ValidationSummary:
     edge_contracts: tuple[EdgeContract, ...] = ()
 
 
-class _ProducerEntry(NamedTuple):
-    producer_id: str
-    plugin_name: str | None
-    options: Mapping[str, Any]
-
-
 def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
     """Return whether source options carry a schema under the current contract.
 
@@ -356,54 +350,14 @@ def validate_transform_framing_contracts(nodes: tuple[NodeSpec, ...]) -> tuple[V
     ``text_separator`` by default, compacting DOM text into one long logical
     line. That pairing produces a successful one-row run instead of the
     requested line explosion unless the scrape is explicitly newline-framed.
+
+    Retained as a thin shim during Phase 0-5; deleted in Phase 6 once the
+    semantic validator owns this case.
     """
+    from elspeth.web.composer._producer_resolver import ProducerResolver
+
     errors: list[ValidationEntry] = []
-    producer_map: dict[str, _ProducerEntry] = {}
-    duplicate_connections: set[str] = set()
-    node_by_id = {node.id: node for node in nodes}
-
-    def _register_producer(connection_name: str | None, producer: _ProducerEntry) -> None:
-        if connection_name is None or connection_name == "discard":
-            return
-        if connection_name in producer_map:
-            duplicate_connections.add(connection_name)
-            return
-        producer_map[connection_name] = producer
-
-    for node in nodes:
-        producer_entry = _ProducerEntry(
-            producer_id=node.id,
-            plugin_name=node.plugin,
-            options=node.options,
-        )
-        if node.node_type == "coalesce" and node.on_success is None:
-            _register_producer(node.id, producer_entry)
-        else:
-            _register_producer(node.on_success, producer_entry)
-        _register_producer(node.on_error, producer_entry)
-        if node.routes is not None:
-            for target in node.routes.values():
-                _register_producer(target, producer_entry)
-        if node.fork_to is not None:
-            for target in node.fork_to:
-                _register_producer(target, producer_entry)
-
-    def _walk_to_real_producer(connection_name: str) -> _ProducerEntry | None:
-        current_connection = connection_name
-        visited_connections: set[str] = set()
-        while True:
-            if current_connection in visited_connections:
-                return None
-            visited_connections.add(current_connection)
-            if current_connection in duplicate_connections:
-                return None
-            if current_connection not in producer_map:
-                return None
-            producer = producer_map[current_connection]
-            producer_node = node_by_id[producer.producer_id]
-            if producer_node.node_type != "gate":
-                return producer
-            current_connection = producer_node.input
+    resolver = ProducerResolver.build(source=None, nodes=nodes, sink_names=frozenset())
 
     for node in nodes:
         if node.node_type != "transform" or node.plugin != "line_explode":
@@ -411,7 +365,7 @@ def validate_transform_framing_contracts(nodes: tuple[NodeSpec, ...]) -> tuple[V
         if "source_field" not in node.options:
             continue
         source_field = node.options["source_field"]
-        upstream_producer = _walk_to_real_producer(node.input)
+        upstream_producer = resolver.walk_to_real_producer(node.input)
         if upstream_producer is None or upstream_producer.plugin_name != "web_scrape":
             continue
         if "content_field" not in upstream_producer.options:
@@ -550,13 +504,15 @@ def _check_schema_contracts(
     tuple[EdgeContract, ...],
 ]:
     """Validate producer/consumer schema contracts across declarative routing."""
+    from elspeth.web.composer._producer_resolver import ProducerEntry, ProducerResolver
+
     errors: list[ValidationEntry] = []
     contract_warnings: list[ValidationEntry] = []
     edge_contracts: list[EdgeContract] = []
     parse_failed_producers: set[str] = set()
     contract_probe_failed_producers: set[str] = set()
-    node_by_id = {node.id: node for node in nodes}
     sink_names = {output.name for output in outputs}
+    sink_names_frozen = frozenset(sink_names)
     internal_connection_names: set[str] = set()
 
     _err = ValidationEntry
@@ -572,36 +528,37 @@ def _check_schema_contracts(
         )
         return tuple(errors), tuple(contract_warnings), ()
 
-    producer_map: dict[str, _ProducerEntry] = {}
-    producer_desc: dict[str, str] = {}
-    direct_sink_producers: dict[str, list[_ProducerEntry]] = {}
+    # The resolver builds the connection -> producer map (with the
+    # source-as-source-sentinel and same-node carve-out semantics), and
+    # reports which connections have multiple distinct producers.
+    resolver = ProducerResolver.build(
+        source=source,
+        nodes=nodes,
+        sink_names=sink_names_frozen,
+    )
+    node_by_id = {node.id: node for node in nodes}
 
-    def _register_producer(
-        connection_name: str,
-        producer_id: str,
-        plugin_name: str | None,
-        options: Mapping[str, Any],
-        description: str,
-    ) -> None:
-        if connection_name in producer_map:
-            errors.append(
-                _err(
-                    f"connection:{connection_name}",
-                    f"Duplicate producer for connection '{connection_name}': {producer_desc[connection_name]} and {description}.",
-                    "high",
-                )
-            )
+    # Schema-specific bookkeeping: track per-connection producer
+    # description (for richer duplicate-error messages) and the separate
+    # direct-to-sink producers map (sink-targeted edges that the
+    # resolver intentionally excludes from walk-back). Mirror the
+    # resolver's registration order so first-seen descriptions match
+    # the resolver's first-seen producer.
+    producer_desc: dict[str, str] = {}
+    duplicate_descs: dict[str, list[str]] = {}
+    direct_sink_producers: dict[str, list[ProducerEntry]] = {}
+
+    def _record_description(connection_name: str, description: str) -> None:
+        if connection_name in producer_desc:
+            if connection_name not in duplicate_descs:
+                duplicate_descs[connection_name] = []
+            duplicate_descs[connection_name].append(description)
             return
-        producer_map[connection_name] = _ProducerEntry(
-            producer_id=producer_id,
-            plugin_name=plugin_name,
-            options=options,
-        )
         producer_desc[connection_name] = description
         if connection_name not in sink_names:
             internal_connection_names.add(connection_name)
 
-    def _register_direct_sink_producer(
+    def _record_direct_sink(
         sink_name: str,
         producer_id: str,
         plugin_name: str | None,
@@ -609,94 +566,76 @@ def _check_schema_contracts(
     ) -> None:
         if sink_name not in direct_sink_producers:
             direct_sink_producers[sink_name] = []
-        direct_sink_producers[sink_name].append(_ProducerEntry(producer_id=producer_id, plugin_name=plugin_name, options=options))
+        direct_sink_producers[sink_name].append(ProducerEntry(producer_id=producer_id, plugin_name=plugin_name, options=options))
 
     if source is not None:
         if source.on_success in sink_names:
-            _register_direct_sink_producer(
+            _record_direct_sink(
                 source.on_success,
                 "source",
                 source.plugin,
                 source.options,
             )
         else:
-            _register_producer(
-                source.on_success,
-                "source",
-                source.plugin,
-                source.options,
-                f"source '{source.plugin}'",
-            )
+            _record_description(source.on_success, f"source '{source.plugin}'")
 
     for node in nodes:
         if node.node_type == "coalesce" and node.on_success is None:
-            _register_producer(
-                node.id,
-                node.id,
-                node.plugin,
-                node.options,
-                f"coalesce '{node.id}'",
-            )
+            _record_description(node.id, f"coalesce '{node.id}'")
         elif node.on_success is not None:
             if node.on_success in sink_names:
-                _register_direct_sink_producer(
-                    node.on_success,
-                    node.id,
-                    node.plugin,
-                    node.options,
-                )
+                _record_direct_sink(node.on_success, node.id, node.plugin, node.options)
             else:
-                _register_producer(
-                    node.on_success,
-                    node.id,
-                    node.plugin,
-                    node.options,
-                    f"node '{node.id}' on_success",
-                )
+                _record_description(node.on_success, f"node '{node.id}' on_success")
         if node.on_error is not None and node.on_error != "discard":
             if node.on_error in sink_names:
-                _register_direct_sink_producer(
-                    node.on_error,
-                    node.id,
-                    node.plugin,
-                    node.options,
-                )
+                _record_direct_sink(node.on_error, node.id, node.plugin, node.options)
             else:
-                _register_producer(
-                    node.on_error,
-                    node.id,
-                    node.plugin,
-                    node.options,
-                    f"node '{node.id}' on_error",
-                )
+                _record_description(node.on_error, f"node '{node.id}' on_error")
         if node.routes is not None:
             for route_label, target in node.routes.items():
                 if target in sink_names:
-                    _register_direct_sink_producer(
-                        target,
-                        node.id,
-                        node.plugin,
-                        node.options,
-                    )
+                    _record_direct_sink(target, node.id, node.plugin, node.options)
                     continue
-                if target in producer_map and producer_map[target].producer_id == node.id:
+                # Same-node carve-out: a gate with multiple route labels
+                # mapping to the same target is idempotent, not a
+                # duplicate. The resolver applies the same carve-out, so
+                # description tracking must mirror it to keep error
+                # messages aligned.
+                resolver_owner = resolver.find_producer_for(target)
+                if resolver_owner is not None and resolver_owner.producer_id == node.id and target in producer_desc:
                     continue
-                _register_producer(
-                    target,
-                    node.id,
-                    node.plugin,
-                    node.options,
-                    f"gate '{node.id}' route '{route_label}'",
-                )
+                _record_description(target, f"gate '{node.id}' route '{route_label}'")
         if node.fork_to is not None:
             for branch_name in node.fork_to:
-                _register_producer(
-                    branch_name,
-                    node.id,
-                    node.plugin,
-                    node.options,
-                    f"gate '{node.id}' fork '{branch_name}'",
-                )
+                if branch_name in sink_names:
+                    # Fork branches that terminate at sinks behave like
+                    # direct-to-sink edges from the gate: the runtime
+                    # contract walks from the sink back through the gate
+                    # to the gate's upstream producer (matched in
+                    # _walk_producer_entry_to_real_producer's fork-vs-sink
+                    # branch). Record both the direct-sink producer entry
+                    # and the description so duplicate-error formatting
+                    # remains identical to pre-resolver behaviour.
+                    _record_direct_sink(branch_name, node.id, node.plugin, node.options)
+                    continue
+                _record_description(branch_name, f"gate '{node.id}' fork '{branch_name}'")
+
+    # Surface duplicate-producer errors using the captured descriptions.
+    for connection_name in sorted(resolver.duplicate_connections):
+        first_desc = producer_desc[connection_name]
+        # duplicate_descs may be missing if the duplicate was suppressed
+        # by the same-node route carve-out; in that case the resolver
+        # would not flag a duplicate either, so this branch is purely
+        # defensive against future divergence.
+        second_desc = duplicate_descs[connection_name][0]
+        errors.append(
+            _err(
+                f"connection:{connection_name}",
+                f"Duplicate producer for connection '{connection_name}': {first_desc} and {second_desc}.",
+                "high",
+            )
+        )
 
     consumer_claims: list[tuple[str, str, str]] = [
         (node.input, node.id, f"node '{node.id}'") for node in nodes if node.node_type != "coalesce"
@@ -732,20 +671,28 @@ def _check_schema_contracts(
         return tuple(errors), tuple(contract_warnings), ()
 
     def _walk_producer_entry_to_real_producer(
-        producer: _ProducerEntry,
+        producer: ProducerEntry,
         *,
         connection_name: str,
-        producer_map: Mapping[str, _ProducerEntry],
-        node_by_id: Mapping[str, NodeSpec],
         warnings: list[ValidationEntry],
-    ) -> _ProducerEntry | None:
+    ) -> ProducerEntry | None:
+        """Schema-specific walk-back with coalesce/fork warning emission.
+
+        Differs from ``ProducerResolver.walk_to_real_producer`` in two
+        ways: it traverses fork gates and coalesce nodes only to emit
+        skip-with-warning entries (the resolver returns None silently),
+        and it stops at coalesce nodes because schema-contract
+        propagation through coalesce branches is out of scope here.
+        """
         visited_connections: set[str] = set()
         current_producer = producer
         while True:
             if current_producer.producer_id == "source":
                 return current_producer
 
-            producer_node = node_by_id[current_producer.producer_id]
+            producer_node = resolver.get_node(current_producer.producer_id)
+            if producer_node is None:
+                return None
             if producer_node.node_type == "coalesce":
                 warnings.append(
                     _warn(
@@ -777,31 +724,29 @@ def _check_schema_contracts(
                 )
                 return None
             visited_connections.add(current_connection)
-            if current_connection not in producer_map:
+            next_producer = resolver.find_producer_for(current_connection)
+            if next_producer is None:
                 return None
-            current_producer = producer_map[current_connection]
+            current_producer = next_producer
 
     def _walk_to_real_producer(
         connection_name: str,
         *,
-        producer_map: Mapping[str, _ProducerEntry],
-        node_by_id: Mapping[str, NodeSpec],
         warnings: list[ValidationEntry],
-    ) -> _ProducerEntry | None:
-        if connection_name not in producer_map:
+    ) -> ProducerEntry | None:
+        producer = resolver.find_producer_for(connection_name)
+        if producer is None:
             return None
         return _walk_producer_entry_to_real_producer(
-            producer_map[connection_name],
+            producer,
             connection_name=connection_name,
-            producer_map=producer_map,
-            node_by_id=node_by_id,
             warnings=warnings,
         )
 
-    def _producer_owner(producer: _ProducerEntry) -> str:
+    def _producer_owner(producer: ProducerEntry) -> str:
         return "source" if producer.producer_id == "source" else f"node:{producer.producer_id}"
 
-    def _producer_label(producer: _ProducerEntry) -> str:
+    def _producer_label(producer: ProducerEntry) -> str:
         if producer.plugin_name is not None:
             return producer.plugin_name
         return node_by_id[producer.producer_id].node_type
@@ -835,7 +780,7 @@ def _check_schema_contracts(
             return True
         return type(exc) is ValueError and str(exc).startswith("Invalid configuration for transform ")
 
-    def _effective_producer_vote(producer: _ProducerEntry) -> tuple[bool, frozenset[str]]:
+    def _effective_producer_vote(producer: ProducerEntry) -> tuple[bool, frozenset[str]]:
         """Return (participates, guarantees) for preview propagation.
 
         Raw schema blocks are the baseline. For transform/aggregation nodes,
@@ -949,7 +894,7 @@ def _check_schema_contracts(
         base = output_schema_config.get_effective_guaranteed_fields()
         return output_schema_config.participates_in_propagation, base
 
-    def _effective_producer_guarantees(producer: _ProducerEntry) -> frozenset[str]:
+    def _effective_producer_guarantees(producer: ProducerEntry) -> frozenset[str]:
         """Return the producer guarantees Stage 1 should compare."""
         _participates, guarantees = _effective_producer_vote(producer)
         return guarantees
@@ -961,9 +906,9 @@ def _check_schema_contracts(
         pass-through inheritance and therefore follows structural fan-out/fan-in
         nodes instead of treating them as preview-stopping boundaries.
         """
-        if connection_name not in producer_map:
+        producer = resolver.find_producer_for(connection_name)
+        if producer is None:
             return False, frozenset()
-        producer = producer_map[connection_name]
 
         if producer.producer_id == "source":
             return _effective_producer_vote(producer)
@@ -1040,8 +985,6 @@ def _check_schema_contracts(
 
         actual_producer = _walk_to_real_producer(
             node.input,
-            producer_map=producer_map,
-            node_by_id=node_by_id,
             warnings=contract_warnings,
         )
         if actual_producer is None or actual_producer.producer_id in parse_failed_producers:
@@ -1095,8 +1038,6 @@ def _check_schema_contracts(
         else:
             actual_producer = _walk_to_real_producer(
                 output.name,
-                producer_map=producer_map,
-                node_by_id=node_by_id,
                 warnings=contract_warnings,
             )
             sink_producers = () if actual_producer is None else (actual_producer,)
@@ -1106,8 +1047,6 @@ def _check_schema_contracts(
             actual_producer = _walk_producer_entry_to_real_producer(
                 sink_producer,
                 connection_name=output.name,
-                producer_map=producer_map,
-                node_by_id=node_by_id,
                 warnings=contract_warnings,
             )
             if actual_producer is None:
