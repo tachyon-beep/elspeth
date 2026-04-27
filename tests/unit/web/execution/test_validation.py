@@ -237,8 +237,15 @@ class TestValidatePipelineSinkPathAllowlist:
         assert path_check.passed is True
 
 
-class TestValidatePipelineTransformFraming:
-    """Validation must catch transform pairings that violate line framing."""
+class TestValidatePipelineSemanticContractsLegacy:
+    """Validation must catch transform pairings that violate line framing.
+
+    Renamed from TestValidatePipelineTransformFraming when the
+    transform_framing check was replaced with the generic
+    semantic_contracts check (Phase 4 Task 4.3). The web_scrape ->
+    line_explode regression surface remains the same; only the check
+    name in the response changes.
+    """
 
     @staticmethod
     def _make_web_scrape_line_explode_state(
@@ -341,8 +348,16 @@ class TestValidatePipelineTransformFraming:
             result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is False
-        assert _check(result, "transform_framing").passed is False
-        assert any("text_separator" in error.message for error in result.errors)
+        assert _check(result, "semantic_contracts").passed is False
+        # The semantic validator's diagnostic names the requirement code
+        # and the observed framing; the legacy framing validator named
+        # "text_separator". Both validators run in Phase 4-5; whichever
+        # produced an error first short-circuits, so we accept either
+        # surface form. Phase 6 deletes the legacy validator.
+        assert any(
+            "text_separator" in error.message or "line_framed_text" in error.message or "text_framing" in error.message
+            for error in result.errors
+        )
         mock_yaml_gen.generate_yaml.assert_not_called()
 
     def test_newline_framed_web_scrape_text_reaches_yaml_generation(self) -> None:
@@ -356,8 +371,124 @@ class TestValidatePipelineTransformFraming:
             mock_load.side_effect = ValueError("invalid settings")
             result = validate_pipeline(state, settings, mock_yaml_gen)
 
-        assert _check(result, "transform_framing").passed is True
+        assert _check(result, "semantic_contracts").passed is True
         mock_yaml_gen.generate_yaml.assert_called_once_with(state)
+
+
+class TestValidatePipelineSemanticContracts:
+    """The /validate route must surface the semantic_contracts check.
+
+    Uses a wardline-shape state (web_scrape -> line_explode -> sink) but
+    with paths that pass the path_allowlist, so semantic_contracts is
+    actually exercised. The Phase 3 _wardline_state fixture is composer-
+    test-shaped (paths like ``data/url.csv``) and would short-circuit at
+    path_allowlist when fed through validate_pipeline.
+    """
+
+    @staticmethod
+    def _make_state(text_separator: str = " ") -> CompositionState:
+        return CompositionState(
+            metadata=PipelineMetadata(name="wardline"),
+            version=1,
+            edges=(),
+            source=SourceSpec(
+                plugin="csv",
+                on_success="scrape_in",
+                options={
+                    "path": "/tmp/test_data/blobs/url.csv",
+                    "schema": {"mode": "fixed", "fields": ["url: str"]},
+                },
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="scrape",
+                    node_type="transform",
+                    plugin="web_scrape",
+                    input="scrape_in",
+                    on_success="explode_in",
+                    on_error="errors",
+                    options={
+                        "schema": {"mode": "flexible", "fields": ["url: str"]},
+                        "required_input_fields": ["url"],
+                        "url_field": "url",
+                        "content_field": "content",
+                        "fingerprint_field": "fingerprint",
+                        "format": "text",
+                        "text_separator": text_separator,
+                        "http": {
+                            "abuse_contact": "x@example.com",
+                            "scraping_reason": "t",
+                            "timeout": 5,
+                            "allowed_hosts": "public_only",
+                        },
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+                NodeSpec(
+                    id="explode",
+                    node_type="transform",
+                    plugin="line_explode",
+                    input="explode_in",
+                    on_success="sink",
+                    on_error="errors",
+                    options={
+                        "schema": {"mode": "flexible", "fields": ["content: str"]},
+                        "source_field": "content",
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            outputs=(
+                OutputSpec(
+                    name="sink",
+                    plugin="json",
+                    options={"path": "/tmp/test_data/outputs/out.json"},
+                    on_write_failure="discard",
+                ),
+                OutputSpec(
+                    name="errors",
+                    plugin="json",
+                    options={"path": "/tmp/test_data/outputs/err.json"},
+                    on_write_failure="discard",
+                ),
+            ),
+        )
+
+    def test_compact_text_fails_with_semantic_contracts_check_name(self) -> None:
+        state = self._make_state(text_separator=" ")
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert result.is_valid is False
+        assert _check(result, "semantic_contracts").passed is False
+
+    def test_newline_text_passes_semantic_contracts_check(self) -> None:
+        state = self._make_state(text_separator="\n")
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        # Subsequent checks may still fail (depends on fixture); we only
+        # assert semantic_contracts itself passed.
+        assert _check(result, "semantic_contracts").passed is True
 
 
 class TestValidatePipelineRelativePaths:
@@ -456,7 +587,7 @@ class TestValidatePipelineSuccess:
         # B11 fix: path_allowlist check is always recorded
         assert _check(result, "path_allowlist").passed is True
         assert _check(result, "secret_refs").passed is True
-        assert _check(result, "transform_framing").passed is True
+        assert _check(result, "semantic_contracts").passed is True
         assert result.errors == []
 
         # Verify real engine functions were called

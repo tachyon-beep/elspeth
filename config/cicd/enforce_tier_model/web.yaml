@@ -401,22 +401,22 @@ allow_hits:
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
   safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=ace822918797304c
+- key: web/execution/validation.py:R5:validate_pipeline:fp=5f3056c9a46ddeb3
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=43988f787045965b
+- key: web/execution/validation.py:R5:validate_pipeline:fp=e6c400010231c440
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=35abca82736262c1
+- key: web/execution/validation.py:R1:validate_pipeline:fp=801c7d036f72ff2b
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=b9daf20523db1438
+- key: web/execution/validation.py:R1:validate_pipeline:fp=cb8f3cf812e3756e
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
@@ -499,22 +499,22 @@ allow_hits:
     pinned by the resolve/has_ref invariant regressions covering user-row
     deletion and server env-var clearing between the probe and the fetch.
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=378ee82e6cb5afc2
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=37e51986585e3b97
   owner: web-execution
   reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=80fa6b9d1af5d420
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=e97c65781b7e6225
   owner: web-execution
   reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
   safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=a63c32d5ce6bbef3
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=46a71cc27fceaa19
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=e8ce3853b04745ce
+- key: web/execution/validation.py:R5:validate_pipeline:fp=c6b468f779428a6a
   owner: web-execution
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
@@ -905,7 +905,7 @@ allow_hits:
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
   expires: null
-- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=5d76165931060571
+- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=4e99de25e7b391f1
   owner: web-validation
   reason: Union type dispatch — function receives PluginNotFoundError | PluginConfigError, isinstance needed to read component_type attribute only present on PluginConfigError
   safety: Returns None for non-matching type; no error suppression

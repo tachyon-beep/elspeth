@@ -22,6 +22,7 @@ import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts.plugin_semantics import SemanticEdgeContract
 from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
@@ -29,7 +30,8 @@ from elspeth.core.dag.models import GraphValidationError
 from elspeth.core.secrets import resolve_secret_refs
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
-from elspeth.web.composer.state import CompositionState, validate_transform_framing_contracts
+from elspeth.web.composer._semantic_validator import validate_semantic_contracts
+from elspeth.web.composer.state import CompositionState, ValidationEntry
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.protocol import YamlGenerator
 from elspeth.web.execution.schemas import (
@@ -41,7 +43,7 @@ from elspeth.web.execution.schemas import (
 # ── Check names (ordered) ─────────────────────────────────────────────
 _CHECK_PATH_ALLOWLIST = "path_allowlist"
 _CHECK_SECRET_REFS = "secret_refs"
-_CHECK_TRANSFORM_FRAMING = "transform_framing"
+_CHECK_SEMANTIC_CONTRACTS = "semantic_contracts"
 _CHECK_SETTINGS = "settings_load"
 _CHECK_PLUGINS = "plugin_instantiation"
 _CHECK_GRAPH = "graph_structure"
@@ -50,7 +52,7 @@ _CHECK_SCHEMA = "schema_compatibility"
 _ALL_CHECKS = [
     _CHECK_PATH_ALLOWLIST,
     _CHECK_SECRET_REFS,
-    _CHECK_TRANSFORM_FRAMING,
+    _CHECK_SEMANTIC_CONTRACTS,
     _CHECK_SETTINGS,
     _CHECK_PLUGINS,
     _CHECK_GRAPH,
@@ -106,6 +108,49 @@ def _collect_secret_refs(obj: Any) -> list[str]:
         for item in obj:
             refs.extend(_collect_secret_refs(item))
     return refs
+
+
+def _assistance_suggestion_for(
+    entry: ValidationEntry,
+    contracts: tuple[SemanticEdgeContract, ...],
+) -> str | None:
+    """Look up plugin-owned guidance for a semantic error.
+
+    Uses SemanticEdgeContract.consumer_plugin (and producer_plugin as
+    a fallback) to address a SPECIFIC plugin class. Looping every
+    registered transform and returning the first match was registry-
+    order dependent — fixed by carrying the plugin names on the
+    contract (Phase 1 Task 1.3).
+    """
+    from typing import cast
+
+    from elspeth.plugins.infrastructure.base import BaseTransform
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+    component_id = entry.component.removeprefix("node:")
+    matching = next((c for c in contracts if c.to_id == component_id), None)
+    if matching is None:
+        return None
+
+    manager = get_shared_plugin_manager()
+    issue_code = matching.requirement.requirement_code
+
+    # Consumer plugin owns the requirement, so it's the authoritative
+    # source for guidance about the requirement_code. Verified method
+    # name: get_transform_by_name (manager.py:183), NOT get_transform_class.
+    # The registry returns type[TransformProtocol]; assistance lives on
+    # BaseTransform — every in-tree plugin is a BaseTransform subclass,
+    # so the cast is sound (per CLAUDE.md plugin-as-system-code policy).
+    consumer_cls = cast(type[BaseTransform], manager.get_transform_by_name(matching.consumer_plugin))
+    consumer_assistance = consumer_cls.get_agent_assistance(issue_code=issue_code)
+    if consumer_assistance is not None:
+        return consumer_assistance.summary
+
+    # Producer plugin may also publish guidance for the producer-side
+    # fact_code. The validator could attach that fact_code on the
+    # contract in a later phase; for now, only consumer assistance is
+    # surfaced as suggestion text.
+    return None
 
 
 def validate_pipeline(
@@ -271,32 +316,36 @@ def validate_pipeline(
             )
         )
 
-    framing_errors = validate_transform_framing_contracts(state.nodes)
-    if framing_errors:
+    semantic_errors, semantic_contracts = validate_semantic_contracts(state)
+    if semantic_errors:
         checks.append(
             ValidationCheck(
-                name=_CHECK_TRANSFORM_FRAMING,
+                name=_CHECK_SEMANTIC_CONTRACTS,
                 passed=False,
-                detail="Transform framing contract failed",
+                detail="Semantic contract check failed",
             )
         )
-        errors.extend(
-            ValidationError(
-                component_id=entry.component.removeprefix("node:"),
-                component_type="transform",
-                message=entry.message,
-                suggestion="Set web_scrape text_separator to '\\n' or use format: markdown before line_explode.",
+        for entry in semantic_errors:
+            # entry.message already names plugins, fields, requirement code.
+            # Suggestion is plugin-owned — fetch from PluginAssistance.
+            errors.append(
+                ValidationError(
+                    component_id=entry.component.removeprefix("node:"),
+                    component_type="transform",
+                    message=entry.message,
+                    suggestion=_assistance_suggestion_for(entry, semantic_contracts),
+                )
             )
-            for entry in framing_errors
-        )
-        checks.extend(_skipped_checks(_CHECK_TRANSFORM_FRAMING))
+        checks.extend(_skipped_checks(_CHECK_SEMANTIC_CONTRACTS))
         return ValidationResult(is_valid=False, checks=checks, errors=errors)
 
     checks.append(
         ValidationCheck(
-            name=_CHECK_TRANSFORM_FRAMING,
+            name=_CHECK_SEMANTIC_CONTRACTS,
             passed=True,
-            detail="Transform framing contracts satisfied",
+            detail=(
+                f"All {len(semantic_contracts)} semantic contract(s) satisfied" if semantic_contracts else "No semantic contracts to check"
+            ),
         )
     )
 
