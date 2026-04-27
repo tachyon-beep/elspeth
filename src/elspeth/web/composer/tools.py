@@ -471,7 +471,13 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                 "properties": {
                     "sink_name": {"type": "string", "description": "Sink name (connection point for edges/routes)."},
                     "plugin": {"type": "string", "description": "Sink plugin name (e.g. 'csv', 'json')."},
-                    "options": {"type": "object", "description": "Plugin-specific config."},
+                    "options": {
+                        "type": "object",
+                        "description": (
+                            "Plugin-specific config. For csv/json file sinks in runnable web pipelines, "
+                            "include path, schema, and explicit collision_policy."
+                        ),
+                    },
                     "on_write_failure": {
                         "type": "string",
                         "description": "How to handle per-row write failures. Use 'discard' to drop with audit record, or a sink name (e.g. 'results_failures') to divert failed rows to that failsink.",
@@ -625,7 +631,11 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                             },
                             "required": ["sink_name", "plugin", "options"],
                         },
-                        "description": "Array of output specs: [{sink_name, plugin, options, on_write_failure?}]",
+                        "description": (
+                            "Array of output specs: [{sink_name, plugin, options, on_write_failure?}]. "
+                            "For csv/json file sinks in runnable web pipelines, options must include "
+                            "path, schema, and explicit collision_policy."
+                        ),
                     },
                     "metadata": {
                         "type": "object",
@@ -1336,6 +1346,42 @@ def _prevalidate_plugin_options(
 
 
 _WEB_ONLY_SOURCE_KEYS = frozenset({"blob_ref"})
+_FILE_SINKS_REQUIRING_COLLISION_POLICY = frozenset({"csv", "json"})
+_WRITE_COLLISION_POLICIES = frozenset({"fail_if_exists", "auto_increment"})
+_APPEND_COLLISION_POLICIES = frozenset({"append_or_create"})
+
+
+def validate_composer_file_sink_collision_policy(
+    plugin_name: str,
+    options: Mapping[str, Any],
+    *,
+    require_explicit: bool,
+) -> str | None:
+    """Require generated runnable file sinks to choose collision behavior."""
+    if not require_explicit or plugin_name not in _FILE_SINKS_REQUIRING_COLLISION_POLICY:
+        return None
+
+    if "collision_policy" not in options:
+        return (
+            f"File sink '{plugin_name}' must set collision_policy explicitly. "
+            "Use 'fail_if_exists' to refuse a taken output path, "
+            "'auto_increment' to choose a free sibling path, or "
+            "'append_or_create' with mode='append'."
+        )
+
+    mode = options.get("mode", "write")
+    policy = options["collision_policy"]
+    if mode == "append":
+        if policy not in _APPEND_COLLISION_POLICIES:
+            return f"File sink '{plugin_name}' with mode='append' must use collision_policy='append_or_create'."
+    else:
+        if policy not in _WRITE_COLLISION_POLICIES:
+            return (
+                f"File sink '{plugin_name}' with mode='write' must use "
+                "collision_policy='fail_if_exists' or collision_policy='auto_increment'."
+            )
+
+    return None
 
 
 def _prevalidate_source(
@@ -1608,6 +1654,13 @@ def _execute_set_output(
     prevalidation_error = _prevalidate_sink(plugin, sink_options)
     if prevalidation_error is not None:
         return _failure_result(state, prevalidation_error)
+    collision_error = validate_composer_file_sink_collision_policy(
+        plugin,
+        sink_options,
+        require_explicit=data_dir is not None,
+    )
+    if collision_error is not None:
+        return _failure_result(state, collision_error)
 
     output = OutputSpec(
         name=args["sink_name"],
@@ -2692,6 +2745,13 @@ def _execute_set_pipeline(
         out_prevalidation = _prevalidate_sink(out_plugin, out_options)
         if out_prevalidation is not None:
             return _failure_result(state, f"Output '{out_name}': {out_prevalidation}")
+        out_collision_error = validate_composer_file_sink_collision_policy(
+            out_plugin,
+            out_options,
+            require_explicit=data_dir is not None,
+        )
+        if out_collision_error is not None:
+            return _failure_result(state, f"Output '{out_name}': {out_collision_error}")
 
     # 4. Construct specs (same field extraction as individual handlers)
     try:
@@ -2918,6 +2978,13 @@ def _execute_patch_output_options(
     prevalidation_error = _prevalidate_sink(current.plugin, new_options)
     if prevalidation_error is not None:
         return _failure_result(state, prevalidation_error)
+    collision_error = validate_composer_file_sink_collision_policy(
+        current.plugin,
+        new_options,
+        require_explicit=data_dir is not None,
+    )
+    if collision_error is not None:
+        return _failure_result(state, collision_error)
 
     new_output = OutputSpec(
         name=current.name,

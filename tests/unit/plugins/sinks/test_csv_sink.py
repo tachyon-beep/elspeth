@@ -46,6 +46,54 @@ class TestCSVSink:
         assert rows[0]["id"] == "1"
         assert rows[0]["name"] == "alice"
 
+    def test_fail_if_exists_collision_policy_refuses_existing_write_target(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Explicit fail-if-exists mode must not truncate a taken output file."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        output_file.write_text("existing\n")
+        with pytest.raises(FileExistsError, match="already exists"):
+            CSVSink(
+                {
+                    "path": str(output_file),
+                    "schema": STRICT_SCHEMA,
+                    "collision_policy": "fail_if_exists",
+                }
+            )
+
+        assert output_file.read_text() == "existing\n"
+
+    def test_auto_increment_collision_policy_writes_free_sibling(
+        self,
+        tmp_path: Path,
+        ctx: PluginContext,
+    ) -> None:
+        """Auto-increment mode must leave the taken path alone and report the chosen artifact."""
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+
+        output_file = tmp_path / "output.csv"
+        output_file.write_text("existing\n")
+        sink = inject_write_failure(
+            CSVSink(
+                {
+                    "path": str(output_file),
+                    "schema": STRICT_SCHEMA,
+                    "collision_policy": "auto_increment",
+                }
+            )
+        )
+
+        artifact = sink.write([{"id": "1", "name": "alice"}], ctx)
+        sink.close()
+
+        chosen_file = tmp_path / "output-1.csv"
+        assert output_file.read_text() == "existing\n"
+        assert chosen_file.exists()
+        assert artifact.artifact.path_or_uri == f"file://{chosen_file}"
+
     def test_write_multiple_rows(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Multiple writes append to CSV."""
         from elspeth.plugins.sinks.csv_sink import CSVSink

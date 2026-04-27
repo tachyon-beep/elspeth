@@ -122,6 +122,12 @@ class WebScrapeConfig(TransformDataConfig):
     content_field: str
     fingerprint_field: str
     format: Literal["markdown", "text", "raw"] = "markdown"
+    text_separator: str = Field(
+        default=" ",
+        min_length=1,
+        max_length=16,
+        description="Separator inserted between DOM text nodes when format is text.",
+    )
     fingerprint_mode: Literal["content", "full"] = "content"
     strip_elements: list[str] = Field(default_factory=lambda: ["script", "style"])
     http: WebScrapeHTTPConfig
@@ -226,6 +232,7 @@ class WebScrapeTransform(BaseTransform):
         content_field: Field to store extracted content
         fingerprint_field: Field to store content fingerprint
         format: Output format ("markdown", "text", "raw")
+        text_separator: Separator between DOM text nodes when format is text
         fingerprint_mode: Fingerprinting mode ("content", "full")
         strip_elements: HTML tags to remove (default: ["script", "style"])
         http:
@@ -246,6 +253,7 @@ class WebScrapeTransform(BaseTransform):
               content_field: page_content
               fingerprint_field: page_fingerprint
               format: markdown
+              text_separator: "\n"  # only used with format: text
               http:
                 abuse_contact: compliance@example.com
                 scraping_reason: Regulatory monitoring
@@ -254,7 +262,7 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:9b48986e840e6355"
+    source_file_hash: str | None = "sha256:f60fb40c235352e1"
     config_model = WebScrapeConfig
     passes_through_input = True
 
@@ -298,6 +306,7 @@ class WebScrapeTransform(BaseTransform):
 
         # Format and fingerprint mode
         self._format = cfg.format
+        self._text_separator = cfg.text_separator
         self._fingerprint_mode = cfg.fingerprint_mode
 
         # HTTP config — validated by WebScrapeHTTPConfig sub-model
@@ -473,6 +482,7 @@ class WebScrapeTransform(BaseTransform):
                 response.text,
                 format=self._format,
                 strip_elements=self._strip_elements,
+                text_separator=self._text_separator,
             )
         except (ValueError, UnicodeDecodeError, UnicodeEncodeError, RuntimeError) as e:
             return TransformResult.error(

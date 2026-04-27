@@ -308,6 +308,7 @@ def _make_app(
     from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
     app.state.rate_limiter = ComposerRateLimiter(limit=100)
+    app.state.composer_progress_registry = ComposerProgressRegistry()
 
     # Minimal mock for execution service — delete_session calls
     # cleanup_session_lock() after archiving.
@@ -732,6 +733,7 @@ class TestIDORCoverageDrift:
             "get_messages",
             "send_message",
             "recompose",
+            "get_composer_progress",
             "list_session_runs",
             "get_current_state",
             "get_state_versions",
@@ -751,6 +753,8 @@ class TestIDORCoverageDrift:
     EXPECTED_EXECUTION_RUN_OWNERSHIP_ENDPOINTS: frozenset[str] = frozenset(
         {
             "get_run_status",
+            "get_run_diagnostics",
+            "evaluate_run_diagnostics",
             "cancel_run",
             "get_run_results",
         }
@@ -924,6 +928,7 @@ class TestIDORProtection:
             from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
             app.state.rate_limiter = ComposerRateLimiter(limit=100)
+            app.state.composer_progress_registry = ComposerProgressRegistry()
             app.include_router(create_session_router())
             return app
 
@@ -1118,6 +1123,7 @@ class TestSendMessageStateIdValidation:
             from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
             app.state.rate_limiter = ComposerRateLimiter(limit=100)
+            app.state.composer_progress_registry = ComposerProgressRegistry()
             app.include_router(create_session_router())
             return app
 
@@ -1608,6 +1614,54 @@ class TestLiteLLMErrorRedaction:
         )
         self._assert_redacted(msg_resp, "llm_unavailable", "APIError")
 
+    def test_api_error_debug_detail_is_exposed_when_enabled(self) -> None:
+        """Opt-in debug mode exposes scrubbed provider detail for staging triage."""
+        from litellm.exceptions import APIError as LiteLLMAPIError
+
+        from elspeth.web.sessions.routes import _litellm_error_detail
+
+        exc = LiteLLMAPIError(
+            status_code=402,
+            message="OpenRouter upstream rejected request: insufficient credits",
+            llm_provider="openrouter",
+            model="openai/gpt-5.5",
+        )
+
+        detail = _litellm_error_detail(
+            "llm_unavailable",
+            exc,
+            expose_provider_error=True,
+        )
+
+        assert detail["error_type"] == "llm_unavailable"
+        assert detail["detail"] == "APIError"
+        assert detail["provider_status_code"] == 402
+        assert detail["provider_detail"] == ("litellm.APIError: OpenRouter upstream rejected request: insufficient credits")
+
+    def test_api_error_debug_detail_scrubs_secret_values(self) -> None:
+        """Debug detail must not turn provider errors into a secret leak channel."""
+        from litellm.exceptions import APIError as LiteLLMAPIError
+
+        from elspeth.web.sessions.routes import _litellm_error_detail
+
+        secret = "sk-or-v1-abcdefghijklmnopqrstuvwxyz123456"
+        exc = LiteLLMAPIError(
+            status_code=503,
+            message=f"Provider echoed Authorization Bearer {secret}",
+            llm_provider="openrouter",
+            model="openai/gpt-5.5",
+        )
+
+        detail = _litellm_error_detail(
+            "llm_unavailable",
+            exc,
+            expose_provider_error=True,
+        )
+
+        body_text = str(detail)
+        assert secret not in body_text
+        assert detail["provider_detail"] == ("Provider detail redacted because it may contain secrets.")
+
     def test_recompose_auth_error_body_carries_class_name_only(self, tmp_path) -> None:
         """recompose path must mirror send_message's redaction."""
         import asyncio
@@ -2081,6 +2135,7 @@ class TestRevertEndpoint:
             from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
             app.state.rate_limiter = ComposerRateLimiter(limit=100)
+            app.state.composer_progress_registry = ComposerProgressRegistry()
             app.include_router(create_session_router())
             return app
 

@@ -2175,6 +2175,109 @@ class TestSchemaContractValidation:
             on_write_failure="discard",
         )
 
+    def _make_web_scrape_to_line_explode_state(
+        self,
+        *,
+        scrape_options: dict[str, Any] | None = None,
+        line_options: dict[str, Any] | None = None,
+    ) -> CompositionState:
+        scrape_opts = {
+            "schema": {"mode": "flexible", "fields": ["url: str"]},
+            "required_input_fields": ["url"],
+            "url_field": "url",
+            "content_field": "content",
+            "fingerprint_field": "content_fingerprint",
+            "format": "text",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "pipeline@example.com",
+                "scraping_reason": "test scrape",
+                "allowed_hosts": "public_only",
+            },
+        }
+        scrape_opts.update(scrape_options or {})
+        split_opts = {
+            "schema": {
+                "mode": "flexible",
+                "fields": [
+                    "url: str",
+                    "content: str",
+                    "content_fingerprint: str",
+                ],
+            },
+            "required_input_fields": ["content"],
+            "source_field": "content",
+            "output_field": "line",
+            "include_index": True,
+            "index_field": "line_index",
+        }
+        split_opts.update(line_options or {})
+
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="scrape_in",
+                options={"schema": {"mode": "fixed", "fields": ["url: str"]}},
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "scrape_page",
+                "scrape_in",
+                "explode_in",
+                plugin="web_scrape",
+                options=scrape_opts,
+            )
+        )
+        state = state.with_node(
+            self._make_transform(
+                "split_lines",
+                "explode_in",
+                "main",
+                plugin="line_explode",
+                options=split_opts,
+            )
+        )
+        state = state.with_output(self._make_output())
+        state = state.with_edge(self._make_edge("e1", "source", "scrape_page"))
+        state = state.with_edge(self._make_edge("e2", "scrape_page", "split_lines"))
+        state = state.with_edge(self._make_edge("e3", "split_lines", "main"))
+        return state
+
+    def test_line_explode_rejects_compact_web_scrape_text(self) -> None:
+        """A text scrape with the default space separator is not line-framed."""
+        state = self._make_web_scrape_to_line_explode_state()
+
+        result = state.validate()
+
+        assert not result.is_valid
+        assert any(
+            error.component == "node:split_lines"
+            and "line_explode" in error.message
+            and "text_separator" in error.message
+            and "\\n" in error.message
+            for error in result.errors
+        )
+
+    def test_line_explode_accepts_newline_framed_web_scrape_text(self) -> None:
+        state = self._make_web_scrape_to_line_explode_state(
+            scrape_options={"text_separator": "\n"},
+        )
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+        assert not any("line_explode" in error.message and "text_separator" in error.message for error in result.errors)
+
+    def test_line_explode_accepts_markdown_web_scrape_content(self) -> None:
+        state = self._make_web_scrape_to_line_explode_state(
+            scrape_options={"format": "markdown"},
+        )
+
+        result = state.validate()
+
+        assert result.is_valid, result.errors
+
     def _make_edge(
         self,
         id: str,

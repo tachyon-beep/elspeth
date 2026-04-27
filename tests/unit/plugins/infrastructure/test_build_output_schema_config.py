@@ -88,8 +88,14 @@ class TestBuildOutputSchemaConfig:
         transform = _make_minimal_transform()
         assert transform.effective_static_contract() == frozenset()
 
-    def test_effective_static_contract_crashes_when_config_missing(self):
+    def test_effective_static_contract_empty_for_shape_preserving_missing_config(self):
         transform = _make_minimal_transform()
+        transform._output_schema_config = None
+
+        assert transform.effective_static_contract() == frozenset()
+
+    def test_effective_static_contract_crashes_when_field_adding_config_missing(self):
+        transform = _make_minimal_transform(frozenset({"new_field"}))
         transform._output_schema_config = None
 
         with pytest.raises(FrameworkBugError, match="effective static contract"):

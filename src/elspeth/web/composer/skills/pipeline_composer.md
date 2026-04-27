@@ -263,6 +263,13 @@ Example of the mistake:
 
 Every sink requires `on_write_failure` — either `"discard"` (drop failed rows with audit record) or a sink name (route failed rows to that sink).
 
+Every generated `csv` or `json` file sink must also choose `collision_policy` explicitly. Do not rely on an implicit overwrite/default:
+- `fail_if_exists`: refuse to run if the requested output path already exists. Use this when the filename is a deliberate contract.
+- `auto_increment`: write to a free sibling path such as `results-1.json` if `results.json` already exists. Use this for exploratory or repeated runs.
+- `append_or_create`: only with `mode: "append"`; append to an existing JSONL/CSV output or create it if missing.
+
+For `mode: "write"`, choose either `fail_if_exists` or `auto_increment`. For `mode: "append"`, choose `append_or_create`.
+
 ### Automatic Failsink Creation
 
 **For external sinks (database, azure_blob, dataverse, chroma_sink), always create a companion failsink.** External writes fail more often (network issues, auth failures, constraint violations), so capturing failed rows for retry is essential.
@@ -284,7 +291,11 @@ Every sink requires `on_write_failure` — either `"discard"` (drop failed rows 
     },
     "results_failures": {
       "plugin": "json",
-      "options": {"path": "outputs/results_failures.json"},
+      "options": {
+        "path": "outputs/results_failures.json",
+        "schema": {"mode": "observed"},
+        "collision_policy": "auto_increment"
+      },
       "on_write_failure": "discard"
     }
   }
@@ -386,6 +397,7 @@ If the user's intent matches a known pattern, use its safe defaults and build im
 | `truncate` | Truncate text fields to max length | no | no | no | Truncates specified fields in-place |
 | `keyword_filter` | Filter rows by keyword presence | no | no | no | (none — routes matching/non-matching rows) |
 | `json_explode` | Expand nested JSON field into row fields | no | no | no | Adds fields from nested JSON object |
+| `line_explode` | Split a string field into one row per line | **yes** | no | no | Emits one row per line with `line`/`line_index` fields |
 | `batch_stats` | Compute statistics over a batch of rows | **yes** | no | no | Emits aggregate result row(s) |
 | `batch_replicate` | Replicate rows for fan-out | no | no | no | Emits multiple copies per input row |
 | `web_scrape` | Fetch and extract content from URLs | no | no | yes | Adds `content` field (scraped text/HTML) |
@@ -443,6 +455,7 @@ Gotchas:
 **web_scrape** — Fetch and extract content from a URL in each row.
 Gotchas:
 - You must specify `url_field` — the name of the row field containing the URL to fetch. There is no default.
+- `format: text` defaults to compact text with spaces between DOM text nodes. If the next step is `line_explode`, set `text_separator: "\n"` or use `format: markdown`; otherwise the page may arrive as one long line.
 
 **llm** — Send row data to an LLM using a Jinja2 template.
 Gotchas:
@@ -456,6 +469,11 @@ Gotchas:
 **json_explode** — Expand a nested JSON string field into top-level row fields.
 Gotchas:
 - The `field` must contain a valid JSON string. Typically used after an `llm` step — make sure the LLM template instructs the model to return JSON.
+
+**line_explode** — Split one string field into multiple rows, one per line.
+Gotchas:
+- Set `source_field` to the string field to split and choose `output_field`/`index_field` names that do not collide with existing fields.
+- For scraped pages, use `web_scrape` with `text_separator: "\n"` or `format: markdown` before `line_explode`; compact text may otherwise arrive as a single long line.
 
 **field_mapper** — Rename fields in each row.
 
@@ -474,11 +492,13 @@ Gotchas:
 **All sink paths must be inside the `outputs/` directory.** Paths outside this folder will be rejected as a security measure.
 
 **csv** — Write rows to a CSV file.
+- Required generated options: `path`, `schema`, `collision_policy`.
 
 **json** — Write rows to a JSON or JSONL file.
 Gotchas:
 - Default format is `json` (single array). Set `format: "jsonl"` for one record per line — important for large outputs or streaming consumers.
 - Failsinks should also use `outputs/` paths, e.g., `outputs/errors.json`
+- Required generated options: `path`, `schema`, `collision_policy`.
 
 ---
 
@@ -587,7 +607,7 @@ Never ask the user to upload a file when the data is already in the conversation
 
 **Required inputs:** URL, what to extract (extraction prompt), output fields
 **Ask exactly:** "What URL should I fetch?", "What information should I extract?", "What fields/columns do you want in the output?"
-**Safe defaults:** schema mode `fixed` with `url: str`, LLM temperature `0.0`, json sink with indent 2
+**Safe defaults:** schema mode `fixed` with `url: str`, `web_scrape` format `markdown` for line-oriented/page-structure tasks, LLM temperature `0.0`, json sink with indent 2
 **Caveats:** LLM returns a string — if you need structured JSON fields downstream, the template must instruct the model to return JSON and you may need `json_explode` after the LLM step.
 
 ### 2. Search → Fetch → Extract → CSV
@@ -740,6 +760,7 @@ Always check `list_secret_refs` to see what secrets the user has configured befo
 | `truncate` | Row with truncated text fields | In-place modification | Row with shortened string values |
 | `keyword_filter` | Same row (routing decision only) | Row passes through if matched | Identical to input row |
 | `json_explode` | Row with nested JSON expanded to top-level fields | Nested fields promoted into row | Original fields + exploded fields |
+| `line_explode` | One row per line from a string field | Source text field replaced by line fields | Original row minus source field + `line`/`line_index` |
 | `web_scrape` | Row + `content` field (scraped text) | New field added to row | Original fields + `content` string |
 | `llm` | Row + response field (default: `llm_response`) | New field added to row | Original fields + `llm_response` string |
 | `llm` (multi-query) | Row + one field per query | New fields added to row | Original fields + named response fields |

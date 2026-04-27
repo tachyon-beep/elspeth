@@ -27,6 +27,10 @@ def test_secret_like_text_is_redacted() -> None:
     assert scrub_text_for_audit("secret sk-1234567890abcdef1234567890abcdef leaked") == REDACTED
 
 
+def test_openrouter_key_like_text_is_redacted() -> None:
+    assert scrub_text_for_audit("secret sk-or-v1-abcdefghijklmnopqrstuvwxyz123456 leaked") == REDACTED
+
+
 def test_aws_access_key_redacted() -> None:
     p = {"note": "AKIAIOSFODNN7EXAMPLE in log"}
     out = scrub_payload_for_audit(p)

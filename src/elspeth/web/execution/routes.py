@@ -23,6 +23,7 @@ import pydantic
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
 from elspeth.web.auth.protocol import AuthProvider
@@ -363,7 +364,7 @@ def create_execution_router() -> APIRouter:
         if status.landscape_run_id is not None and status.discard_summary is None:
             from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
 
-            discard_summaries = await asyncio.to_thread(
+            discard_summaries = await run_sync_in_worker(
                 load_discard_summaries_for_settings,
                 request.app.state.settings,
                 (status.landscape_run_id,),
@@ -391,7 +392,7 @@ def create_execution_router() -> APIRouter:
             raise _run_not_found_http() from None
 
         landscape_run_id = status.landscape_run_id or status.run_id
-        return await asyncio.to_thread(
+        return await run_sync_in_worker(
             load_run_diagnostics_for_settings,
             request.app.state.settings,
             run_id=status.run_id,
@@ -419,7 +420,7 @@ def create_execution_router() -> APIRouter:
             raise _run_not_found_http() from None
 
         landscape_run_id = status.landscape_run_id or status.run_id
-        diagnostics = await asyncio.to_thread(
+        diagnostics = await run_sync_in_worker(
             load_run_diagnostics_for_settings,
             request.app.state.settings,
             run_id=status.run_id,
@@ -480,7 +481,7 @@ def create_execution_router() -> APIRouter:
         if status.landscape_run_id is not None and status.discard_summary is None:
             from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
 
-            discard_summaries = await asyncio.to_thread(
+            discard_summaries = await run_sync_in_worker(
                 load_discard_summaries_for_settings,
                 request.app.state.settings,
                 (status.landscape_run_id,),

@@ -1383,12 +1383,12 @@ class TestEmptyChoicesValidation:
         service = ComposerServiceImpl(catalog=catalog, settings=settings)
         state = _empty_state()
 
-        # Patch litellm.acompletion (not _call_llm) so the validation
+        # Patch the lazy LiteLLM wrapper (not _call_llm) so the validation
         # inside _call_llm is exercised through the production code path.
         empty_response = FakeLLMResponse(choices=[])
         with (
             patch(
-                "elspeth.web.composer.service.litellm.acompletion",
+                "elspeth.web.composer.service._litellm_acompletion",
                 new_callable=AsyncMock,
                 return_value=empty_response,
             ),
@@ -1430,7 +1430,7 @@ class TestEmptyChoicesValidation:
 
         with (
             patch(
-                "elspeth.web.composer.service.litellm.acompletion",
+                "elspeth.web.composer.service._litellm_acompletion",
                 new_callable=AsyncMock,
                 side_effect=[mutation_call, empty_response],
             ) as mock_acomp,
@@ -1483,7 +1483,7 @@ class TestComposerAvailabilityAndBadRequest:
 
         with (
             patch(
-                "elspeth.web.composer.service.litellm.acompletion",
+                "elspeth.web.composer.service._litellm_acompletion",
                 new_callable=AsyncMock,
                 side_effect=bad_request,
             ),
@@ -1512,7 +1512,7 @@ class TestComposerAvailabilityAndBadRequest:
 
         with (
             patch(
-                "elspeth.web.composer.service.litellm.acompletion",
+                "elspeth.web.composer.service._litellm_acompletion",
                 new_callable=AsyncMock,
                 side_effect=[transient_error, success],
             ) as mock_llm,

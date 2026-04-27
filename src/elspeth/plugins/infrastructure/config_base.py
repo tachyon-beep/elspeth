@@ -15,12 +15,14 @@ Example usage:
 """
 
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from elspeth.contracts.header_modes import HeaderMode, parse_header_mode
 from elspeth.contracts.schema import SchemaConfig
+
+OutputCollisionPolicy = Literal["fail_if_exists", "auto_increment", "append_or_create"]
 
 
 class PluginConfigError(Exception):
@@ -426,6 +428,15 @@ class SinkPathConfig(PathConfig):
     headers: str | dict[str, str] | None = Field(
         default=None,
         description=("Header output mode: 'normalized', 'original', or {field: header} mapping"),
+    )
+    collision_policy: OutputCollisionPolicy | None = Field(
+        default=None,
+        description=(
+            "Optional local output collision policy. "
+            "'fail_if_exists' refuses an existing write target; "
+            "'auto_increment' picks a free sibling path; "
+            "'append_or_create' is valid with append mode."
+        ),
     )
 
     @field_validator("headers")

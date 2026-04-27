@@ -1689,7 +1689,7 @@ class TestAsyncShutdown:
         def short_call_async(coro: Coroutine[Any, Any, Any]) -> Any:
             future = asyncio.run_coroutine_threadsafe(coro, loop)
             try:
-                return future.result(timeout=0.05)
+                return future.result(timeout=1.0)
             except concurrent.futures.TimeoutError:
                 future.cancel()
                 raise
@@ -1965,6 +1965,122 @@ class TestSinkPathRestriction:
 
         with patch.object(service, "_run_pipeline"):
             run_id = await service.execute(session_id=uuid4())
+        assert isinstance(run_id, UUID)
+
+
+# ── Transform Framing Restriction ─────────────────────────────────────
+
+
+class TestTransformFramingRestriction:
+    """Execution must reject transform pairings that violate framing contracts."""
+
+    @staticmethod
+    def _set_web_scrape_line_explode_state(
+        mock_session_service: MagicMock,
+        *,
+        scrape_options: dict[str, Any] | None = None,
+    ) -> None:
+        state = mock_session_service.get_current_state.return_value
+        web_scrape_options = {
+            "schema": {"mode": "flexible", "fields": ["url: str"]},
+            "required_input_fields": ["url"],
+            "url_field": "url",
+            "content_field": "content",
+            "fingerprint_field": "content_fingerprint",
+            "format": "text",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "pipeline@example.com",
+                "scraping_reason": "test scrape",
+                "allowed_hosts": "public_only",
+            },
+        }
+        web_scrape_options.update(scrape_options or {})
+        state.source = {
+            "plugin": "text",
+            "on_success": "scrape_in",
+            "options": {
+                "path": "blobs/urls.txt",
+                "column": "url",
+                "schema": {"mode": "fixed", "fields": ["url: str"]},
+            },
+            "on_validation_failure": "discard",
+        }
+        state.nodes = [
+            {
+                "id": "scrape_page",
+                "node_type": "transform",
+                "plugin": "web_scrape",
+                "input": "scrape_in",
+                "on_success": "explode_in",
+                "on_error": "discard",
+                "options": web_scrape_options,
+            },
+            {
+                "id": "split_lines",
+                "node_type": "transform",
+                "plugin": "line_explode",
+                "input": "explode_in",
+                "on_success": "results",
+                "on_error": "discard",
+                "options": {
+                    "schema": {
+                        "mode": "flexible",
+                        "fields": [
+                            "url: str",
+                            "content: str",
+                            "content_fingerprint: str",
+                        ],
+                    },
+                    "required_input_fields": ["content"],
+                    "source_field": "content",
+                    "output_field": "line",
+                    "include_index": True,
+                    "index_field": "line_index",
+                },
+            },
+        ]
+        state.edges = None
+        state.outputs = [
+            {
+                "name": "results",
+                "plugin": "json",
+                "options": {"path": "outputs/lines.json", "format": "json"},
+                "on_write_failure": "discard",
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_execute_rejects_compact_web_scrape_text_before_creating_run(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        self._set_web_scrape_line_explode_state(mock_session_service)
+
+        with pytest.raises(ValueError, match="text_separator"):
+            await service.execute(session_id=uuid4())
+
+        mock_session_service.create_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_allows_newline_framed_web_scrape_text(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        self._set_web_scrape_line_explode_state(
+            mock_session_service,
+            scrape_options={"text_separator": "\n"},
+        )
+
+        with patch.object(service, "_run_pipeline"):
+            run_id = await service.execute(session_id=uuid4())
+
         assert isinstance(run_id, UUID)
 
 

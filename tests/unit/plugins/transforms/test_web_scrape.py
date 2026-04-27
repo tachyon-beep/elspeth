@@ -306,9 +306,40 @@ def test_web_scrape_text_format(mock_ctx):
 
     assert result.status == "success"
     # Text format should not include markdown
+    assert result.row["page_content"] == "Title Content here"
     assert "#" not in result.row["page_content"]
     assert "Title" in result.row["page_content"]
     assert "Content here" in result.row["page_content"]
+
+
+@respx.mock
+def test_web_scrape_text_format_uses_configured_separator(mock_ctx):
+    """Text extraction can preserve line boundaries before line_explode consumes it."""
+    html_content = "<html><body><h1>Title</h1><p>Content here</p><ul><li>One</li><li>Two</li></ul></body></html>"
+
+    respx.get(f"https://{_TEST_IP}:443/page").mock(return_value=httpx.Response(200, text=html_content))
+
+    transform = WebScrapeTransform(
+        {
+            "schema": {"mode": "observed"},
+            "url_field": "url",
+            "content_field": "page_content",
+            "fingerprint_field": "page_fingerprint",
+            "format": "text",
+            "text_separator": "\n",
+            "http": {
+                "abuse_contact": "test@example.com",
+                "scraping_reason": "Testing",
+            },
+        }
+    )
+    transform.on_start(mock_ctx)
+
+    with patch("socket.getaddrinfo", _mock_getaddrinfo()):
+        result = transform.process(make_pipeline_row({"url": "https://example.com/page"}), mock_ctx)
+
+    assert result.status == "success"
+    assert result.row["page_content"] == "Title\nContent here\nOne\nTwo"
 
 
 @respx.mock

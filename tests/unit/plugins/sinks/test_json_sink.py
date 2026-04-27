@@ -45,6 +45,56 @@ class TestJSONSink:
         assert len(data) == 2
         assert data[0]["name"] == "alice"
 
+    def test_json_array_fail_if_exists_collision_policy_refuses_existing_target(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """Explicit fail-if-exists mode must not replace an existing JSON output."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.json"
+        output_file.write_text('[{"id": 0}]')
+        with pytest.raises(FileExistsError, match="already exists"):
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "json",
+                    "schema": DYNAMIC_SCHEMA,
+                    "collision_policy": "fail_if_exists",
+                }
+            )
+
+        assert json.loads(output_file.read_text()) == [{"id": 0}]
+
+    def test_json_array_auto_increment_collision_policy_writes_free_sibling(
+        self,
+        tmp_path: Path,
+        ctx: PluginContext,
+    ) -> None:
+        """Auto-increment mode must preserve existing JSON output and report the chosen path."""
+        from elspeth.plugins.sinks.json_sink import JSONSink
+
+        output_file = tmp_path / "output.json"
+        output_file.write_text('[{"id": 0}]')
+        sink = inject_write_failure(
+            JSONSink(
+                {
+                    "path": str(output_file),
+                    "format": "json",
+                    "schema": DYNAMIC_SCHEMA,
+                    "collision_policy": "auto_increment",
+                }
+            )
+        )
+
+        artifact = sink.write([{"id": 1}], ctx)
+        sink.close()
+
+        chosen_file = tmp_path / "output-1.json"
+        assert json.loads(output_file.read_text()) == [{"id": 0}]
+        assert json.loads(chosen_file.read_text()) == [{"id": 1}]
+        assert artifact.artifact.path_or_uri == f"file://{chosen_file}"
+
     def test_write_jsonl(self, tmp_path: Path, ctx: PluginContext) -> None:
         """Write rows as JSONL (one per line)."""
         from elspeth.plugins.sinks.json_sink import JSONSink

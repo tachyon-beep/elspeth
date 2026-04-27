@@ -124,6 +124,29 @@ describe("sessionStore", () => {
       expect(state.error).toContain("couldn't complete the composition");
     });
 
+    it("includes provider detail when an LLM unavailable response exposes it", async () => {
+      const { sendMessage: mockSendMessage } = await import("@/api/client");
+      (mockSendMessage as ReturnType<typeof vi.fn>).mockRejectedValueOnce({
+        status: 502,
+        error_type: "llm_unavailable",
+        detail: "APIError",
+        provider_detail:
+          "litellm.APIError: OpenRouter upstream rejected request: insufficient credits",
+        provider_status_code: 402,
+      });
+
+      useSessionStore.setState({ activeSessionId: "session-1" });
+      await useSessionStore.getState().sendMessage("hello");
+
+      const state = useSessionStore.getState();
+      expect(state.error).toContain("The AI service is temporarily unavailable");
+      expect(state.error).toContain(
+        "litellm.APIError: OpenRouter upstream rejected request: insufficient credits",
+      );
+      expect(state.error).toContain("Provider status: 402");
+      expect(state.messages[0].local_error).toBe(state.error);
+    });
+
     it("polls composer progress only while a send is composing", async () => {
       vi.useFakeTimers();
       try {

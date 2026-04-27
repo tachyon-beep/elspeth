@@ -237,6 +237,129 @@ class TestValidatePipelineSinkPathAllowlist:
         assert path_check.passed is True
 
 
+class TestValidatePipelineTransformFraming:
+    """Validation must catch transform pairings that violate line framing."""
+
+    @staticmethod
+    def _make_web_scrape_line_explode_state(
+        *,
+        scrape_options: dict[str, Any] | None = None,
+    ) -> CompositionState:
+        web_scrape_options = {
+            "schema": {"mode": "flexible", "fields": ["url: str"]},
+            "required_input_fields": ["url"],
+            "url_field": "url",
+            "content_field": "content",
+            "fingerprint_field": "content_fingerprint",
+            "format": "text",
+            "fingerprint_mode": "content",
+            "http": {
+                "abuse_contact": "pipeline@example.com",
+                "scraping_reason": "test scrape",
+                "allowed_hosts": "public_only",
+            },
+        }
+        web_scrape_options.update(scrape_options or {})
+        return CompositionState(
+            source=SourceSpec(
+                plugin="text",
+                on_success="scrape_in",
+                options={
+                    "path": "/tmp/test_data/blobs/urls.txt",
+                    "column": "url",
+                    "schema": {"mode": "fixed", "fields": ["url: str"]},
+                },
+                on_validation_failure="discard",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="scrape_page",
+                    node_type="transform",
+                    plugin="web_scrape",
+                    input="scrape_in",
+                    on_success="explode_in",
+                    on_error="discard",
+                    options=web_scrape_options,
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+                NodeSpec(
+                    id="split_lines",
+                    node_type="transform",
+                    plugin="line_explode",
+                    input="explode_in",
+                    on_success="results",
+                    on_error="discard",
+                    options={
+                        "schema": {
+                            "mode": "flexible",
+                            "fields": [
+                                "url: str",
+                                "content: str",
+                                "content_fingerprint: str",
+                            ],
+                        },
+                        "required_input_fields": ["content"],
+                        "source_field": "content",
+                        "output_field": "line",
+                        "include_index": True,
+                        "index_field": "line_index",
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="results",
+                    plugin="json",
+                    options={"path": "/tmp/test_data/outputs/lines.json", "format": "json"},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+    def test_compact_web_scrape_text_fails_before_yaml_generation(self) -> None:
+        state = self._make_web_scrape_line_explode_state()
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert result.is_valid is False
+        assert _check(result, "transform_framing").passed is False
+        assert any("text_separator" in error.message for error in result.errors)
+        mock_yaml_gen.generate_yaml.assert_not_called()
+
+    def test_newline_framed_web_scrape_text_reaches_yaml_generation(self) -> None:
+        state = self._make_web_scrape_line_explode_state(
+            scrape_options={"text_separator": "\n"},
+        )
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv_source"
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("invalid settings")
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert _check(result, "transform_framing").passed is True
+        mock_yaml_gen.generate_yaml.assert_called_once_with(state)
+
+
 class TestValidatePipelineRelativePaths:
     """Relative paths must resolve against data_dir, not CWD."""
 
@@ -328,11 +451,12 @@ class TestValidatePipelineSuccess:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is True
-        assert len(result.checks) == 6
+        assert len(result.checks) == 7
         assert all(c.passed for c in result.checks)
         # B11 fix: path_allowlist check is always recorded
         assert _check(result, "path_allowlist").passed is True
         assert _check(result, "secret_refs").passed is True
+        assert _check(result, "transform_framing").passed is True
         assert result.errors == []
 
         # Verify real engine functions were called

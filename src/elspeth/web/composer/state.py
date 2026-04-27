@@ -348,6 +348,97 @@ def _runtime_consumer_connections(nodes: tuple[NodeSpec, ...]) -> set[str]:
     return consumers
 
 
+def validate_transform_framing_contracts(nodes: tuple[NodeSpec, ...]) -> tuple[ValidationEntry, ...]:
+    """Validate cross-transform framing contracts that schemas cannot express.
+
+    ``line_explode`` only knows how to split newline-framed strings. A
+    ``web_scrape`` transform in ``format: text`` mode uses a space
+    ``text_separator`` by default, compacting DOM text into one long logical
+    line. That pairing produces a successful one-row run instead of the
+    requested line explosion unless the scrape is explicitly newline-framed.
+    """
+    errors: list[ValidationEntry] = []
+    producer_map: dict[str, _ProducerEntry] = {}
+    duplicate_connections: set[str] = set()
+    node_by_id = {node.id: node for node in nodes}
+
+    def _register_producer(connection_name: str | None, producer: _ProducerEntry) -> None:
+        if connection_name is None or connection_name == "discard":
+            return
+        if connection_name in producer_map:
+            duplicate_connections.add(connection_name)
+            return
+        producer_map[connection_name] = producer
+
+    for node in nodes:
+        producer_entry = _ProducerEntry(
+            producer_id=node.id,
+            plugin_name=node.plugin,
+            options=node.options,
+        )
+        if node.node_type == "coalesce" and node.on_success is None:
+            _register_producer(node.id, producer_entry)
+        else:
+            _register_producer(node.on_success, producer_entry)
+        _register_producer(node.on_error, producer_entry)
+        if node.routes is not None:
+            for target in node.routes.values():
+                _register_producer(target, producer_entry)
+        if node.fork_to is not None:
+            for target in node.fork_to:
+                _register_producer(target, producer_entry)
+
+    def _walk_to_real_producer(connection_name: str) -> _ProducerEntry | None:
+        current_connection = connection_name
+        visited_connections: set[str] = set()
+        while True:
+            if current_connection in visited_connections:
+                return None
+            visited_connections.add(current_connection)
+            if current_connection in duplicate_connections:
+                return None
+            if current_connection not in producer_map:
+                return None
+            producer = producer_map[current_connection]
+            producer_node = node_by_id[producer.producer_id]
+            if producer_node.node_type != "gate":
+                return producer
+            current_connection = producer_node.input
+
+    for node in nodes:
+        if node.node_type != "transform" or node.plugin != "line_explode":
+            continue
+        if "source_field" not in node.options:
+            continue
+        source_field = node.options["source_field"]
+        upstream_producer = _walk_to_real_producer(node.input)
+        if upstream_producer is None or upstream_producer.plugin_name != "web_scrape":
+            continue
+        if "content_field" not in upstream_producer.options:
+            continue
+        content_field = upstream_producer.options["content_field"]
+        if content_field != source_field:
+            continue
+        scrape_format = upstream_producer.options["format"] if "format" in upstream_producer.options else "markdown"
+        if scrape_format != "text":
+            continue
+        text_separator = upstream_producer.options["text_separator"] if "text_separator" in upstream_producer.options else " "
+        if type(text_separator) is str and "\n" in text_separator:
+            continue
+        errors.append(
+            ValidationEntry(
+                f"node:{node.id}",
+                f"line_explode '{node.id}' consumes web_scrape text content field '{source_field}' from "
+                f"'{upstream_producer.producer_id}', but format='text' requires text_separator to contain '\\n' before "
+                "page contents can be split into lines. Set text_separator: '\\n' on the web_scrape transform "
+                "or use format: markdown.",
+                "high",
+            )
+        )
+
+    return tuple(errors)
+
+
 def _validate_runtime_route_destinations(
     source: SourceSpec | None,
     nodes: tuple[NodeSpec, ...],
@@ -1414,6 +1505,8 @@ class CompositionState:
                         "high",
                     )
                 )
+
+        errors.extend(validate_transform_framing_contracts(self.nodes))
 
         # --- Warnings (advisory, non-blocking) ---
         warnings: list[ValidationEntry] = []

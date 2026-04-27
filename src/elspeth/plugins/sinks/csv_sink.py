@@ -15,7 +15,7 @@ import os
 from collections.abc import Sequence
 from typing import IO, TYPE_CHECKING, Any, Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 from elspeth.contracts.diversion import SinkWriteResult
@@ -24,13 +24,18 @@ if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.contexts import SinkContext
 from elspeth.plugins.infrastructure.base import BaseSink
-from elspeth.plugins.infrastructure.config_base import SinkPathConfig
+from elspeth.plugins.infrastructure.config_base import OutputCollisionPolicy, SinkPathConfig
 from elspeth.plugins.infrastructure.display_headers import (
     get_effective_display_headers,
     init_display_headers,
     resolve_contract_from_context_if_needed,
     resolve_display_headers_if_needed,
     set_resume_field_resolution,
+)
+from elspeth.plugins.infrastructure.output_paths import (
+    resolve_output_collision_path,
+    should_create_exclusively,
+    validate_output_collision_policy_mode,
 )
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
@@ -66,6 +71,15 @@ class CSVSinkConfig(SinkPathConfig):
             raise ValueError(f"unknown encoding: {v!r}") from exc
         return v
 
+    @model_validator(mode="after")
+    def _validate_collision_policy_mode(self) -> CSVSinkConfig:
+        validate_output_collision_policy_mode(
+            plugin_name="CSVSink",
+            mode=self.mode,
+            collision_policy=self.collision_policy,
+        )
+        return self
+
 
 class CSVSink(BaseSink):
     """Write rows to a CSV file.
@@ -95,12 +109,13 @@ class CSVSink(BaseSink):
 
     name = "csv"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:e9af613bbb6f74f1"
+    source_file_hash: str | None = "sha256:c24ad00a6582427b"
     config_model = CSVSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 
     # Resume capability: CSV can append to existing files
     supports_resume: bool = True
+    _collision_policy: OutputCollisionPolicy | None
 
     def configure_for_resume(self) -> None:
         """Configure CSV sink for resume mode.
@@ -109,6 +124,7 @@ class CSVSink(BaseSink):
         add to existing output instead of overwriting.
         """
         self._mode = "append"
+        self._collision_policy = "append_or_create"
 
     def validate_output_target(self) -> OutputValidationResult:
         """Validate existing CSV file headers against configured schema.
@@ -199,9 +215,14 @@ class CSVSink(BaseSink):
         cfg = CSVSinkConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
+        self._requested_path = self._path
         self._delimiter = cfg.delimiter
         self._encoding = cfg.encoding
         self._mode = cfg.mode
+        self._collision_policy = cfg.collision_policy
+        self._write_target_claimed = False
+        if self._mode != "append":
+            self._path = resolve_output_collision_path(self._requested_path, self._collision_policy)
 
         # Display header state (shared module handles all modes)
         init_display_headers(self, cfg.headers_mode, cfg.headers_mapping)
@@ -237,6 +258,13 @@ class CSVSink(BaseSink):
         self._fieldnames: Sequence[str] | None = None
         # Incremental hasher — avoids O(N²) full-file re-reads in append mode
         self._hasher: hashlib._Hash | None = None
+
+    def _claim_write_target(self) -> None:
+        """Apply write-mode collision policy before the first filesystem mutation."""
+        if self._write_target_claimed or self._mode == "append":
+            return
+        self._path = resolve_output_collision_path(self._requested_path, self._collision_policy)
+        self._write_target_claimed = True
 
     def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to the CSV file.
@@ -494,9 +522,11 @@ class CSVSink(BaseSink):
             display_fields: Display names for the CSV header row.
         """
         self._fieldnames = data_fields
+        self._claim_write_target()
+        file_mode = "x" if should_create_exclusively(self._collision_policy) else "w"
 
         self._file = open(  # noqa: SIM115 - handle kept open for streaming writes, closed in close()
-            self._path, "w", encoding=self._encoding, newline=""
+            self._path, file_mode, encoding=self._encoding, newline=""
         )
         self._writer = csv.DictWriter(
             self._file,

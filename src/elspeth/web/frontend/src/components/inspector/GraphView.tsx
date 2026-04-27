@@ -27,10 +27,14 @@ import dagre from "@dagrejs/dagre";
 import "@xyflow/react/dist/style.css";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useExecutionStore } from "@/stores/executionStore";
+import { useTheme } from "@/hooks/useTheme";
 import { BADGE_COLORS, BADGE_BACKGROUNDS, EDGE_COLORS, EDGE_LABEL_COLOR, VALIDATION_COLORS } from "@/styles/tokens";
+import type { CompositionState } from "@/types/index";
 
 const NODE_WIDTH = 260;
 const NODE_HEIGHT = 80;
+const FALLBACK_MINIMAP_NODE_COLOR_VAR = "--color-text-muted";
+const MINIMAP_NODE_STROKE_COLOR_VAR = "--color-border-strong";
 
 const EDGE_LABEL_MAP: Record<string, string> = {
   on_success: "success",
@@ -39,6 +43,42 @@ const EDGE_LABEL_MAP: Record<string, string> = {
   route_false: "false",
   fork: "fork",
 };
+
+type MiniMapNodeKind = keyof typeof BADGE_COLORS;
+
+function readThemeColor(cssVariableName: string, fallbackVariableName: string): string {
+  if (typeof document === "undefined" || typeof getComputedStyle !== "function") {
+    return `var(${fallbackVariableName})`;
+  }
+
+  const rootStyles = getComputedStyle(document.documentElement);
+  return (
+    rootStyles.getPropertyValue(cssVariableName).trim() ||
+    rootStyles.getPropertyValue(fallbackVariableName).trim() ||
+    `var(${fallbackVariableName})`
+  );
+}
+
+function buildMiniMapNodeKindById(
+  compositionState: CompositionState | null,
+): Map<string, MiniMapNodeKind> {
+  const kindById = new Map<string, MiniMapNodeKind>();
+  if (!compositionState) {
+    return kindById;
+  }
+
+  if (compositionState.source) {
+    kindById.set("source", "source");
+  }
+  for (const node of compositionState.nodes) {
+    kindById.set(node.id, node.node_type);
+  }
+  for (const output of compositionState.outputs) {
+    kindById.set(output.name, "sink");
+  }
+
+  return kindById;
+}
 
 // ── Dagre layout ─────────────────────────────────────────────────────────────
 
@@ -83,8 +123,30 @@ export function GraphView() {
   const compositionState = useSessionStore((s) => s.compositionState);
   const selectedNodeId = useSessionStore((s) => s.selectedNodeId);
   const selectNode = useSessionStore((s) => s.selectNode);
+  const { resolvedTheme } = useTheme();
 
   const validationResult = useExecutionStore((s) => s.validationResult);
+
+  const miniMapNodeKindById = useMemo(
+    () => buildMiniMapNodeKindById(compositionState),
+    [compositionState],
+  );
+
+  const getMiniMapNodeColor = useCallback(
+    (node: Node) => {
+      const nodeKind = miniMapNodeKindById.get(node.id);
+      return readThemeColor(
+        nodeKind ? `--color-badge-${nodeKind}` : FALLBACK_MINIMAP_NODE_COLOR_VAR,
+        FALLBACK_MINIMAP_NODE_COLOR_VAR,
+      );
+    },
+    [miniMapNodeKindById, resolvedTheme],
+  );
+
+  const getMiniMapNodeStrokeColor = useCallback(
+    () => readThemeColor(MINIMAP_NODE_STROKE_COLOR_VAR, FALLBACK_MINIMAP_NODE_COLOR_VAR),
+    [resolvedTheme],
+  );
 
   // Node click handler — toggle selection
   const onNodeClick: NodeMouseHandler = useCallback(
@@ -509,14 +571,18 @@ export function GraphView() {
         elementsSelectable={true}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        colorMode={resolvedTheme}
         fitView
         fitViewOptions={{ padding: 0.15, maxZoom: 1.5, minZoom: 0.3 }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background />
+        <Background gap={16} size={1} color="var(--color-border)" />
         <Controls showInteractive={false} />
         {nodes.length > 5 && (
           <MiniMap
+            bgColor="var(--color-surface)"
+            nodeColor={getMiniMapNodeColor}
+            nodeStrokeColor={getMiniMapNodeStrokeColor}
             nodeStrokeWidth={3}
             zoomable
             pannable

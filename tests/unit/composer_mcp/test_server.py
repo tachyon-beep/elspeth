@@ -63,7 +63,7 @@ def _invalid_contract_state() -> CompositionState:
             OutputSpec(
                 name="main",
                 plugin="csv",
-                options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                options={"path": "outputs/out.csv", "schema": {"mode": "observed"}, "collision_policy": "auto_increment"},
                 on_write_failure="discard",
             ),
         ),
@@ -86,7 +86,7 @@ def _valid_state_with_no_edge_contracts() -> CompositionState:
             OutputSpec(
                 name="main",
                 plugin="csv",
-                options={"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                options={"path": "outputs/out.csv", "schema": {"mode": "observed"}, "collision_policy": "auto_increment"},
                 on_write_failure="discard",
             ),
         ),
@@ -131,6 +131,7 @@ def _connection_valid_field_mapper_state_without_edges() -> CompositionState:
                 options={
                     "path": "outputs/out.csv",
                     "schema": {"mode": "observed", "required_fields": ["body"]},
+                    "collision_policy": "auto_increment",
                 },
                 on_write_failure="discard",
             ),
@@ -228,6 +229,108 @@ class TestDispatchTool:
         assert result["success"] is True
         assert result["state"]["source"]["plugin"] == "csv"
 
+    def test_set_output_requires_explicit_collision_policy(self, scratch_dir: Path) -> None:
+        result = _dispatch_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            _empty_state(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert "collision_policy" in result["error"]
+        assert result["state"] == _empty_state().to_dict()
+
+    def test_set_output_accepts_explicit_collision_policy(self, scratch_dir: Path) -> None:
+        result = _dispatch_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {
+                    "path": "outputs/out.csv",
+                    "schema": {"mode": "observed"},
+                    "collision_policy": "auto_increment",
+                },
+                "on_write_failure": "discard",
+            },
+            _empty_state(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is True
+        assert result["state"]["outputs"][0]["options"]["collision_policy"] == "auto_increment"
+
+    def test_patch_output_options_cannot_remove_collision_policy(self, scratch_dir: Path) -> None:
+        state = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={
+                        "path": "outputs/out.csv",
+                        "schema": {"mode": "observed"},
+                        "collision_policy": "auto_increment",
+                    },
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+        result = _dispatch_tool(
+            "patch_output_options",
+            {"sink_name": "main", "patch": {"collision_policy": None}},
+            state,
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert "collision_policy" in result["error"]
+        assert result["state"] == state.to_dict()
+
+    def test_set_pipeline_requires_explicit_output_collision_policy(self, scratch_dir: Path) -> None:
+        result = _dispatch_tool(
+            "set_pipeline",
+            {
+                "source": {
+                    "plugin": "csv",
+                    "on_success": "main",
+                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    "on_validation_failure": "discard",
+                },
+                "nodes": [],
+                "edges": [],
+                "outputs": [
+                    {
+                        "sink_name": "main",
+                        "plugin": "json",
+                        "options": {"path": "outputs/out.json", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+            },
+            _empty_state(),
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert "Output 'main'" in result["error"]
+        assert "collision_policy" in result["error"]
+
     def test_new_session_returns_session_id(self, scratch_dir: Path) -> None:
         result = _dispatch_tool(
             "new_session",
@@ -307,6 +410,39 @@ class TestDispatchTool:
         )
         assert result["success"] is True
         assert isinstance(result["data"], str)
+
+    def test_generate_yaml_rejects_state_missing_file_sink_collision_policy(self, scratch_dir: Path) -> None:
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="main",
+                options={"path": "/data/in.csv", "schema": {"mode": "observed"}},
+                on_validation_failure="discard",
+            ),
+            nodes=(),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="main",
+                    plugin="json",
+                    options={"path": "outputs/out.json", "schema": {"mode": "observed"}},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+
+        result = _dispatch_tool(
+            "generate_yaml",
+            {},
+            state,
+            _mock_catalog(),
+            scratch_dir,
+        )
+
+        assert result["success"] is False
+        assert "collision_policy" in result["error"]
 
     def test_generate_yaml_rejects_invalid_contract_state(self, scratch_dir: Path) -> None:
         result = _dispatch_tool(

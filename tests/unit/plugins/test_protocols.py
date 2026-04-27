@@ -37,7 +37,7 @@ class TestSourceProtocol:
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
             on_success = "output"
-            declared_guaranteed_fields = frozenset()
+            declared_guaranteed_fields: frozenset[str] = frozenset()
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -114,7 +114,7 @@ class TestSourceProtocol:
             plugin_version = "1.0.0"
             _on_validation_failure = "discard"
             on_success = "output"
-            declared_guaranteed_fields = frozenset()
+            declared_guaranteed_fields: frozenset[str] = frozenset()
 
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
@@ -194,6 +194,9 @@ class TestTransformProtocol:
                     ),
                     success_reason={"action": "test"},
                 )
+
+            def effective_static_contract(self) -> frozenset[str]:
+                return frozenset()
 
             def close(self) -> None:
                 pass

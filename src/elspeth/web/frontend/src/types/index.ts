@@ -461,6 +461,8 @@ export interface ApiError {
   status: number;
   detail: string;
   error_type?: string;
+  provider_detail?: string;
+  provider_status_code?: number;
   validation_errors?: ValidationError[];
 }
 

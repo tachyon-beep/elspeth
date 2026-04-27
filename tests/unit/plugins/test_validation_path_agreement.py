@@ -92,6 +92,17 @@ _TRANSFORM_REJECTION_CASES = [
         "item_index.*conflicts",
         id="json_explode-output-index-collision",
     ),
+    # ── line_explode ──────────────────────────────────────────────────────
+    pytest.param(
+        "line_explode",
+        {
+            "schema": _make_observed_schema(),
+            "source_field": "content",
+            "output_field": "content",  # same as source_field
+        },
+        "output_field and source_field must differ",
+        id="line_explode-output-equals-source",
+    ),
     # ── truncate ──────────────────────────────────────────────────────────
     pytest.param(
         "truncate",

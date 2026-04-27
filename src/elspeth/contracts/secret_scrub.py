@@ -40,6 +40,7 @@ _REDACTED = "<redacted-secret>"
 #    _credentials_passes_through``.
 _PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"AKIA[0-9A-Z]{16}"),  # AWS access key
+    re.compile(r"sk-or-v1-[A-Za-z0-9_-]{20,}"),  # OpenRouter API key
     re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI / generic "sk-" key
     re.compile(r"xox[abpr]-[A-Za-z0-9-]{10,}"),  # Slack token
     re.compile(r"ghp_[A-Za-z0-9]{36,}"),  # GitHub PAT

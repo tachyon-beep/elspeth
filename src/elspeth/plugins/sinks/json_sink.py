@@ -17,12 +17,13 @@ from pydantic import model_validator
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
 from elspeth.contracts.diversion import SinkWriteResult
+from elspeth.contracts.schema import SchemaConfig
 
 if TYPE_CHECKING:
     from elspeth.contracts.sink import OutputValidationResult
 from elspeth.contracts.contexts import SinkContext
 from elspeth.plugins.infrastructure.base import BaseSink
-from elspeth.plugins.infrastructure.config_base import SinkPathConfig
+from elspeth.plugins.infrastructure.config_base import OutputCollisionPolicy, SinkPathConfig
 from elspeth.plugins.infrastructure.display_headers import (
     apply_display_headers,
     get_effective_display_headers,
@@ -30,6 +31,11 @@ from elspeth.plugins.infrastructure.display_headers import (
     resolve_contract_from_context_if_needed,
     resolve_display_headers_if_needed,
     set_resume_field_resolution,
+)
+from elspeth.plugins.infrastructure.output_paths import (
+    resolve_output_collision_path,
+    should_create_exclusively,
+    validate_output_collision_policy_mode,
 )
 from elspeth.plugins.infrastructure.schema_factory import create_schema_from_config
 
@@ -58,6 +64,11 @@ class JSONSinkConfig(SinkPathConfig):
         if fmt == "json" and self.mode == "append":
             raise ValueError("JSONSink format='json' does not support mode='append'. Use format='jsonl' for append/resume output.")
 
+        validate_output_collision_policy_mode(
+            plugin_name="JSONSink",
+            mode=self.mode,
+            collision_policy=self.collision_policy,
+        )
         return self
 
 
@@ -81,7 +92,7 @@ class JSONSink(BaseSink):
 
     name = "json"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:4d9c8d1be645c1a3"
+    source_file_hash: str | None = "sha256:cd491a54ae1a7a03"
     config_model = JSONSinkConfig
     # determinism inherited from BaseSink (IO_WRITE)
 
@@ -90,6 +101,9 @@ class JSONSink(BaseSink):
     # JSON array format rewrites the entire file on each write (seek(0) + truncate),
     # so it cannot append to existing output. JSONL writes line-by-line and can
     # append to existing files.
+    _format: Literal["json", "jsonl"]
+    _schema_config: SchemaConfig
+    _collision_policy: OutputCollisionPolicy | None
 
     def configure_for_resume(self) -> None:
         """Configure JSON sink for resume mode.
@@ -107,6 +121,7 @@ class JSONSink(BaseSink):
                 f"Use format='jsonl' for resumable JSON output."
             )
         self._mode = "append"
+        self._collision_policy = "append_or_create"
 
     def validate_output_target(self) -> "OutputValidationResult":
         """Validate existing JSONL file structure against configured schema.
@@ -205,8 +220,14 @@ class JSONSink(BaseSink):
         cfg = JSONSinkConfig.from_dict(config, plugin_name=self.name)
 
         self._path = cfg.resolved_path()
+        self._requested_path = self._path
         self._encoding = cfg.encoding
         self._indent = cfg.indent
+        self._mode = cfg.mode
+        self._collision_policy = cfg.collision_policy
+        self._write_target_claimed = False
+        if self._mode != "append":
+            self._path = resolve_output_collision_path(self._requested_path, self._collision_policy)
 
         # Display header state (shared module handles all modes)
         init_display_headers(self, cfg.headers_mode, cfg.headers_mapping)
@@ -216,7 +237,6 @@ class JSONSink(BaseSink):
         if fmt is None:
             fmt = "jsonl" if self._path.suffix == ".jsonl" else "json"
         self._format = fmt
-        self._mode = cfg.mode
 
         # Set resume capability based on format
         # JSONL can append; JSON array rewrites entirely and cannot resume
@@ -242,6 +262,13 @@ class JSONSink(BaseSink):
 
         self._file: IO[str] | None = None
         self._rows: list[dict[str, Any]] = []  # Buffer for json array format
+
+    def _claim_write_target(self) -> None:
+        """Apply write-mode collision policy before the first filesystem mutation."""
+        if self._write_target_claimed or self._mode == "append":
+            return
+        self._path = resolve_output_collision_path(self._requested_path, self._collision_policy)
+        self._write_target_claimed = True
 
     def write(self, rows: list[dict[str, Any]], ctx: SinkContext) -> SinkWriteResult:
         """Write a batch of rows to the JSON file.
@@ -333,7 +360,11 @@ class JSONSink(BaseSink):
         in append mode where pre-existing content must be preserved.
         """
         if self._file is None:
+            if self._mode != "append":
+                self._claim_write_target()
             file_mode = "a" if self._mode == "append" else "w"
+            if self._mode != "append" and should_create_exclusively(self._collision_policy):
+                file_mode = "x"
 
             # Validate schema compatibility before first append to existing file.
             # Without this, append mode can write rows with incompatible schemas
@@ -374,6 +405,7 @@ class JSONSink(BaseSink):
         if self._mode == "append":
             raise ValueError("JSONSink format='json' does not support mode='append'. Use format='jsonl' for append/resume output.")
 
+        self._claim_write_target()
         temp_path = self._path.with_suffix(self._path.suffix + ".tmp")
         try:
             with open(temp_path, "w", encoding=self._encoding) as f:

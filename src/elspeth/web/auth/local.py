@@ -6,7 +6,6 @@ and validation. The SQLite database is created at db_path on first use.
 
 from __future__ import annotations
 
-import asyncio
 import sqlite3
 import time
 from pathlib import Path
@@ -15,6 +14,7 @@ import bcrypt
 import jwt
 from jwt.exceptions import PyJWTError
 
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.models import AuthenticationError, UserIdentity, UserProfile
 
 
@@ -92,12 +92,12 @@ class LocalAuthProvider:
         Uses constant-time comparison to prevent username enumeration
         via timing side-channel.
 
-        Blocking bcrypt/sqlite work is offloaded via asyncio.to_thread().
+        Blocking bcrypt/sqlite work is offloaded to a bounded worker.
         """
-        return await asyncio.to_thread(self._login_sync, username, password)
+        return await run_sync_in_worker(self._login_sync, username, password)
 
     def _login_sync(self, username: str, password: str) -> str:
-        """Synchronous login — called via asyncio.to_thread."""
+        """Synchronous login — called via run_sync_in_worker."""
         # Early rejection for empty credentials. This exits before the
         # bcrypt path, so it is faster than a real login attempt. This is
         # acceptable: empty credentials are syntactically invalid (not a
@@ -140,12 +140,12 @@ class LocalAuthProvider:
         credentials — the caller (get_current_user middleware)
         has already validated the existing token.
 
-        Blocking sqlite work is offloaded via asyncio.to_thread().
+        Blocking sqlite work is offloaded to a bounded worker.
         """
-        return await asyncio.to_thread(self._refresh_sync, user_id, username, original_iat)
+        return await run_sync_in_worker(self._refresh_sync, user_id, username, original_iat)
 
     def _refresh_sync(self, user_id: str, username: str, original_iat: int | None = None) -> str:
-        """Synchronous refresh — called via asyncio.to_thread."""
+        """Synchronous refresh — called via run_sync_in_worker."""
         now = int(time.time())
 
         # Max refresh chain: reject if the original token was issued too
@@ -191,7 +191,7 @@ class LocalAuthProvider:
         user_id = payload["sub"]
 
         # Verify user still exists — deleted users must not retain access
-        exists = await asyncio.to_thread(self._user_exists, user_id)
+        exists = await run_sync_in_worker(self._user_exists, user_id)
         if not exists:
             raise AuthenticationError("Invalid token")
 
@@ -210,7 +210,7 @@ class LocalAuthProvider:
             return row is not None
 
     def _query_user(self, user_id: str) -> tuple[str, str | None] | None:
-        """Synchronous DB lookup — called via asyncio.to_thread."""
+        """Synchronous DB lookup — called via run_sync_in_worker."""
         with self._get_conn() as conn:
             row: tuple[str, str | None] | None = conn.execute(
                 "SELECT display_name, email FROM users WHERE user_id = ?",
@@ -226,7 +226,7 @@ class LocalAuthProvider:
         """
         identity = await self.authenticate(token)
 
-        row = await asyncio.to_thread(self._query_user, identity.user_id)
+        row = await run_sync_in_worker(self._query_user, identity.user_id)
 
         if row is None:
             raise AuthenticationError("User not found")

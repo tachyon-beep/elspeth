@@ -240,8 +240,8 @@ class BaseTransform(ABC):
         self.config = config
         # Per-instance, not per-class — class-level defaults would be shared across instances.
         self._on_start_called: bool = False
-        self._output_schema_config: SchemaConfig | None = None
         self.declared_input_fields = frozenset()
+        self._output_schema_config: SchemaConfig | None = None
 
     def _initialize_declared_input_fields(self, validated_config: TransformDataConfig) -> None:
         """Populate ADR-013's runtime input-field declaration from config.
@@ -265,13 +265,15 @@ class BaseTransform(ABC):
     def effective_static_contract(self) -> frozenset[str]:
         """Return the transform's public static output guarantee surface.
 
-        Runtime declaration checks record this value in audit evidence. A
-        missing output schema config is therefore a framework bug: returning
-        an empty set would falsely state that the transform made no static
-        guarantees.
+        Runtime declaration checks record this value in audit evidence. Missing
+        output schema config is acceptable only for shape-preserving transforms
+        that declare no added fields. A field-adding transform without a schema
+        config would falsely state its static guarantees and must crash.
         """
         output_schema_config = self._output_schema_config
         if output_schema_config is None:
+            if not self.declared_output_fields:
+                return frozenset()
             raise FrameworkBugError(
                 f"Cannot derive effective static contract for transform {self.name!r}: "
                 "_output_schema_config is missing. Concrete transforms must "

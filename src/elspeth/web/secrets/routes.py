@@ -13,10 +13,9 @@ POST   /api/secrets/{name}/validate -- check whether a secret ref is resolvable
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.config import WebSettings
@@ -55,7 +54,7 @@ def create_secrets_router() -> APIRouter:
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        items = await asyncio.to_thread(service.list_refs, user.user_id, auth_provider_type=settings.auth_provider)
+        items = await run_sync_in_worker(service.list_refs, user.user_id, auth_provider_type=settings.auth_provider)
         return [
             SecretInventoryResponse(
                 name=item.name,
@@ -91,7 +90,7 @@ def create_secrets_router() -> APIRouter:
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        result = await asyncio.to_thread(
+        result = await run_sync_in_worker(
             service.set_user_secret,
             user.user_id,
             body.name,
@@ -115,7 +114,7 @@ def create_secrets_router() -> APIRouter:
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        deleted = await asyncio.to_thread(
+        deleted = await run_sync_in_worker(
             service.delete_user_secret,
             user.user_id,
             name,
@@ -150,7 +149,7 @@ def create_secrets_router() -> APIRouter:
         """
         service = _get_service(request)
         settings = _get_settings(request)
-        available = await asyncio.to_thread(
+        available = await run_sync_in_worker(
             service.check_user_ref_resolvable,
             user.user_id,
             name,

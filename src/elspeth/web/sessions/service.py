@@ -6,9 +6,7 @@ thread pool executor to avoid blocking the async event loop.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
-import functools
 import shutil
 import uuid
 from collections.abc import Mapping, Sequence
@@ -22,6 +20,7 @@ from sqlalchemy.exc import IntegrityError
 
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.sessions.models import (
     chat_messages_table,
     composition_states_table,
@@ -80,8 +79,8 @@ def _assert_state_in_session(
 class SessionServiceImpl:
     """Concrete session service backed by SQLAlchemy Core.
 
-    All public methods are async. Database I/O runs in the default thread
-    pool executor via _run_sync() so the async event loop is never blocked.
+    All public methods are async. Database I/O runs through _run_sync() in a
+    bounded worker thread so the async event loop is never blocked.
     """
 
     def __init__(self, engine: Engine, data_dir: Path | None = None) -> None:
@@ -90,11 +89,7 @@ class SessionServiceImpl:
 
     async def _run_sync(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Run a synchronous callable in the thread pool executor."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            functools.partial(func, *args, **kwargs),
-        )
+        return await run_sync_in_worker(func, *args, **kwargs)
 
     def _now(self) -> datetime:
         return datetime.now(UTC)

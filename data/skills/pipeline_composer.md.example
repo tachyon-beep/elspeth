@@ -43,3 +43,8 @@ All secrets follow the pattern `SERVICE_API_KEY` (e.g., `OPENROUTER_API_KEY`,
 - Default output format: JSON with indent 2
 - Default LLM temperature: 0.0
 - Default error handling: route to quarantine sink
+- Do not set an organisation-wide default `collision_policy`. For every generated
+  CSV/JSON sink, choose it deliberately from the user's intent:
+  - `fail_if_exists` when the requested filename is a deliberate contract
+  - `auto_increment` for exploratory/repeated runs
+  - `append_or_create` only when using `mode: append`

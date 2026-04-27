@@ -175,19 +175,19 @@ allow_hits:
   reason: os.environ.get() for optional env var at trust boundary — ELSPETH_ALLOW_RAW_SECRETS is genuinely optional with empty-string default
   safety: Empty string default is meaning-preserving (feature disabled); no data fabrication
   expires: '2026-05-02'
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=40c716064e91a347
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:validate_output_target:fp=4f1ac56ede069b6c
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=6779eee64dfc2fcd
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_open_file:fp=0146cfe5e62af33f
   owner: feature
   reason: Intentional fallback - reverse mapping may not contain all fields (transform-added)
   safety: Falls back to original field name - correct behavior for fields not in source
-- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=4ab22bd7d787d5c4
+- key: plugins/sinks/csv_sink.py:R1:CSVSink:_get_field_names_and_display:fp=2c0175dc21d2253c
   owner: feature
   reason: Intentional fallback - display mapping may not contain all fields (transform-added)
   safety: Falls back to normalized field name - correct behavior for fields not in source
-- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=5c2c35d55b80aa31
+- key: plugins/sinks/json_sink.py:R1:JSONSink:validate_output_target:fp=dfe658cafe4cfb1e
   owner: feature
   reason: Display header mapping - fields not in map keep original name (transform-added fields)
   safety: Intentional fallback to original field name, not bug hiding

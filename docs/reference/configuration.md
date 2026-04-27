@@ -236,6 +236,7 @@ sinks:
     on_write_failure: discard
     options:
       path: output/results.csv
+      collision_policy: fail_if_exists
       schema:
         mode: observed
 
@@ -244,6 +245,7 @@ sinks:
     on_write_failure: quarantine
     options:
       path: output/flagged.csv
+      collision_policy: fail_if_exists
       schema:
         mode: observed
 
@@ -252,6 +254,7 @@ sinks:
     on_write_failure: discard
     options:
       path: output/quarantine.csv
+      collision_policy: fail_if_exists
       schema:
         mode: observed
 ```
@@ -261,6 +264,14 @@ sinks:
 | `plugin` | string | **Yes** | Plugin name: `csv`, `json`, `database`, `azure_blob`, `dataverse`, `chroma_sink` |
 | `on_write_failure` | string | **Yes** | Per-row write failure handling: `discard` to drop with audit record, or a sink name to divert to a failsink |
 | `options` | object | No | Plugin-specific configuration |
+
+For local file sinks (`csv`, `json`), `options.collision_policy` can make output-path collisions explicit:
+
+| Policy | Use with | Behavior |
+|--------|----------|----------|
+| `fail_if_exists` | `mode: write` | Refuse to write if the requested output path already exists |
+| `auto_increment` | `mode: write` | Pick a free sibling path such as `results-1.json` |
+| `append_or_create` | `mode: append` | Append to an existing output or create it if missing |
 
 ### Available Sink Plugins
 

@@ -444,6 +444,10 @@ summary:focus-visible {
     transition: none;
   }
 
+  .react-flow__edge.animated path {
+    animation: none;
+  }
+
 }
 
 /* ---------------------------------------------------------------------------
@@ -2077,6 +2081,44 @@ summary:focus-visible {
 /* ---------------------------------------------------------------------------
    Graph View
    --------------------------------------------------------------------------- */
+:root .react-flow.react-flow {
+  --xy-background-color-default: var(--color-bg);
+  --xy-background-pattern-dots-color-default: var(--color-border-strong);
+  --xy-background-pattern-lines-color-default: var(--color-border-strong);
+  --xy-background-pattern-cross-color-default: var(--color-border-strong);
+  --xy-controls-button-background-color-default: var(--color-surface-elevated);
+  --xy-controls-button-background-color-hover-default: var(--color-surface-raised);
+  --xy-controls-button-color-default: var(--color-text);
+  --xy-controls-button-color-hover-default: var(--color-text);
+  --xy-controls-button-border-color-default: var(--color-border);
+  --xy-controls-box-shadow-default: 0 0 0 1px var(--color-border), 0 8px 24px rgba(0, 0, 0, 0.18);
+  --xy-minimap-background-color-default: var(--color-surface);
+  --xy-minimap-mask-background-color-default: rgba(15, 45, 53, 0.55);
+  --xy-minimap-mask-stroke-color-default: var(--color-border-strong);
+  --xy-minimap-node-background-color-default: var(--color-text-muted);
+  --xy-minimap-node-stroke-color-default: var(--color-border-strong);
+  --xy-edge-stroke-default: var(--color-text-muted);
+  --xy-edge-stroke-selected-default: var(--color-focus-ring);
+  --xy-edge-label-background-color-default: var(--color-surface);
+  --xy-edge-label-color-default: var(--color-text);
+  --xy-handle-background-color-default: var(--color-accent);
+  --xy-handle-border-color-default: var(--color-surface);
+  --xy-selection-background-color-default: rgba(195, 144, 249, 0.10);
+  --xy-selection-border-default: 1px dashed var(--color-focus-ring);
+  --xy-attribution-background-color-default: transparent;
+}
+
+[data-theme="light"] .react-flow.react-flow {
+  --xy-minimap-mask-background-color-default: rgba(15, 45, 53, 0.12);
+  --xy-selection-background-color-default: rgba(138, 90, 192, 0.10);
+  --xy-controls-box-shadow-default: 0 0 0 1px var(--color-border), 0 8px 24px rgba(15, 45, 53, 0.10);
+}
+
+.react-flow__controls-button:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
 .graph-node-content {
   display: flex;
   flex-direction: column;

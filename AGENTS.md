@@ -29,6 +29,95 @@ You are starting this session with zero context. No memory of prior conversation
 
 ---
 
+## Staging Site And Web Restart
+
+The staging web UI is `https://elspeth.foundryside.dev`. This is **not** the
+generic Docker/VM image flow in `scripts/deploy-vm.sh`; it is a source-checkout
+systemd/Caddy deployment on this machine:
+
+- Checkout served by staging: `/home/john/elspeth`
+- systemd unit source: `deploy/elspeth-web.service` (installed as
+  `elspeth-web.service`)
+- Environment file: `deploy/elspeth-web.env`
+- Caddy config: `deploy/Caddyfile`
+- Reverse proxy: `elspeth.foundryside.dev` -> `unix//run/elspeth/uvicorn.sock`
+- Server entrypoint: `/home/john/elspeth/.venv/bin/uvicorn
+  elspeth.web.app:create_app --factory --uds /run/elspeth/uvicorn.sock`
+- FastAPI serves the SPA from `src/elspeth/web/frontend/dist/` after all API and
+  WebSocket routes.
+
+`deploy/elspeth-web.env` is live operational config and may be untracked/ignored;
+do not trust `git status` to show edits to it. Inspect it directly before and
+after changing staging settings, avoid printing secret values, and restart
+`elspeth-web.service` before expecting the running process to pick up changes.
+`ELSPETH_WEB__COMPOSER_EXPOSE_PROVIDER_ERRORS=true` is an opt-in staging/debug
+switch that surfaces scrubbed LiteLLM provider detail in composer 502 responses;
+leave it off unless actively triaging provider failures.
+
+For frontend-only staging deploys, run the frontend verification/build from
+`src/elspeth/web/frontend`:
+
+```bash
+npm run test
+npm run build
+```
+
+`npm run build` refreshes the static `dist/` assets that the running FastAPI app
+serves from disk. A service restart is normally **not required** for static
+frontend-only changes, but still verify the rebuilt asset names in
+`src/elspeth/web/frontend/dist/index.html` and live-check the domain when network
+access permits. Backend Python changes, dependency changes, and changes to
+`deploy/elspeth-web.env` or systemd/Caddy config require restarting
+`elspeth-web.service`.
+
+Useful live checks when the sandbox allows host networking/systemd access:
+
+```bash
+curl --unix-socket /run/elspeth/uvicorn.sock -fsS http://localhost/api/health
+curl -fsS https://elspeth.foundryside.dev/api/health
+systemctl status elspeth-web.service --no-pager --lines=40
+journalctl -u elspeth-web.service --no-pager -n 80
+```
+
+Codex sandbox caveat: the sandbox may block both systemd bus access and `sudo`.
+Observed failures include `Failed to connect to bus: Operation not permitted` and
+`sudo: The "no new privileges" flag is set`. If those appear, sudoers is not the
+only problem; do **not** claim the live service was restarted or live-verified.
+Report the exact blocker and the local artifact verification instead.
+
+There is an installed sudoers drop-in at `/etc/sudoers.d/elspeth-web-deploy` on
+the staging host. If restart access is not working, check it from a normal host
+shell with `sudo -l` or read it directly as root; the Codex sandbox may not have
+permission to inspect that file. As of the staging-debug session that added this
+section, no matching restart wrapper was visible under `/usr/local/sbin`,
+`/usr/local/bin`, `/opt`, `/home/john/bin`, or `/home/john/.local/bin` from the
+sandbox, so do not invent a command path without verifying it on the host.
+
+Safe restart delegation: do **not** put a repo-writable script under
+`/home/john/elspeth` directly into sudoers. That would let any edit to the repo
+change what runs as root. If sudo access is available in the host environment,
+prefer a small root-owned wrapper outside the repo, for example
+`/usr/local/sbin/restart-elspeth-web`, and allow only that exact command:
+
+```sudoers
+john ALL=(root) NOPASSWD: /usr/local/sbin/restart-elspeth-web
+```
+
+The wrapper should be owned by `root:root`, mode `0755`, and should run only the
+bounded restart/status sequence for `elspeth-web.service`. Codex should invoke it
+as:
+
+```bash
+sudo -n /usr/local/sbin/restart-elspeth-web
+```
+
+If that still fails with `no new privileges`, run Codex with a host execution
+mode that permits `sudo`/systemd, or use a host-side trigger such as a root-owned
+systemd path unit. Sudoers alone cannot override the sandbox's
+`no_new_privileges` setting.
+
+---
+
 ## Mandatory Coding Standards — Load Before Writing Code
 
 **CRITICAL:** The following skills contain ELSPETH's core coding standards. You MUST invoke these skills (via the Skill tool) before performing any of the activities listed below. CLAUDE.md contains summary rules, but the skills contain the detailed code examples, decision tables, and boundary rules that prevent violations.

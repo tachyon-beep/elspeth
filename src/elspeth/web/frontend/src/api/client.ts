@@ -80,6 +80,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
     // HTTPException format.
     let detail = response.statusText;
     let errorType: string | undefined;
+    let providerDetail: string | undefined;
+    let providerStatusCode: number | undefined;
     let validationErrors: ApiError["validation_errors"];
     try {
       const body = await response.json();
@@ -101,6 +103,23 @@ async function parseResponse<T>(response: Response): Promise<T> {
         detail = body.detail;
       }
 
+      providerDetail =
+        typeof body.provider_detail === "string"
+          ? body.provider_detail
+          : typeof nestedDetail?.provider_detail === "string"
+            ? nestedDetail.provider_detail
+            : undefined;
+
+      const rawProviderStatusCode =
+        typeof body.provider_status_code === "number"
+          ? body.provider_status_code
+          : typeof nestedDetail?.provider_status_code === "number"
+            ? nestedDetail.provider_status_code
+            : undefined;
+      providerStatusCode = Number.isInteger(rawProviderStatusCode)
+        ? rawProviderStatusCode
+        : undefined;
+
       validationErrors =
         body.validation_errors ?? nestedDetail?.validation_errors;
     } catch {
@@ -111,6 +130,8 @@ async function parseResponse<T>(response: Response): Promise<T> {
       status: response.status,
       detail,
       error_type: errorType,
+      provider_detail: providerDetail,
+      provider_status_code: providerStatusCode,
       validation_errors: validationErrors,
     };
     throw error;

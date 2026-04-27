@@ -9,11 +9,10 @@ GET /me returns the full UserProfile for any auth provider.
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.local import LocalAuthProvider
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import AuthenticationError, UserIdentity
@@ -144,7 +143,7 @@ def create_auth_router() -> APIRouter:
 
         provider: LocalAuthProvider = request.app.state.auth_provider
         try:
-            await asyncio.to_thread(
+            await run_sync_in_worker(
                 provider.create_user,
                 body.username,
                 body.password,

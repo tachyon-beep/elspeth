@@ -29,7 +29,7 @@ from elspeth.core.dag.models import GraphValidationError
 from elspeth.core.secrets import resolve_secret_refs
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
-from elspeth.web.composer.state import CompositionState
+from elspeth.web.composer.state import CompositionState, validate_transform_framing_contracts
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.protocol import YamlGenerator
 from elspeth.web.execution.schemas import (
@@ -41,12 +41,21 @@ from elspeth.web.execution.schemas import (
 # ── Check names (ordered) ─────────────────────────────────────────────
 _CHECK_PATH_ALLOWLIST = "path_allowlist"
 _CHECK_SECRET_REFS = "secret_refs"
+_CHECK_TRANSFORM_FRAMING = "transform_framing"
 _CHECK_SETTINGS = "settings_load"
 _CHECK_PLUGINS = "plugin_instantiation"
 _CHECK_GRAPH = "graph_structure"
 _CHECK_SCHEMA = "schema_compatibility"
 
-_ALL_CHECKS = [_CHECK_PATH_ALLOWLIST, _CHECK_SECRET_REFS, _CHECK_SETTINGS, _CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA]
+_ALL_CHECKS = [
+    _CHECK_PATH_ALLOWLIST,
+    _CHECK_SECRET_REFS,
+    _CHECK_TRANSFORM_FRAMING,
+    _CHECK_SETTINGS,
+    _CHECK_PLUGINS,
+    _CHECK_GRAPH,
+    _CHECK_SCHEMA,
+]
 
 
 def _infer_component_type_from_plugin_error(
@@ -261,6 +270,35 @@ def validate_pipeline(
                 detail="No secret service — check skipped",
             )
         )
+
+    framing_errors = validate_transform_framing_contracts(state.nodes)
+    if framing_errors:
+        checks.append(
+            ValidationCheck(
+                name=_CHECK_TRANSFORM_FRAMING,
+                passed=False,
+                detail="Transform framing contract failed",
+            )
+        )
+        errors.extend(
+            ValidationError(
+                component_id=entry.component.removeprefix("node:"),
+                component_type="transform",
+                message=entry.message,
+                suggestion="Set web_scrape text_separator to '\\n' or use format: markdown before line_explode.",
+            )
+            for entry in framing_errors
+        )
+        checks.extend(_skipped_checks(_CHECK_TRANSFORM_FRAMING))
+        return ValidationResult(is_valid=False, checks=checks, errors=errors)
+
+    checks.append(
+        ValidationCheck(
+            name=_CHECK_TRANSFORM_FRAMING,
+            passed=True,
+            detail="Transform framing contracts satisfied",
+        )
+    )
 
     # Step 2: Generate YAML
     pipeline_yaml = yaml_generator.generate_yaml(state)

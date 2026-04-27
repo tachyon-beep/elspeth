@@ -16,18 +16,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
-import litellm
 import structlog
-from litellm.exceptions import APIError as LiteLLMAPIError
-from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
 from sqlalchemy import Engine, update
 from sqlalchemy.exc import SQLAlchemyError
 
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressSink
 from elspeth.web.composer.prompts import build_messages, build_run_diagnostics_messages
@@ -55,6 +54,13 @@ _ARRAY_ITEM_SEGMENT = "[]"
 _LLM_API_MAX_ATTEMPTS = 3
 _LLM_API_RETRY_BASE_DELAY_SECONDS = 1.0
 type RequiredPath = tuple[str, ...]
+
+
+async def _litellm_acompletion(**kwargs: Any) -> Any:
+    """Call LiteLLM lazily so app startup never imports provider machinery."""
+    import litellm
+
+    return await litellm.acompletion(**kwargs)
 
 
 def _collect_required_paths(
@@ -154,6 +160,15 @@ class ComposerAvailability:
     missing_keys: tuple[str, ...] = ()
 
 
+_PROVIDER_REQUIRED_ENV_KEYS: dict[str, tuple[str, ...]] = {
+    "anthropic": ("ANTHROPIC_API_KEY",),
+    "azure": ("AZURE_API_KEY",),
+    "azure_ai": ("AZURE_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
+}
+
+
 @dataclass(frozen=True, slots=True)
 class _CachedDiscoveryPayload:
     """State-independent portion of a cacheable discovery tool result."""
@@ -219,6 +234,8 @@ class ComposerServiceImpl:
             raise ComposerServiceError(f"Failed to load deployment skill ({type(exc).__name__})") from exc
 
         try:
+            from litellm.exceptions import APIError as LiteLLMAPIError
+
             response = await asyncio.wait_for(
                 self._call_text_llm(messages),
                 timeout=self._timeout_seconds,
@@ -261,6 +278,8 @@ class ComposerServiceImpl:
             raise ComposerServiceError(self._availability.reason or "Composer is unavailable.")
 
         deadline = asyncio.get_event_loop().time() + self._timeout_seconds
+        from litellm.exceptions import APIError as LiteLLMAPIError
+
         try:
             return await self._compose_loop(message, messages, state, session_id, user_id, deadline, progress)
         except ComposerConvergenceError:
@@ -287,7 +306,7 @@ class ComposerServiceImpl:
             # migration: elspeth-23b0987938).
             if self._session_engine is not None and session_id is not None:
                 try:
-                    # Offload to the thread pool — _persist_crashed_session
+                    # Offload to a worker — _persist_crashed_session
                     # executes a synchronous SQLAlchemy ``Engine.begin()``
                     # + UPDATE, which would otherwise block the event
                     # loop for the duration of the DB round-trip,
@@ -295,10 +314,10 @@ class ComposerServiceImpl:
                     # and concurrent progress broadcasts. Symmetric with
                     # the execute_tool offload at the top of
                     # _compose_loop: every other sync DB path in this
-                    # file runs through asyncio.to_thread, and this
+                    # file runs through run_sync_in_worker, and this
                     # crash-path call was missed when it was hoisted
                     # out of the main loop.
-                    await asyncio.to_thread(self._persist_crashed_session, session_id)
+                    await run_sync_in_worker(self._persist_crashed_session, session_id)
                 except (SQLAlchemyError, OSError) as audit_failure:
                     # Audit-persistence is best-effort on the crash path —
                     # failure to persist MUST NOT mask the original plugin
@@ -562,11 +581,8 @@ class ComposerServiceImpl:
                     continue
 
                 await _emit_progress(progress, _tool_started_progress_event(tool_name))
-                # All tool calls are offloaded to the thread pool via
-                # asyncio.to_thread() to avoid blocking the event loop.
-                # to_thread (not run_in_executor) because it propagates
-                # contextvars into the worker thread automatically —
-                # OpenTelemetry span context follows tool execution.
+                # All tool calls are offloaded to a worker to avoid blocking
+                # the event loop.
                 # Blob and secret tools perform synchronous filesystem
                 # writes and SQLAlchemy transactions that would otherwise
                 # stall the single-process web server for all concurrent
@@ -595,7 +611,7 @@ class ComposerServiceImpl:
                 # a confident but wrong Tier-3 story, and the LLM's "retry"
                 # cannot correct a fault in our own code.
                 try:
-                    result = await asyncio.to_thread(
+                    result = await run_sync_in_worker(
                         execute_tool,
                         tool_name,
                         arguments,
@@ -895,10 +911,12 @@ class ComposerServiceImpl:
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
-    ) -> litellm.ModelResponse:
+    ) -> Any:
         """Call the LLM via LiteLLM. Separated for test mocking."""
+        from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+
         try:
-            response = await litellm.acompletion(
+            response = await _litellm_acompletion(
                 model=self._model,
                 messages=messages,
                 tools=tools,
@@ -915,10 +933,12 @@ class ComposerServiceImpl:
     async def _call_text_llm(
         self,
         messages: list[dict[str, str]],
-    ) -> litellm.ModelResponse:
+    ) -> Any:
         """Call the LLM for non-tool text generation."""
+        from litellm.exceptions import BadRequestError as LiteLLMBadRequestError
+
         try:
-            response = await litellm.acompletion(
+            response = await _litellm_acompletion(
                 model=self._model,
                 messages=messages,
             )
@@ -935,7 +955,7 @@ class ComposerServiceImpl:
         state: CompositionState,
         initial_version: int,
         deadline: float,
-    ) -> litellm.ModelResponse:
+    ) -> Any:
         """Call the LLM with a per-call timeout derived from the deadline.
 
         LLM calls are pure network I/O with no side effects, so they
@@ -943,6 +963,8 @@ class ComposerServiceImpl:
         already passed or the call exceeds the remaining budget, raise
         ComposerConvergenceError with the current partial state.
         """
+        from litellm.exceptions import APIError as LiteLLMAPIError
+
         attempt = 0
         while True:
             remaining = deadline - asyncio.get_event_loop().time()
@@ -979,38 +1001,41 @@ class ComposerServiceImpl:
         """Infer whether the configured model has the required env at boot.
 
         This is a configuration/readiness signal, not a network health check.
+        Keep it side-effect-free: LiteLLM provider probing has observable
+        startup side effects in web lifespans, while the actual composer call
+        path still validates provider requests through LiteLLM.
         """
-        try:
-            _, provider, _, _ = litellm.get_llm_provider(model=self._model)
-        except LiteLLMBadRequestError:
-            # Fallback: infer from "provider/model" prefix. Returns None for
-            # unprefixed names — ComposerAvailability.provider is str | None,
-            # and this is a boot-time diagnostic, not audit data.
-            provider = _infer_provider_from_model_name(self._model)
-
-        try:
-            env_status = litellm.validate_environment(model=self._model)
-        except LiteLLMBadRequestError as exc:
+        provider = _infer_provider_from_model_name(self._model) or _infer_provider_from_unprefixed_model_name(self._model)
+        if provider is None:
             return ComposerAvailability(
                 available=False,
                 model=self._model,
                 provider=provider,
-                reason=f"Unable to validate composer environment: {exc}",
+                reason=(
+                    f"Composer model {self._model} is unavailable: provider could not be inferred. "
+                    "Use a provider-prefixed model name or a recognized OpenAI/Anthropic model name."
+                ),
             )
 
-        missing_keys = tuple(sorted(set(env_status["missing_keys"])))
-        if env_status["keys_in_environment"]:
+        if provider not in _PROVIDER_REQUIRED_ENV_KEYS:
+            return ComposerAvailability(
+                available=False,
+                model=self._model,
+                provider=provider,
+                reason=f"Composer model {self._model} is unavailable: provider {provider!r} has no configured environment contract.",
+            )
+        required_keys = _PROVIDER_REQUIRED_ENV_KEYS[provider]
+
+        missing_keys = tuple(key for key in required_keys if key not in os.environ or not os.environ[key])
+        if not missing_keys:
             return ComposerAvailability(
                 available=True,
                 model=self._model,
                 provider=provider,
             )
 
-        if missing_keys:
-            missing = ", ".join(missing_keys)
-            reason = f"Composer model {self._model} is unavailable: missing {missing}."
-        else:
-            reason = f"Composer model {self._model} is unavailable: provider environment validation failed."
+        missing = ", ".join(missing_keys)
+        reason = f"Composer model {self._model} is unavailable: missing {missing}."
 
         return ComposerAvailability(
             available=False,
@@ -1026,6 +1051,16 @@ def _infer_provider_from_model_name(model: str) -> str | None:
     if "/" not in model:
         return None
     return model.split("/", 1)[0]
+
+
+def _infer_provider_from_unprefixed_model_name(model: str) -> str | None:
+    """Infer provider for common unprefixed model families."""
+    normalized = model.lower()
+    if normalized.startswith(("gpt-", "o1", "o3", "o4")):
+        return "openai"
+    if normalized.startswith("claude"):
+        return "anthropic"
+    return None
 
 
 async def _emit_progress(

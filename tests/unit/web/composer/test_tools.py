@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import MagicMock
 
 import pytest
@@ -1056,6 +1056,50 @@ class TestSetOutput:
         assert result.updated_state.outputs[0].plugin == "csv"
         assert result.updated_state.version == 2
         assert "main" in result.affected_nodes
+
+    def test_data_dir_file_sink_requires_collision_policy(self) -> None:
+        """Runnable web-composer file sinks must make output collision behavior explicit."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+
+        assert result.success is False
+        assert "collision_policy" in result.data["error"]
+
+    def test_data_dir_file_sink_accepts_explicit_collision_policy(self) -> None:
+        """The composer accepts file sinks once the LLM chooses the collision policy."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "set_output",
+            {
+                "sink_name": "main",
+                "plugin": "csv",
+                "options": {
+                    "path": "/data/outputs/out.csv",
+                    "schema": {"mode": "observed"},
+                    "collision_policy": "auto_increment",
+                },
+                "on_write_failure": "discard",
+            },
+            state,
+            catalog,
+            data_dir="/data",
+        )
+
+        assert result.success is True
+        assert result.updated_state.outputs[0].options["collision_policy"] == "auto_increment"
 
     def test_replaces_existing_output(self) -> None:
         state = _empty_state()
@@ -4443,7 +4487,13 @@ class TestPatchOutputPathSecurity:
         catalog = _mock_catalog()
         result = execute_tool(
             "patch_output_options",
-            {"sink_name": "main", "patch": {"path": "outputs/result.csv"}},
+            {
+                "sink_name": "main",
+                "patch": {
+                    "path": "outputs/result.csv",
+                    "collision_policy": "auto_increment",
+                },
+            },
             state,
             catalog,
             data_dir="/data",
@@ -4455,7 +4505,13 @@ class TestPatchOutputPathSecurity:
         catalog = _mock_catalog()
         result = execute_tool(
             "patch_output_options",
-            {"sink_name": "main", "patch": {"path": "/data/outputs/subdir/out.csv"}},
+            {
+                "sink_name": "main",
+                "patch": {
+                    "path": "/data/outputs/subdir/out.csv",
+                    "collision_policy": "fail_if_exists",
+                },
+            },
             state,
             catalog,
             data_dir="/data",
@@ -4547,7 +4603,7 @@ class TestSetPipeline:
 
         from elspeth.web.catalog.schemas import PluginSchemaInfo
 
-        def selective_schema(plugin_type: str, name: str) -> PluginSchemaInfo:
+        def selective_schema(plugin_type: Literal["source", "transform", "sink"], name: str) -> PluginSchemaInfo:
             if plugin_type == "transform" and name == "badplugin":
                 raise ValueError(f"Unknown plugin: {name}")
             return PluginSchemaInfo(name=name, plugin_type=plugin_type, description="", json_schema={})
@@ -4565,7 +4621,7 @@ class TestSetPipeline:
 
         from elspeth.web.catalog.schemas import PluginSchemaInfo
 
-        def selective_schema(plugin_type: str, name: str) -> PluginSchemaInfo:
+        def selective_schema(plugin_type: Literal["source", "transform", "sink"], name: str) -> PluginSchemaInfo:
             if plugin_type == "sink" and name == "badsink":
                 raise ValueError(f"Unknown plugin: {name}")
             return PluginSchemaInfo(name=name, plugin_type=plugin_type, description="", json_schema={})

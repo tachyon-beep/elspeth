@@ -12,12 +12,12 @@ from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from litellm.exceptions import APIError as LiteLLMAPIError
-from litellm.exceptions import AuthenticationError as LiteLLMAuthError
 from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw
+from elspeth.contracts.secret_scrub import scrub_text_for_audit
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
@@ -61,6 +61,10 @@ from elspeth.web.sessions.schemas import (
 )
 
 slog = structlog.get_logger()
+
+_REDACTED_SECRET_DETAIL = "<redacted-secret>"
+_PROVIDER_DETAIL_REDACTED = "Provider detail redacted because it may contain secrets."
+_MAX_PROVIDER_DETAIL_CHARS = 1_000
 
 
 class _SessionComposeLockRegistry:
@@ -154,6 +158,38 @@ def _message_response(msg: ChatMessageRecord) -> ChatMessageResponse:
         created_at=msg.created_at,
         composition_state_id=str(msg.composition_state_id) if msg.composition_state_id else None,
     )
+
+
+def _litellm_error_detail(
+    error_type: str,
+    exc: Exception,
+    *,
+    expose_provider_error: bool,
+) -> dict[str, object]:
+    """Build the HTTP error payload for LiteLLM failures.
+
+    ``detail`` remains class-name-only for the stable redaction contract. When
+    staging/debug mode is explicitly enabled, ``provider_detail`` carries a
+    bounded, scrubbed provider message for operator triage.
+    """
+    detail: dict[str, object] = {
+        "error_type": error_type,
+        "detail": type(exc).__name__,
+    }
+    if not expose_provider_error:
+        return detail
+
+    raw_provider_detail = str(exc).strip()
+    if raw_provider_detail:
+        scrubbed = scrub_text_for_audit(raw_provider_detail).strip()
+        detail["provider_detail"] = (
+            _PROVIDER_DETAIL_REDACTED if scrubbed == _REDACTED_SECRET_DETAIL else scrubbed[:_MAX_PROVIDER_DETAIL_CHARS]
+        )
+
+    status_code = getattr(exc, "status_code", None)
+    if type(status_code) is int:
+        detail["provider_status_code"] = status_code
+    return detail
 
 
 def _state_response(
@@ -561,6 +597,7 @@ def create_session_router() -> APIRouter:
 
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
+        settings = request.app.state.settings
         compose_lock = await _get_session_compose_lock_registry(request).get_lock(str(session.id))
         async with compose_lock:
             # 1. Load or create CompositionState — needed before user message
@@ -660,6 +697,9 @@ def create_session_router() -> APIRouter:
 
             # 4. Run the LLM composition loop
             composer: ComposerService = request.app.state.composer_service
+            from litellm.exceptions import APIError as LiteLLMAPIError
+            from litellm.exceptions import AuthenticationError as LiteLLMAuthError
+
             try:
                 result = await composer.compose(
                     body.content,
@@ -717,7 +757,11 @@ def create_session_router() -> APIRouter:
                 )
                 raise HTTPException(
                     status_code=502,
-                    detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
+                    detail=_litellm_error_detail(
+                        "llm_auth_error",
+                        exc,
+                        expose_provider_error=settings.composer_expose_provider_errors,
+                    ),
                 ) from exc
             except LiteLLMAPIError as exc:
                 # Same redaction rationale as the auth-error block above.
@@ -743,7 +787,11 @@ def create_session_router() -> APIRouter:
                 )
                 raise HTTPException(
                     status_code=502,
-                    detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
+                    detail=_litellm_error_detail(
+                        "llm_unavailable",
+                        exc,
+                        expose_provider_error=settings.composer_expose_provider_errors,
+                    ),
                 ) from exc
             except ComposerPluginCrashError as crash:
                 # Plugin-crash path: _compose_loop wraps any non-ToolArgumentError
@@ -891,6 +939,7 @@ def create_session_router() -> APIRouter:
         await rate_limiter.check(user.user_id)
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
+        settings = request.app.state.settings
         compose_lock = await _get_session_compose_lock_registry(request).get_lock(str(session.id))
         async with compose_lock:
             # Load current state
@@ -948,6 +997,9 @@ def create_session_router() -> APIRouter:
 
             # Run the LLM composition loop
             composer: ComposerService = request.app.state.composer_service
+            from litellm.exceptions import APIError as LiteLLMAPIError
+            from litellm.exceptions import AuthenticationError as LiteLLMAuthError
+
             try:
                 result = await composer.compose(
                     last_user_content,
@@ -996,7 +1048,11 @@ def create_session_router() -> APIRouter:
                 )
                 raise HTTPException(
                     status_code=502,
-                    detail={"error_type": "llm_auth_error", "detail": type(exc).__name__},
+                    detail=_litellm_error_detail(
+                        "llm_auth_error",
+                        exc,
+                        expose_provider_error=settings.composer_expose_provider_errors,
+                    ),
                 ) from exc
             except LiteLLMAPIError as exc:
                 slog.error(
@@ -1017,7 +1073,11 @@ def create_session_router() -> APIRouter:
                 )
                 raise HTTPException(
                     status_code=502,
-                    detail={"error_type": "llm_unavailable", "detail": type(exc).__name__},
+                    detail=_litellm_error_detail(
+                        "llm_unavailable",
+                        exc,
+                        expose_provider_error=settings.composer_expose_provider_errors,
+                    ),
                 ) from exc
             except ComposerPluginCrashError as crash:
                 # Plugin-crash path: mirror /messages handler. See the send_message
@@ -1162,7 +1222,7 @@ def create_session_router() -> APIRouter:
         runs = await service.list_runs_for_session(session.id)
         from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
 
-        discard_summaries = await asyncio.to_thread(
+        discard_summaries = await run_sync_in_worker(
             load_discard_summaries_for_settings,
             request.app.state.settings,
             (run.landscape_run_id for run in runs),

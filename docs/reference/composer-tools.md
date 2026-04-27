@@ -163,6 +163,7 @@ Export the current composition state as deterministic pipeline YAML.
 
 **Validation backstop:** The LLM-facing export surfaces re-run validation before emitting YAML.
 - The MCP `generate_yaml` session tool returns failure if the current composition state is invalid.
+- The MCP `generate_yaml` session tool also enforces generated-file controls such as explicit `collision_policy` on CSV/JSON sinks, so loaded older session state cannot bypass the mutation-tool checks.
 - The HTTP `GET /api/sessions/{id}/state/yaml` endpoint returns `409` for invalid state.
 
 **Important:** This is an export step, not the primary validator. Use `preview_pipeline` first to inspect validation results and `edge_contracts`. The underlying serializer remains a pure serializer and is not universally validation-aware at every internal call site.
@@ -282,6 +283,8 @@ Add or replace a pipeline output (sink).
 
 **Behaviour:** If a sink with the given name exists, it is replaced. A pipeline must have at least one sink.
 
+**File sink collision control:** For generated `csv` and `json` file sinks, include `options.collision_policy` explicitly. Use `fail_if_exists` when the requested filename must be free, `auto_increment` when repeated runs may create `name-1.ext`, or `append_or_create` with `mode: "append"`.
+
 ---
 
 ### `remove_output`
@@ -351,6 +354,8 @@ Atomically replace the entire pipeline in one call.
 | `metadata` | object | No | `{name?, description?}` |
 
 **When to use:** When the user describes a complete pipeline and you can construct the whole thing at once. More efficient than sequential `set_source` + `upsert_node` + `upsert_edge` + `set_output` calls. Also useful for major restructuring where most components change.
+
+Generated `csv` and `json` outputs must include `options.collision_policy`; the web composer and MCP composer controls reject missing policy choices before export.
 
 ---
 

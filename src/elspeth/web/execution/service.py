@@ -40,8 +40,10 @@ from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.core.secrets import SecretResolutionError
 from elspeth.engine.orchestrator.core import Orchestrator
 from elspeth.engine.orchestrator.types import PipelineConfig
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError, BlobServiceProtocol, BlobStateError
+from elspeth.web.composer.state import validate_transform_framing_contracts
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError, YamlGenerator
@@ -252,7 +254,7 @@ class ExecutionServiceImpl:
             events = list(self._shutdown_events.values())
         for event in events:
             event.set()
-        await asyncio.to_thread(self._executor.shutdown, wait=True)
+        await run_sync_in_worker(self._executor.shutdown, True)
 
     async def execute(self, session_id: UUID, state_id: UUID | None = None, *, user_id: str | None = None) -> UUID:
         """Start a background pipeline run.
@@ -319,6 +321,10 @@ class ExecutionServiceImpl:
         # Bridge CompositionStateRecord → CompositionState for generate_yaml().
         # The record stores raw dicts; generate_yaml() needs the typed domain object.
         composition_state = state_from_record(state_record)
+
+        framing_errors = validate_transform_framing_contracts(composition_state.nodes)
+        if framing_errors:
+            raise ValueError("; ".join(error.message for error in framing_errors))
 
         # Path allowlist check — defense-in-depth. The validate endpoint also
         # checks this, but /execute does not require /validate first. An
@@ -514,11 +520,9 @@ class ExecutionServiceImpl:
             )
 
         composition_state = state_from_record(state_record)
-        loop = asyncio.get_running_loop()
         return cast(
             ValidationResult,
-            await loop.run_in_executor(
-                None,
+            await run_sync_in_worker(
                 partial(
                     validate_pipeline,
                     composition_state,

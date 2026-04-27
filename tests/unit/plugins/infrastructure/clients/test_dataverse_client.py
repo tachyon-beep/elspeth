@@ -141,6 +141,16 @@ def _make_ssrf_safe(url: str) -> SSRFSafeRequest:
     )
 
 
+@pytest.fixture(autouse=True)
+def _bypass_ssrf_dns():
+    """Dataverse unit tests use MockTransport; bypass live DNS pinning by default."""
+    with patch(
+        "elspeth.plugins.infrastructure.clients.dataverse.validate_url_for_ssrf",
+        side_effect=lambda url, **_kwargs: _make_ssrf_safe(url),
+    ):
+        yield
+
+
 @pytest.fixture()
 def transport() -> MockTransport:
     return MockTransport()

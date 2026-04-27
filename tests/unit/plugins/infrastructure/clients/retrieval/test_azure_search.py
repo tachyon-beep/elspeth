@@ -354,6 +354,12 @@ class TestParseResponse:
 class TestAzureSearchProviderReadiness:
     """Tests for AzureSearchProvider.check_readiness()."""
 
+    @pytest.fixture(autouse=True)
+    def _bypass_ssrf_dns(self):
+        """Readiness tests mock httpx; bypass live DNS pinning at that boundary."""
+        with patch("elspeth.core.security.web.validate_url_for_ssrf"):
+            yield
+
     def _make_provider(self) -> AzureSearchProvider:
         config = AzureSearchProviderConfig(
             endpoint="https://test.search.windows.net",

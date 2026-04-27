@@ -33,7 +33,10 @@ When building a pipeline from scratch, use `set_pipeline` to set everything atom
   "source": {"plugin": "csv", "on_success": "gate_in", "options": {...}, "on_validation_failure": "discard"},
   "nodes": [{"id": "my_gate", "node_type": "gate", "input": "gate_in", "condition": "row['amount'] > 1000", "routes": {"true": "high", "false": "normal"}}],
   "edges": [],
-  "outputs": [{"name": "normal", "plugin": "csv", "options": {...}, "on_write_failure": "discard"}, {"name": "high", "plugin": "csv", "options": {...}, "on_write_failure": "discard"}],
+  "outputs": [
+    {"name": "normal", "plugin": "csv", "options": {"path": "outputs/normal.csv", "schema": {"mode": "observed"}, "collision_policy": "auto_increment"}, "on_write_failure": "discard"},
+    {"name": "high", "plugin": "csv", "options": {"path": "outputs/high.csv", "schema": {"mode": "observed"}, "collision_policy": "auto_increment"}, "on_write_failure": "discard"}
+  ],
   "metadata": {"name": "My Pipeline", "description": "What it does"}
 }
 ```
@@ -169,6 +172,7 @@ Invalid text-column keyword example:
 | `truncate` | Truncate text fields to max length | no | no | no | Truncates in-place |
 | `keyword_filter` | Filter rows by keyword presence | no | no | no | (routing only) |
 | `json_explode` | Expand nested JSON into row fields | no | no | no | Promotes nested fields |
+| `line_explode` | Split a string field into one row per line | **yes** | no | no | Emits `line`/`line_index` fields |
 | `batch_stats` | Compute batch statistics | **yes** | no | no | Emits aggregate rows |
 | `batch_replicate` | Replicate rows for fan-out | no | no | no | Emits N copies per row |
 | `web_scrape` | Fetch content from URLs | no | no | yes | Adds `content` field |
@@ -185,12 +189,17 @@ Invalid text-column keyword example:
 
 | Plugin | Description | Secrets | Network | Key Options |
 |--------|-------------|---------|---------|-------------|
-| `csv` | Write CSV file | no | no | `path`, `delimiter`, `mode`, `headers` |
-| `json` | Write JSON/JSONL file | no | no | `path`, `format`, `indent`, `mode`, `headers` |
+| `csv` | Write CSV file | no | no | `path`, `schema`, `collision_policy`, `delimiter`, `mode`, `headers` |
+| `json` | Write JSON/JSONL file | no | no | `path`, `schema`, `collision_policy`, `format`, `indent`, `mode`, `headers` |
 | `database` | Write to SQL database | yes | depends | `url`, `table`, `if_exists` |
 | `azure_blob` | Upload to Azure Blob Storage | yes | yes | `container`, `blob_path`, `format`, auth config |
 | `dataverse` | Upsert to Dataverse | yes | yes | `environment_url`, `entity`, `field_mapping`, `alternate_key` |
 | `chroma_sink` | Store in ChromaDB | depends | depends | `collection`, `mode`, `document_field`, `id_field` |
+
+For generated `csv` and `json` sinks, choose `collision_policy` explicitly. Do not rely on an implicit overwrite/default:
+- `fail_if_exists`: refuse a taken output path when the filename is a deliberate contract
+- `auto_increment`: choose a free sibling path for exploratory or repeated runs
+- `append_or_create`: only with `mode: "append"`
 
 ## Plugin Quick Reference
 
@@ -237,6 +246,12 @@ Minimal config: `{"field": "llm_response"}`
 Gotchas:
 - The `field` must contain a valid JSON string. Typically used after an `llm` step — make sure the LLM template instructs the model to return JSON.
 
+**line_explode** — Split one string field into multiple rows, one per line.
+Minimal config: `{"source_field": "content", "output_field": "line", "include_index": true, "index_field": "line_index"}`
+Gotchas:
+- Choose `output_field`/`index_field` names that do not collide with existing fields.
+- For scraped pages, use `web_scrape` with `text_separator: "\n"` or `format: markdown` first; compact text can otherwise arrive as one long line.
+
 **field_mapper** — Rename fields in each row.
 Minimal config: `{"mapping": {"old_name": "new_name"}}`
 
@@ -255,10 +270,10 @@ Gotchas:
 ### Sinks
 
 **csv** — Write rows to a CSV file.
-Minimal config: `{"path": "output.csv"}`
+Minimal generated config: `{"path": "outputs/output.csv", "schema": {"mode": "observed"}, "collision_policy": "auto_increment"}`
 
 **json** — Write rows to a JSON or JSONL file.
-Minimal config: `{"path": "output.json"}`
+Minimal generated config: `{"path": "outputs/output.json", "schema": {"mode": "observed"}, "collision_policy": "auto_increment"}`
 Gotchas:
 - Default format is `json` (single array). Set `format: "jsonl"` for one record per line — important for large outputs or streaming consumers.
 
@@ -339,6 +354,7 @@ source → fork gate → path A + path B → `coalesce` → sink
 
 Most transforms **add** fields — original row fields are preserved. Key exceptions:
 - `batch_stats`: **replaces** input rows with aggregate results
+- `line_explode`: emits one row per line and replaces the source text field with line fields
 - `gate`: routes unchanged row (no field changes)
 - LLM response is always a **string** — use `json_explode` after LLM to parse into structured fields
 - Sinks serialize the **full row** (all accumulated fields)

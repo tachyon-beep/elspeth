@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import hmac
 import re
@@ -17,6 +16,7 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts.errors import AuditIntegrityError
+from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.blobs.protocol import (
     ALLOWED_MIME_TYPES,
     BLOB_CREATORS,
@@ -199,8 +199,7 @@ class BlobServiceImpl:
         self._max_storage_per_session = max_storage_per_session
 
     async def _run_sync(self, func: Callable[[], _T]) -> _T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, func)
+        return await run_sync_in_worker(func)
 
     def _now(self) -> datetime:
         return datetime.now(UTC)

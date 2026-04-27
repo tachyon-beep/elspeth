@@ -19,6 +19,10 @@ function getExecutionStore() {
 }
 
 const COMPOSER_PROGRESS_POLL_INTERVAL_MS = 1500;
+const LLM_UNAVAILABLE_MESSAGE =
+  "The AI service is temporarily unavailable. Please try again in a moment.";
+const LLM_AUTH_ERROR_MESSAGE =
+  "The AI service configuration is invalid. Please contact your administrator.";
 
 let composerProgressPollTimer: ReturnType<typeof setInterval> | null = null;
 let composerProgressPollSessionId: string | null = null;
@@ -29,6 +33,25 @@ function clearComposerProgressPollTimer(): void {
     composerProgressPollTimer = null;
   }
   composerProgressPollSessionId = null;
+}
+
+function formatProviderDiagnostic(apiErr: ApiError): string {
+  const lines: string[] = [];
+  if (apiErr.provider_detail) {
+    lines.push(apiErr.provider_detail);
+  }
+  if (apiErr.provider_status_code !== undefined) {
+    lines.push(`Provider status: ${apiErr.provider_status_code}`);
+  }
+  return lines.length > 0 ? `\n\n${lines.join("\n")}` : "";
+}
+
+function formatLlmUnavailableError(apiErr: ApiError): string {
+  return `${LLM_UNAVAILABLE_MESSAGE}${formatProviderDiagnostic(apiErr)}`;
+}
+
+function formatLlmAuthError(apiErr: ApiError): string {
+  return `${LLM_AUTH_ERROR_MESSAGE}${formatProviderDiagnostic(apiErr)}`;
 }
 
 interface SessionState {
@@ -238,14 +261,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
         apiErr.status === 502 &&
         apiErr.error_type === "llm_unavailable"
       ) {
-        errorMessage =
-          "The AI service is temporarily unavailable. Please try again in a moment.";
+        errorMessage = formatLlmUnavailableError(apiErr);
       } else if (
         apiErr.status === 502 &&
         apiErr.error_type === "llm_auth_error"
       ) {
-        errorMessage =
-          "The AI service configuration is invalid. Please contact your administrator.";
+        errorMessage = formatLlmAuthError(apiErr);
       } else {
         errorMessage =
           apiErr.detail ?? "Failed to send message. Please try again.";
@@ -391,9 +412,9 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       const apiErr = err as ApiError;
       const errorMessage =
         apiErr.status === 502 && apiErr.error_type === "llm_unavailable"
-          ? "No LLM is available for the composer right now."
+          ? formatLlmUnavailableError(apiErr)
           : apiErr.status === 502 && apiErr.error_type === "llm_auth_error"
-            ? "The AI service configuration is invalid. Please contact your administrator."
+            ? formatLlmAuthError(apiErr)
             : apiErr.status === 422 && apiErr.error_type === "convergence"
               ? "ELSPETH couldn't complete the composition after multiple attempts. Try breaking your request into smaller steps."
               : apiErr.detail ?? "Failed to send message. Please try again.";

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -22,14 +23,17 @@ from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel
 
 from elspeth.composer_mcp.session import SessionManager, SessionNotFoundError
+from elspeth.contracts.freeze import deep_thaw
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.tools import (
     _DISCOVERY_TOOLS,
     _MUTATION_TOOLS,
+    _apply_merge_patch,
     execute_tool,
     get_tool_definitions,
+    validate_composer_file_sink_collision_policy,
 )
 from elspeth.web.composer.yaml_generator import generate_yaml
 
@@ -167,6 +171,58 @@ def _ensure_serializable(obj: Any) -> Any:
     return obj
 
 
+def _state_file_sink_collision_control_error(state: CompositionState) -> str | None:
+    """Return an MCP control error for any file sink missing collision policy."""
+    for output in state.outputs:
+        error = validate_composer_file_sink_collision_policy(
+            output.plugin,
+            deep_thaw(output.options),
+            require_explicit=True,
+        )
+        if error is not None:
+            return f"Output '{output.name}': {error}"
+    return None
+
+
+def _tool_file_sink_collision_control_error(
+    tool_name: str,
+    arguments: Mapping[str, Any],
+    state: CompositionState,
+) -> str | None:
+    """Validate MCP mutation args that can create or update file sink options."""
+    if tool_name == "set_output":
+        return validate_composer_file_sink_collision_policy(
+            arguments["plugin"],
+            arguments.get("options", {}),
+            require_explicit=True,
+        )
+
+    if tool_name == "set_pipeline":
+        for out_args in arguments["outputs"]:
+            output_name = out_args.get("sink_name", "?")
+            error = validate_composer_file_sink_collision_policy(
+                out_args["plugin"],
+                out_args.get("options", {}),
+                require_explicit=True,
+            )
+            if error is not None:
+                return f"Output '{output_name}': {error}"
+        return None
+
+    if tool_name == "patch_output_options":
+        current = next((o for o in state.outputs if o.name == arguments["sink_name"]), None)
+        if current is None:
+            return None
+        new_options = _apply_merge_patch(current.options, arguments["patch"])
+        return validate_composer_file_sink_collision_policy(
+            current.plugin,
+            new_options,
+            require_explicit=True,
+        )
+
+    return None
+
+
 def _dispatch_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -187,6 +243,13 @@ def _dispatch_tool(
         return _dispatch_session_tool(tool_name, arguments, state, scratch_dir)
 
     if tool_name in _COMPOSER_TOOL_NAMES:
+        control_error = _tool_file_sink_collision_control_error(tool_name, arguments, state)
+        if control_error is not None:
+            return {
+                "success": False,
+                "error": control_error,
+                "state": state.to_dict(),
+            }
         result = execute_tool(tool_name, arguments, state, catalog, data_dir=None, baseline=baseline)
         response = result.to_dict()
         response["state"] = result.updated_state.to_dict()
@@ -296,6 +359,13 @@ def _dispatch_session_tool(
         }
 
     if tool_name == "generate_yaml":
+        control_error = _state_file_sink_collision_control_error(state)
+        if control_error is not None:
+            return {
+                "success": False,
+                "error": control_error,
+                "state": state.to_dict(),
+            }
         validation = state.validate()
         if not validation.is_valid:
             return {
