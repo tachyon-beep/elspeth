@@ -502,3 +502,51 @@ class TestDispatchTool:
             scratch_dir,
         )
         assert result["success"] is False
+
+
+class TestValidationToDictSemanticContracts:
+    """Validation payload must surface semantic_contracts for MCP clients.
+
+    Without this, only the legacy edge_contracts field reaches MCP and
+    the new plugin-declared semantic layer is invisible to agent
+    consumers — which makes the /validate response asymmetric across
+    HTTP and MCP surfaces.
+    """
+
+    def test_semantic_contracts_in_payload(self) -> None:
+        from elspeth.composer_mcp.server import _validation_to_dict
+        from tests.unit.web.composer.test_semantic_validator import _wardline_state
+
+        state = _wardline_state(text_separator=" ")
+        validation = state.validate()
+        payload = _validation_to_dict(validation)
+
+        assert "semantic_contracts" in payload
+        assert isinstance(payload["semantic_contracts"], list)
+        assert len(payload["semantic_contracts"]) == 1
+        contract = payload["semantic_contracts"][0]
+        assert contract["from_id"] == "scrape"
+        assert contract["to_id"] == "explode"
+        assert contract["producer_field"] == "content"
+        assert contract["consumer_field"] == "content"
+        assert contract["outcome"] == "conflict"
+        assert contract["consumer_plugin"] == "line_explode"
+        assert contract["producer_plugin"] == "web_scrape"
+        assert contract["requirement_code"] == "line_explode.source_field.line_framed_text"
+
+    def test_empty_semantic_contracts_emits_empty_list_not_absent(self) -> None:
+        """Surface parity: pre-semantic short-circuits emit [], not absent.
+
+        /validate's pre-semantic short-circuit returns serialize the
+        Pydantic default of [] rather than omitting the field; MCP must
+        match that surface so clients can treat 'absent' as a clear
+        signal of an older server version, not as 'maybe satisfied'.
+        """
+        from elspeth.composer_mcp.server import _validation_to_dict
+
+        state = _empty_state()
+        validation = state.validate()
+        payload = _validation_to_dict(validation)
+
+        assert "semantic_contracts" in payload
+        assert payload["semantic_contracts"] == []

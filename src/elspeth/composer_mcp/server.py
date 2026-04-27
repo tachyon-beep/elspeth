@@ -61,12 +61,24 @@ _EdgeContractPayload = TypedDict(
 )
 
 
+class _SemanticEdgeContractPayload(TypedDict):
+    from_id: str
+    to_id: str
+    consumer_plugin: str
+    producer_plugin: str | None
+    producer_field: str
+    consumer_field: str
+    outcome: str
+    requirement_code: str
+
+
 class _ValidationPayload(TypedDict):
     is_valid: bool
     errors: list[_ValidationEntryPayload]
     warnings: list[_ValidationEntryPayload]
     suggestions: list[_ValidationEntryPayload]
     edge_contracts: list[_EdgeContractPayload]
+    semantic_contracts: list[_SemanticEdgeContractPayload]
 
 
 # Composer tools exposed via MCP (excludes blob and secret tools).
@@ -279,6 +291,28 @@ def _edge_contract_to_payload(contract: Any) -> _EdgeContractPayload:
     }
 
 
+def _semantic_edge_contract_to_payload(
+    contract: Any,
+) -> _SemanticEdgeContractPayload:
+    """Serialize a SemanticEdgeContract for MCP. Field names + enum values only.
+
+    SemanticEdgeContract intentionally has no .to_dict() method —
+    serialization happens at consumption sites (HTTP, MCP, tools) so
+    L0 stays free of JSON-encoding concerns. The keys here mirror
+    the Pydantic SemanticEdgeContractResponse used by /validate.
+    """
+    return {
+        "from_id": contract.from_id,
+        "to_id": contract.to_id,
+        "consumer_plugin": contract.consumer_plugin,
+        "producer_plugin": contract.producer_plugin,
+        "producer_field": contract.producer_field,
+        "consumer_field": contract.consumer_field,
+        "outcome": contract.outcome.value,
+        "requirement_code": contract.requirement.requirement_code,
+    }
+
+
 def _validation_to_dict(validation: Any) -> _ValidationPayload:
     """Serialize validation for MCP session-tool error payloads."""
     return {
@@ -287,6 +321,7 @@ def _validation_to_dict(validation: Any) -> _ValidationPayload:
         "warnings": [entry.to_dict() for entry in validation.warnings],
         "suggestions": [entry.to_dict() for entry in validation.suggestions],
         "edge_contracts": [_edge_contract_to_payload(contract) for contract in validation.edge_contracts],
+        "semantic_contracts": [_semantic_edge_contract_to_payload(contract) for contract in validation.semantic_contracts],
     }
 
 
