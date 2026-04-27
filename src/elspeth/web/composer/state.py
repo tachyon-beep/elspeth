@@ -1449,7 +1449,14 @@ class CompositionState:
                     )
                 )
 
+        # Legacy framing check (deleted in Phase 6).
         errors.extend(validate_transform_framing_contracts(self.nodes))
+
+        # Generic semantic-contract check.
+        from elspeth.web.composer._semantic_validator import validate_semantic_contracts
+
+        semantic_errors, semantic_contracts = validate_semantic_contracts(self)
+        errors.extend(semantic_errors)
 
         # --- Warnings (advisory, non-blocking) ---
         warnings: list[ValidationEntry] = []
@@ -1703,4 +1710,5 @@ class CompositionState:
             warnings=tuple(warnings),
             suggestions=tuple(suggestions),
             edge_contracts=edge_contracts,
+            semantic_contracts=semantic_contracts,
         )

@@ -60,19 +60,48 @@ def _is_config_probe_exception(exc: Exception) -> bool:
 
 
 def _instantiate_consumer(node: NodeSpec) -> BaseTransform | None:
-    """Construct a consumer transform instance to read its requirements."""
+    """Construct a consumer transform instance to read its requirements.
+
+    Returns None when:
+    - node.plugin is unset (typed-None on a draft node)
+    - construction fails with one of the established probe-tolerant exception
+      types (PluginConfigError, PluginNotFoundError, TemplateError,
+      UnknownPluginTypeError, or "Invalid configuration for transform"
+      ValueError). This mirrors the producer-probe tolerance in
+      ``_safe_output_semantics`` and the existing schema-contract probe
+      tolerance in ``state._check_schema_contracts``.
+
+    Why both probes share tolerance: ``CompositionState.validate()`` has an
+    established contract that draft pipelines (incomplete config, unregistered
+    plugins) do not crash validation — see
+    ``test_contract_probe_constructor_exception_falls_back_instead_of_crashing``.
+    The semantic validator runs inside ``validate()`` and must respect that
+    contract. Phase 3 semantic-validation fixtures (``_wardline_state``)
+    construct valid producer+consumer configs and assert specific outcomes
+    (``len(errors) == 1``, ``outcome == CONFLICT``), so they never enter the
+    tolerant branch — silent skip would surface as a positive-assertion
+    failure, preserving the vacuousness guard.
+
+    Unexpected exceptions PROPAGATE — a plugin method raising mid-construction
+    is a system bug per CLAUDE.md plugin-as-system-code policy.
+    """
     from elspeth.contracts.freeze import deep_thaw
     from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
 
     if node.plugin is None:
         return None
-    return cast(
-        "BaseTransform",
-        get_shared_plugin_manager().create_transform(
-            node.plugin,
-            deep_thaw(node.options),
-        ),
-    )
+    try:
+        return cast(
+            "BaseTransform",
+            get_shared_plugin_manager().create_transform(
+                node.plugin,
+                deep_thaw(node.options),
+            ),
+        )
+    except Exception as exc:
+        if _is_config_probe_exception(exc):
+            return None
+        raise
 
 
 def _instantiate_producer(producer: ProducerEntry) -> BaseTransform | None:

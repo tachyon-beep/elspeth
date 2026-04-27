@@ -4069,3 +4069,30 @@ class TestPassThroughComposerParity:
         sink_contract = next(ec for ec in result.edge_contracts if ec.to_id == "output:main")
         assert sink_contract.producer_guarantees == ()
         assert sink_contract.satisfied is False
+
+
+class TestCompositionStateValidateEmitsSemanticContracts:
+    def test_compact_wardline_yields_semantic_error_in_validate(self):
+        from tests.unit.web.composer.test_semantic_validator import _wardline_state
+
+        state = _wardline_state(text_separator=" ", scrape_format="text")
+        result = state.validate()
+
+        assert result.is_valid is False
+        # Wardline-shape with compact text: at least one error tagged with
+        # node:explode reflecting the semantic contract violation.
+        explode_errors = [e for e in result.errors if e.component == "node:explode"]
+        assert any("Semantic contract" in e.message or "line_explode" in e.message for e in explode_errors)
+
+        # And a SemanticEdgeContract record on the summary.
+        assert len(result.semantic_contracts) == 1
+        assert result.semantic_contracts[0].outcome.value == "conflict"
+
+    def test_passing_wardline_yields_satisfied_contract(self):
+        from tests.unit.web.composer.test_semantic_validator import _wardline_state
+
+        state = _wardline_state(text_separator="\n", scrape_format="text")
+        result = state.validate()
+        # Other validation may pass or fail; what we assert is that
+        # the semantic contract is SATISFIED.
+        assert any(c.outcome.value == "satisfied" for c in result.semantic_contracts)
