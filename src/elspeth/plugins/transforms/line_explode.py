@@ -17,7 +17,7 @@ Per the plugin protocol, transforms trust that pipeline field types are correct:
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, field_validator, model_validator
 
@@ -28,6 +28,10 @@ from elspeth.contracts.schema_contract import PipelineRow
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
+
+if TYPE_CHECKING:
+    from elspeth.contracts.plugin_assistance import PluginAssistance
+    from elspeth.contracts.plugin_semantics import InputSemanticRequirements
 
 
 class LineExplodeConfig(TransformDataConfig):
@@ -122,12 +126,43 @@ def _build_line_explode_output_schema_config(cfg: LineExplodeConfig) -> SchemaCo
     )
 
 
+def _build_line_explode_input_requirements(
+    *,
+    source_field: str,
+) -> InputSemanticRequirements:
+    from elspeth.contracts.plugin_semantics import (
+        ContentKind,
+        FieldSemanticRequirement,
+        InputSemanticRequirements,
+        TextFraming,
+        UnknownSemanticPolicy,
+    )
+
+    return InputSemanticRequirements(
+        fields=(
+            FieldSemanticRequirement(
+                field_name=source_field,
+                accepted_content_kinds=frozenset(
+                    {ContentKind.PLAIN_TEXT, ContentKind.MARKDOWN},
+                ),
+                accepted_text_framings=frozenset(
+                    {TextFraming.NEWLINE_FRAMED, TextFraming.LINE_COMPATIBLE},
+                ),
+                requirement_code="line_explode.source_field.line_framed_text",
+                severity="high",
+                unknown_policy=UnknownSemanticPolicy.FAIL,
+                configured_by=("source_field",),
+            ),
+        ),
+    )
+
+
 class LineExplode(BaseTransform):
     """Explode a string field into one output row per line."""
 
     name = "line_explode"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:a838c5c2659c7d47"
+    source_file_hash: str | None = "sha256:e426cd6ca548e3e8"
     config_model = LineExplodeConfig
     creates_tokens = True
 
@@ -160,6 +195,38 @@ class LineExplode(BaseTransform):
             adds_fields=True,
         )
         self._output_schema_config = _build_line_explode_output_schema_config(cfg)
+
+    def input_semantic_requirements(self) -> InputSemanticRequirements:
+        return _build_line_explode_input_requirements(
+            source_field=self._source_field,
+        )
+
+    @classmethod
+    def get_agent_assistance(
+        cls,
+        *,
+        issue_code: str | None = None,
+    ) -> PluginAssistance | None:
+        from elspeth.contracts.plugin_assistance import PluginAssistance
+
+        if issue_code != "line_explode.source_field.line_framed_text":
+            return None
+        return PluginAssistance(
+            plugin_name="line_explode",
+            issue_code="line_explode.source_field.line_framed_text",
+            summary=(
+                "line_explode calls splitlines() on the configured source_field. "
+                "Compact text (a single string with no newlines) emits one row "
+                "containing the whole content — the opposite of line "
+                "deaggregation. The producer must emit newline-framed or "
+                "line-compatible text."
+            ),
+            suggested_fixes=(
+                "Configure the upstream producer to emit newline-framed text "
+                "(for web_scrape: text_separator: '\\n', or use format: markdown).",
+                "Choose a producer whose output_semantics() declares a text_framing of newline_framed or line_compatible.",
+            ),
+        )
 
     def backward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
         """Exercise the real source-field consumption path for the backward invariant."""
