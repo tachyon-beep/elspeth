@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from elspeth.contracts.plugin_semantics import (
     ContentKind,
@@ -12,9 +14,11 @@ from elspeth.contracts.plugin_semantics import (
     FieldSemanticRequirement,
     InputSemanticRequirements,
     OutputSemanticDeclaration,
+    SemanticEdgeContract,
     SemanticOutcome,
     TextFraming,
     UnknownSemanticPolicy,
+    compare_semantic,
 )
 
 
@@ -149,3 +153,134 @@ class TestInputSemanticRequirements:
     def test_default_is_empty(self):
         reqs = InputSemanticRequirements()
         assert reqs.fields == ()
+
+
+class TestSemanticEdgeContract:
+    def test_construct(self):
+        facts = FieldSemanticFacts("x", ContentKind.PLAIN_TEXT, fact_code="t.x")
+        req = FieldSemanticRequirement(
+            field_name="x",
+            accepted_content_kinds=frozenset({ContentKind.PLAIN_TEXT}),
+            accepted_text_framings=frozenset({TextFraming.UNKNOWN, TextFraming.LINE_COMPATIBLE}),
+            requirement_code="c.x.req",
+        )
+        edge = SemanticEdgeContract(
+            from_id="a",
+            to_id="b",
+            consumer_plugin="line_explode",
+            producer_plugin="web_scrape",
+            producer_field="x",
+            consumer_field="x",
+            producer_facts=facts,
+            requirement=req,
+            outcome=SemanticOutcome.SATISFIED,
+        )
+        assert edge.outcome is SemanticOutcome.SATISFIED
+        assert edge.consumer_plugin == "line_explode"
+        assert edge.producer_plugin == "web_scrape"
+
+
+class TestCompareSemantic:
+    def _req(self, kinds, framings, policy=UnknownSemanticPolicy.FAIL):
+        return FieldSemanticRequirement(
+            field_name="x",
+            accepted_content_kinds=frozenset(kinds),
+            accepted_text_framings=frozenset(framings),
+            requirement_code="t.x.req",
+            unknown_policy=policy,
+        )
+
+    def test_satisfied_when_facts_within_acceptance(self):
+        facts = FieldSemanticFacts(
+            "x",
+            ContentKind.PLAIN_TEXT,
+            text_framing=TextFraming.NEWLINE_FRAMED,
+            fact_code="t.x.nl",
+        )
+        req = self._req(
+            {ContentKind.PLAIN_TEXT, ContentKind.MARKDOWN},
+            {TextFraming.NEWLINE_FRAMED, TextFraming.LINE_COMPATIBLE},
+        )
+        assert compare_semantic(facts, req) is SemanticOutcome.SATISFIED
+
+    def test_conflict_on_content_kind_mismatch(self):
+        facts = FieldSemanticFacts(
+            "x",
+            ContentKind.HTML_RAW,
+            text_framing=TextFraming.NOT_TEXT,
+            fact_code="t.x.raw",
+        )
+        req = self._req({ContentKind.PLAIN_TEXT}, {TextFraming.NEWLINE_FRAMED})
+        assert compare_semantic(facts, req) is SemanticOutcome.CONFLICT
+
+    def test_conflict_on_framing_mismatch(self):
+        facts = FieldSemanticFacts(
+            "x",
+            ContentKind.PLAIN_TEXT,
+            text_framing=TextFraming.COMPACT,
+            fact_code="t.x.compact",
+        )
+        req = self._req(
+            {ContentKind.PLAIN_TEXT},
+            {TextFraming.NEWLINE_FRAMED, TextFraming.LINE_COMPATIBLE},
+        )
+        assert compare_semantic(facts, req) is SemanticOutcome.CONFLICT
+
+    def test_unknown_when_facts_are_none(self):
+        req = self._req({ContentKind.PLAIN_TEXT}, {TextFraming.NEWLINE_FRAMED})
+        assert compare_semantic(None, req) is SemanticOutcome.UNKNOWN
+
+    def test_unknown_when_either_dimension_is_unknown(self):
+        facts_kind_unknown = FieldSemanticFacts(
+            "x",
+            ContentKind.UNKNOWN,
+            text_framing=TextFraming.NEWLINE_FRAMED,
+            fact_code="t.x.kindless",
+        )
+        facts_framing_unknown = FieldSemanticFacts(
+            "x",
+            ContentKind.PLAIN_TEXT,
+            text_framing=TextFraming.UNKNOWN,
+            fact_code="t.x.framingless",
+        )
+        req = self._req({ContentKind.PLAIN_TEXT}, {TextFraming.NEWLINE_FRAMED})
+        assert compare_semantic(facts_kind_unknown, req) is SemanticOutcome.UNKNOWN
+        assert compare_semantic(facts_framing_unknown, req) is SemanticOutcome.UNKNOWN
+
+
+_CONTENT_KINDS = list(ContentKind)
+_FRAMINGS = list(TextFraming)
+
+
+@given(
+    content_kind=st.sampled_from(_CONTENT_KINDS),
+    text_framing=st.sampled_from(_FRAMINGS),
+    accepted_kinds=st.sets(st.sampled_from(_CONTENT_KINDS), min_size=1),
+    accepted_framings=st.sets(st.sampled_from(_FRAMINGS), min_size=1),
+)
+def test_compare_semantic_outcome_is_consistent(
+    content_kind,
+    text_framing,
+    accepted_kinds,
+    accepted_framings,
+):
+    facts = FieldSemanticFacts(
+        field_name="x",
+        content_kind=content_kind,
+        text_framing=text_framing,
+        fact_code="t.x.gen",
+    )
+    requirement = FieldSemanticRequirement(
+        field_name="x",
+        accepted_content_kinds=frozenset(accepted_kinds),
+        accepted_text_framings=frozenset(accepted_framings),
+        requirement_code="c.x.req",
+    )
+    outcome = compare_semantic(facts, requirement)
+
+    if content_kind is ContentKind.UNKNOWN or text_framing is TextFraming.UNKNOWN:
+        assert outcome is SemanticOutcome.UNKNOWN
+    elif content_kind in accepted_kinds and text_framing in accepted_framings:
+        assert outcome is SemanticOutcome.SATISFIED
+    else:
+        assert outcome is SemanticOutcome.CONFLICT

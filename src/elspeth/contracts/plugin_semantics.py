@@ -97,3 +97,48 @@ class InputSemanticRequirements:
     """A consumer's full semantic requirements across the fields it consumes."""
 
     fields: tuple[FieldSemanticRequirement, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SemanticEdgeContract:
+    """Per-edge result of comparing producer facts to consumer requirement.
+
+    consumer_plugin is REQUIRED — assistance lookup MUST address a
+    specific plugin class, not iterate every registered transform.
+    producer_plugin is optional because some producers (e.g., source)
+    are not registered transform classes.
+    """
+
+    from_id: str
+    to_id: str
+    consumer_plugin: str
+    producer_plugin: str | None
+    producer_field: str
+    consumer_field: str
+    producer_facts: FieldSemanticFacts | None
+    requirement: FieldSemanticRequirement
+    outcome: SemanticOutcome
+
+
+def compare_semantic(
+    facts: FieldSemanticFacts | None,
+    requirement: FieldSemanticRequirement,
+) -> SemanticOutcome:
+    """Compare producer facts to a consumer requirement.
+
+    Returns UNKNOWN if facts are absent or any compared dimension is
+    UNKNOWN. Returns CONFLICT if either dimension is not in the
+    accepted set. Returns SATISFIED only when both dimensions are
+    explicitly in the accepted set.
+    """
+    if facts is None:
+        return SemanticOutcome.UNKNOWN
+    if facts.content_kind is ContentKind.UNKNOWN:
+        return SemanticOutcome.UNKNOWN
+    if facts.text_framing is TextFraming.UNKNOWN:
+        return SemanticOutcome.UNKNOWN
+    if facts.content_kind not in requirement.accepted_content_kinds:
+        return SemanticOutcome.CONFLICT
+    if facts.text_framing not in requirement.accepted_text_framings:
+        return SemanticOutcome.CONFLICT
+    return SemanticOutcome.SATISFIED
