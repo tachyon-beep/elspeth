@@ -4200,3 +4200,58 @@ full state tests, 913 composer+execution tests, 13462 unit tests
 composer exception-channel) clean.
 
 Phase 0 is closed. Phase 1 (contract types) is unblocked.
+
+### Phases 1–7 — completed 2026-04-28
+
+All seven phases landed on `RC5-UX` over 27 commits in a single session. Final
+verification: `tests/unit/contracts/ tests/unit/web/composer/ tests/unit/web/execution/ tests/unit/composer_mcp/ tests/unit/plugins/transforms/test_web_scrape.py tests/unit/plugins/transforms/test_line_explode.py tests/unit/plugins/infrastructure/`
+returns 3862 passed. `grep -rn 'validate_transform_framing_contracts' src/elspeth/ tests/`
+returns zero matches — the legacy validator is fully deleted.
+
+| Phase | Commits | Summary |
+|-------|---------|---------|
+| 1 — Contract types | 5 (5745dfe9 … 8e9d3e4c) | enums, facts/requirements/declaration dataclasses, edge contract + comparator, PluginAssistance with freeze guards, layer-purity test |
+| 2 — Plugin API | 3 (8d10d422 … 5a2604f8) | BaseTransform default methods; web_scrape output_semantics + assistance; line_explode input_semantic_requirements + assistance |
+| 3 — Generic semantic validator | 3 (a37b27df … bbc0463e) | validate_semantic_contracts core, parity test (gate for Phase 6 deletion), secret-leakage sentinel |
+| 4 Part A — composer + /validate + frontend | 5 (555e5e72 … 2035442d) | ValidationSummary.semantic_contracts; integration into CompositionState.validate; /validate route swap; Pydantic schema; frontend type |
+| 4 Part B — /execute + MCP + ToolResult | 5 (793fa53b … c67fc0ce) | hoisted shared helpers; SemanticContractViolationError + 422 handler; MCP serialization; ToolResult.to_dict + preview parity |
+| 5 — get_plugin_assistance discovery tool | 1 (6b436d3c) | MCP tool exposing PluginAssistance keyed by plugin_name + issue_code |
+| 6 — Delete legacy validator + pin Wardline | 2 (824bae65, 684fe4fe) | atomic deletion of validate_transform_framing_contracts and call sites; surface-level Wardline regression pin via state.validate() |
+| 7 — Skill prose update | 1 (e806a937) | replaced hardcoded text_separator advice with get_plugin_assistance pointer in pipeline_composer.md, .claude/skills/pipeline-composer/SKILL.md, and docs/reference/web-scrape-transform.md |
+
+**Notable execution-time facts (not changes to plan design):**
+
+- Worktree-harness stale-base behaviour: every phase's subagent had to `git
+  merge --ff-only RC5-UX` before starting. The Phase 4+ briefs pre-authorised
+  the FF-align so subagents didn't need to round-trip for permission. Worth
+  flagging if the harness behaviour changes.
+- One process violation: the Phase 2 subagent ran `git stash`/`git stash pop`
+  to test whether a freeze-guard finding was pre-existing. CLAUDE.md "Git
+  Safety" forbids this. The pop completed cleanly so no data was lost; the
+  agent acknowledged the violation, finished the Task 2.3 commit cleanly, and
+  committed to using `git diff <base>..HEAD -- <path>` for "is this
+  pre-existing?" questions going forward. Phase 3+ briefs added an explicit
+  "no `git stash`" line.
+- Worktree isolation leak in Phase 5+6+7: pre-commit hooks running from inside
+  the worktree appear to have written to `config/cicd/contracts-whitelist.yaml`
+  in the main checkout (likely via the shared `.venv` symlink resolving the
+  config path through). The leak was benign — diff between worktree and main
+  was zero — but the FF-merge had to be preceded by `git restore` on that one
+  file. Worth flagging as a harness pattern.
+- Phase 4 Part A's consumer-probe widening: the plan's stated invariant
+  ("consumer probe failure propagates") was preserved for unexpected
+  exceptions but widened to share the named config-error predicate
+  (`PluginConfigError`, `PluginNotFoundError`, `TemplateError`,
+  `UnknownPluginTypeError`, plus a specific `ValueError`) used by
+  `_check_schema_contracts`. Necessary because `state.validate()` has 40+
+  pre-existing tests with fictional plugin names that the strict invariant
+  would break. Documented in commit `8cfeb1ac`.
+
+The Wardline regression test (`TestWardlineRegressionPin` in
+`tests/unit/web/composer/test_semantic_validator.py`) is the single
+load-bearing test for this work. It exercises `state.validate()` end-to-end
+against an inline broken-shape fixture. If a future refactor breaks the
+wiring between `state.validate()` and the semantic validator, this test
+catches it before the Wardline shape can regress in production.
+
+Plan status: COMPLETE.
