@@ -396,6 +396,184 @@ class TestValidateSemanticContracts:
         assert contracts[0].producer_plugin == "web_scrape"
 
 
+class TestWardlineRegressionPin:
+    """Exact options shape from the original Wardline regression YAML.
+
+    Sourced from data/wardline_line_export_pipeline.yaml at the commit
+    immediately before text_separator: '\\n' was added. If the new
+    semantic-validator surface fails to block this shape, the original
+    regression has recurred.
+
+    The brief requires this test exercises ``state.validate()``, not just
+    ``validate_semantic_contracts`` directly — a future refactor that
+    detaches the validator from the wired surface must fail this test, not
+    silently pass.
+    """
+
+    def _wardline_broken_yaml_state(self) -> CompositionState:
+        # Options copied verbatim from the broken YAML revision.
+        return CompositionState(
+            metadata=PipelineMetadata(name="wardline-line-export"),
+            version=1,
+            edges=(),
+            source=SourceSpec(
+                plugin="csv",
+                on_success="scrape_in",
+                options={
+                    "schema": {"mode": "fixed", "fields": ["url: str"]},
+                    "path": "data/blobs/<uuid>/<uuid>_wardline_url.csv",
+                    "on_validation_failure": "quarantine",
+                },
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="scrape_page",
+                    node_type="transform",
+                    plugin="web_scrape",
+                    input="scrape_in",
+                    on_success="explode_in",
+                    on_error="errors",
+                    options={
+                        "schema": {
+                            "mode": "flexible",
+                            "fields": ["url: str"],
+                        },
+                        "required_input_fields": ["url"],
+                        "url_field": "url",
+                        "content_field": "content",
+                        "fingerprint_field": "content_fingerprint",
+                        "format": "text",
+                        # text_separator OMITTED -> defaults to single space.
+                        "fingerprint_mode": "content",
+                        "strip_elements": ["script", "style"],
+                        "http": {
+                            "abuse_contact": "pipeline@example.com",
+                            "scraping_reason": ("User requested Wardline contents exported as line-oriented JSON"),
+                            "timeout": 30,
+                            "allowed_hosts": "public_only",
+                        },
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+                NodeSpec(
+                    id="split_lines",
+                    node_type="transform",
+                    plugin="line_explode",
+                    input="explode_in",
+                    on_success="sink",
+                    on_error="errors",
+                    options={
+                        "schema": {
+                            "mode": "flexible",
+                            "fields": ["content: str"],
+                        },
+                        "source_field": "content",
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            outputs=(
+                OutputSpec(
+                    name="sink",
+                    plugin="json",
+                    options={"path": "out.json"},
+                    on_write_failure="discard",
+                ),
+                OutputSpec(
+                    name="errors",
+                    plugin="json",
+                    options={"path": "err.json"},
+                    on_write_failure="discard",
+                ),
+            ),
+        )
+
+    def _wardline_fixed_yaml_state(self) -> CompositionState:
+        """Same shape as the broken state but with the Wardline fix applied:
+        text_separator: '\\n'. Used to assert the validator accepts the
+        post-fix YAML so the test pins both directions of the regression.
+        """
+        broken = self._wardline_broken_yaml_state()
+        # Mutate via with_node so we don't have to repeat the full options dict.
+        scrape_options = dict(broken.nodes[0].options)
+        scrape_options["text_separator"] = "\n"
+        fixed_scrape = NodeSpec(
+            id=broken.nodes[0].id,
+            node_type=broken.nodes[0].node_type,
+            plugin=broken.nodes[0].plugin,
+            input=broken.nodes[0].input,
+            on_success=broken.nodes[0].on_success,
+            on_error=broken.nodes[0].on_error,
+            options=scrape_options,
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        return broken.with_node(fixed_scrape)
+
+    def test_wardline_broken_yaml_blocked_by_semantic_validator(self) -> None:
+        state = self._wardline_broken_yaml_state()
+        errors, contracts = validate_semantic_contracts(state)
+
+        assert len(errors) == 1
+        assert errors[0].component == "node:split_lines"
+
+        assert len(contracts) == 1
+        contract = contracts[0]
+        assert contract.from_id == "scrape_page"
+        assert contract.to_id == "split_lines"
+        assert contract.outcome is SemanticOutcome.CONFLICT
+        assert contract.requirement.requirement_code == "line_explode.source_field.line_framed_text"
+
+    def test_wardline_broken_yaml_blocked_by_full_validate(self) -> None:
+        state = self._wardline_broken_yaml_state()
+        result = state.validate()
+        assert result.is_valid is False
+        # The wired surface must surface the structured violation, addressed by
+        # plugin/requirement_code — not the legacy text_separator prose.
+        assert any(
+            entry.component == "node:split_lines"
+            and "line_explode" in entry.message
+            and "line_explode.source_field.line_framed_text" in entry.message
+            for entry in result.errors
+        )
+
+    def test_wardline_fixed_yaml_passes_semantic_validator(self) -> None:
+        """The post-fix YAML (text_separator='\\n') must NOT be flagged by the
+        semantic validator. Pinning both directions of the regression means a
+        future change that makes the validator too strict also fails this test
+        — not just one that makes it too loose.
+        """
+        state = self._wardline_fixed_yaml_state()
+        errors, contracts = validate_semantic_contracts(state)
+        assert errors == ()
+        assert len(contracts) == 1
+        assert contracts[0].outcome is SemanticOutcome.SATISFIED
+
+    def test_wardline_fixed_yaml_passes_full_validate(self) -> None:
+        state = self._wardline_fixed_yaml_state()
+        result = state.validate()
+        # No semantic-contract entry should appear on split_lines.
+        assert not any(
+            entry.component == "node:split_lines" and "line_explode.source_field.line_framed_text" in entry.message
+            for entry in result.errors
+        )
+
+
 class TestSemanticValidatorSecretLeakage:
     SENTINEL = "PASSWORD_SENTINEL_x9q7r3"
 
