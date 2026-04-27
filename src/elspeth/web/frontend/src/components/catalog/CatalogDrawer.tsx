@@ -24,25 +24,30 @@ import {
 import type { PluginSummary, PluginSchemaInfo } from "@/types/index";
 import { PluginCard } from "./PluginCard";
 import { useFocusTrap } from "@/hooks/useFocusTrap";
+import {
+  MIN_FUZZY_CONFIDENCE,
+  confidenceFromScore,
+  fuzzyMatch,
+} from "@/utils/fuzzyScore";
 
 type CatalogTab = "sources" | "transforms" | "sinks";
 
 /**
- * Simple fuzzy match: all query characters must appear in order in target.
- * Returns true if match, false otherwise.
+ * Score a plugin's name+description against the search query.
+ *
+ * Returns the raw fuzzy score (lower is better, -1 for no match) when the
+ * normalized confidence clears the noise floor, otherwise -1. Centralising
+ * this keeps the list and the per-tab counts in lockstep — without it, the
+ * tab badges and the visible results can disagree on what "matches" means.
  */
-function fuzzyMatch(query: string, target: string): boolean {
-  const q = query.toLowerCase();
-  const t = target.toLowerCase();
-  if (q.length === 0) return true;
-
-  let qIdx = 0;
-  for (let tIdx = 0; tIdx < t.length && qIdx < q.length; tIdx++) {
-    if (t[tIdx] === q[qIdx]) {
-      qIdx++;
-    }
+function scorePlugin(query: string, plugin: PluginSummary): number {
+  const target = `${plugin.name} ${plugin.description ?? ""}`;
+  const score = fuzzyMatch(query, target);
+  if (score < 0) return -1;
+  if (confidenceFromScore(score, target.length) < MIN_FUZZY_CONFIDENCE) {
+    return -1;
   }
-  return qIdx === q.length;
+  return score;
 }
 
 interface CatalogDrawerProps {
@@ -175,18 +180,25 @@ export function CatalogDrawer({ isOpen, onClose }: CatalogDrawerProps) {
         : (sinks ?? []);
 
   const pluginList = useMemo(() => {
-    if (!searchQuery.trim()) {
+    const query = searchQuery.trim();
+    if (!query) {
       return allPluginsForTab;
     }
-    return allPluginsForTab.filter((p) =>
-      fuzzyMatch(searchQuery, `${p.name} ${p.description ?? ""}`)
-    );
+    // Score, drop noise, then sort best-match first (ascending = lower score
+    // = closer match). Stable sort keeps original tab order for ties.
+    return allPluginsForTab
+      .map((plugin) => ({ plugin, score: scorePlugin(query, plugin) }))
+      .filter((item) => item.score >= 0)
+      .sort((a, b) => a.score - b.score)
+      .map((item) => item.plugin);
   }, [allPluginsForTab, searchQuery]);
 
-  // Counts for tab badges (filtered counts when searching)
+  // Counts for tab badges (filtered counts when searching). Uses the same
+  // scored predicate so the per-tab badge totals match the rendered list.
   const counts = useMemo(() => {
-    const filterFn = searchQuery.trim()
-      ? (p: PluginSummary) => fuzzyMatch(searchQuery, `${p.name} ${p.description ?? ""}`)
+    const query = searchQuery.trim();
+    const filterFn = query
+      ? (p: PluginSummary) => scorePlugin(query, p) >= 0
       : () => true;
 
     return {

@@ -14,6 +14,7 @@ import {
 } from "react";
 import { useSessionStore } from "@/stores/sessionStore";
 import { useExecutionStore } from "@/stores/executionStore";
+import { fuzzyMatch } from "@/utils/fuzzyScore";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -33,39 +34,6 @@ export const SWITCH_TAB_EVENT = "elspeth-switch-tab";
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
-}
-
-// ── Fuzzy match ──────────────────────────────────────────────────────────────
-
-/**
- * Simple fuzzy match: all query characters must appear in order in target.
- * Returns match score (lower is better) or -1 if no match.
- */
-function fuzzyMatch(query: string, target: string): number {
-  const q = query.toLowerCase();
-  const t = target.toLowerCase();
-
-  if (q.length === 0) return 0;
-
-  let qIdx = 0;
-  let score = 0;
-  let lastMatchIdx = -1;
-
-  for (let tIdx = 0; tIdx < t.length && qIdx < q.length; tIdx++) {
-    if (t[tIdx] === q[qIdx]) {
-      // Consecutive matches are better (lower score)
-      if (lastMatchIdx === tIdx - 1) {
-        score += 0;
-      } else {
-        score += tIdx - lastMatchIdx;
-      }
-      lastMatchIdx = tIdx;
-      qIdx++;
-    }
-  }
-
-  // All query chars matched?
-  return qIdx === q.length ? score : -1;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
