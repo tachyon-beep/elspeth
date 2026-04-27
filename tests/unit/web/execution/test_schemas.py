@@ -978,3 +978,47 @@ class TestErrorEventRoundTrip:
         assert restored.data.message == "Row parse failure"
         assert restored.data.node_id == "csv_source"
         assert isinstance(restored.timestamp, datetime)
+
+
+def test_validation_result_accepts_semantic_contracts():
+    from elspeth.web.execution.schemas import (
+        SemanticEdgeContractResponse,
+        ValidationCheck,
+        ValidationResult,
+    )
+
+    contract = SemanticEdgeContractResponse(
+        from_id="scrape",
+        to_id="explode",
+        consumer_plugin="line_explode",
+        producer_plugin="web_scrape",
+        producer_field="content",
+        consumer_field="content",
+        outcome="conflict",
+        requirement_code="line_explode.source_field.line_framed_text",
+    )
+    result = ValidationResult(
+        is_valid=False,
+        checks=[ValidationCheck(name="semantic_contracts", passed=False, detail="failed")],
+        errors=[],
+        semantic_contracts=[contract],
+    )
+    payload = result.model_dump()
+    assert payload["semantic_contracts"][0]["outcome"] == "conflict"
+    assert payload["semantic_contracts"][0]["consumer_plugin"] == "line_explode"
+
+
+def test_validation_result_rejects_unknown_field():
+    # Confirms extra="forbid" still applies — the new field doesn't
+    # accidentally weaken strict-mode enforcement.
+    from pydantic import ValidationError as PydanticValidationError
+
+    from elspeth.web.execution.schemas import ValidationResult
+
+    with pytest.raises(PydanticValidationError):
+        ValidationResult(
+            is_valid=True,
+            checks=[],
+            errors=[],
+            invented_extra_field="nope",  # type: ignore[call-arg]
+        )

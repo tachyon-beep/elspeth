@@ -50,12 +50,30 @@ class ValidationError(_StrictResponse):
     suggestion: str | None
 
 
+class SemanticEdgeContractResponse(_StrictResponse):
+    """Per-edge semantic-contract result for HTTP serialization.
+
+    Field set mirrors composer_mcp/server.py::_SemanticEdgeContractPayload
+    so MCP and HTTP clients receive identical shapes.
+    """
+
+    from_id: str
+    to_id: str
+    consumer_plugin: str
+    producer_plugin: str | None
+    producer_field: str
+    consumer_field: str
+    outcome: str  # SemanticOutcome value: "satisfied" | "conflict" | "unknown"
+    requirement_code: str
+
+
 class ValidationResult(_StrictResponse):
     """Result of dry-run validation against real engine code."""
 
     is_valid: bool
     checks: list[ValidationCheck]
     errors: list[ValidationError]
+    semantic_contracts: list[SemanticEdgeContractResponse] = []
 
 
 # ── Typed event payload models ──────────────────────────────────────────

@@ -401,22 +401,22 @@ allow_hits:
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
   safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=5f3056c9a46ddeb3
+- key: web/execution/validation.py:R5:validate_pipeline:fp=0cc69c7d01f5f0b5
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=e6c400010231c440
+- key: web/execution/validation.py:R5:validate_pipeline:fp=2d2acf9719af70f5
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=801c7d036f72ff2b
+- key: web/execution/validation.py:R1:validate_pipeline:fp=86ae3e1f24494028
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=cb8f3cf812e3756e
+- key: web/execution/validation.py:R1:validate_pipeline:fp=8a61eb13239572cb
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
@@ -514,7 +514,7 @@ allow_hits:
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=c6b468f779428a6a
+- key: web/execution/validation.py:R5:validate_pipeline:fp=2ea0c758300ffc5f
   owner: web-execution
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
@@ -964,32 +964,32 @@ allow_hits:
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
   safety: Continues to next delimiter; returns None for uncertain content; no data loss
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=18e5e2ff7767f927
+- key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=8edcac734ba3bbc4
   owner: web-execution
   reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp, rejects int (Unix epoch)
   safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False) coercion scope
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=f188d1541f351fa4
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=f92e540938b20316
   owner: web-execution
   reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip path; non-dict values handled by Pydantic
   safety: Structural dispatch for deserialization, not error suppression
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=b9bc3b949a507bde
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=6362fcd2f47a1a88
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=118cc4bdd8ed7f3b
+- key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=93f94bb7ebf3eae8
   owner: web-execution
   reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=cc9c723009d5e352
+- key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=967d7fc40d9b6626
   owner: web-execution
   reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip resolution
   safety: Non-dict data falls through to Pydantic union matching
   expires: null
-- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=0dea9b2a1e01b6fc
+- key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=cd4aa2d1b29e0ae9
   owner: web-execution
   reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator

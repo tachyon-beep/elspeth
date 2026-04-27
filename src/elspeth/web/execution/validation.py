@@ -35,6 +35,7 @@ from elspeth.web.composer.state import CompositionState, ValidationEntry
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.protocol import YamlGenerator
 from elspeth.web.execution.schemas import (
+    SemanticEdgeContractResponse,
     ValidationCheck,
     ValidationError,
     ValidationResult,
@@ -108,6 +109,31 @@ def _collect_secret_refs(obj: Any) -> list[str]:
         for item in obj:
             refs.extend(_collect_secret_refs(item))
     return refs
+
+
+def _serialize_semantic_contracts(
+    contracts: tuple[SemanticEdgeContract, ...],
+) -> list[SemanticEdgeContractResponse]:
+    """Convert internal SemanticEdgeContract records to the wire response model.
+
+    Field shape mirrors composer_mcp/server.py::_SemanticEdgeContractPayload.
+    Operators want to confirm "yes, semantic_contracts: 1 satisfied" in the
+    UI banner even on success paths — the response carries the same
+    structured payload regardless of the overall pass/fail outcome.
+    """
+    return [
+        SemanticEdgeContractResponse(
+            from_id=c.from_id,
+            to_id=c.to_id,
+            consumer_plugin=c.consumer_plugin,
+            producer_plugin=c.producer_plugin,
+            producer_field=c.producer_field,
+            consumer_field=c.consumer_field,
+            outcome=c.outcome.value,
+            requirement_code=c.requirement.requirement_code,
+        )
+        for c in contracts
+    ]
 
 
 def _assistance_suggestion_for(
@@ -337,7 +363,12 @@ def validate_pipeline(
                 )
             )
         checks.extend(_skipped_checks(_CHECK_SEMANTIC_CONTRACTS))
-        return ValidationResult(is_valid=False, checks=checks, errors=errors)
+        return ValidationResult(
+            is_valid=False,
+            checks=checks,
+            errors=errors,
+            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+        )
 
     checks.append(
         ValidationCheck(
@@ -405,7 +436,12 @@ def validate_pipeline(
             )
         )
         checks.extend(_skipped_checks(_CHECK_SETTINGS))
-        return ValidationResult(is_valid=False, checks=checks, errors=errors)
+        return ValidationResult(
+            is_valid=False,
+            checks=checks,
+            errors=errors,
+            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+        )
 
     # Step 4: Plugin instantiation
     try:
@@ -442,7 +478,12 @@ def validate_pipeline(
             )
         )
         checks.extend(_skipped_checks(_CHECK_PLUGINS))
-        return ValidationResult(is_valid=False, checks=checks, errors=errors)
+        return ValidationResult(
+            is_valid=False,
+            checks=checks,
+            errors=errors,
+            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+        )
 
     # Step 5: Graph construction + structural validation
     try:
@@ -480,7 +521,12 @@ def validate_pipeline(
             )
         )
         checks.extend(_skipped_checks(_CHECK_GRAPH))
-        return ValidationResult(is_valid=False, checks=checks, errors=errors)
+        return ValidationResult(
+            is_valid=False,
+            checks=checks,
+            errors=errors,
+            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+        )
 
     # Step 6: Schema compatibility
     try:
@@ -508,6 +554,16 @@ def validate_pipeline(
                 suggestion=None,
             )
         )
-        return ValidationResult(is_valid=False, checks=checks, errors=errors)
+        return ValidationResult(
+            is_valid=False,
+            checks=checks,
+            errors=errors,
+            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+        )
 
-    return ValidationResult(is_valid=True, checks=checks, errors=errors)
+    return ValidationResult(
+        is_valid=True,
+        checks=checks,
+        errors=errors,
+        semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+    )
