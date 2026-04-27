@@ -22,7 +22,6 @@ import yaml
 from pydantic import ValidationError as PydanticValidationError
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts.plugin_semantics import SemanticEdgeContract
 from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
@@ -31,11 +30,14 @@ from elspeth.core.secrets import resolve_secret_refs
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
-from elspeth.web.composer.state import CompositionState, ValidationEntry
+from elspeth.web.composer.state import CompositionState
 from elspeth.web.config import WebSettings
+from elspeth.web.execution._semantic_helpers import (
+    assistance_suggestion_for,
+    serialize_semantic_contracts,
+)
 from elspeth.web.execution.protocol import YamlGenerator
 from elspeth.web.execution.schemas import (
-    SemanticEdgeContractResponse,
     ValidationCheck,
     ValidationError,
     ValidationResult,
@@ -109,74 +111,6 @@ def _collect_secret_refs(obj: Any) -> list[str]:
         for item in obj:
             refs.extend(_collect_secret_refs(item))
     return refs
-
-
-def _serialize_semantic_contracts(
-    contracts: tuple[SemanticEdgeContract, ...],
-) -> list[SemanticEdgeContractResponse]:
-    """Convert internal SemanticEdgeContract records to the wire response model.
-
-    Field shape mirrors composer_mcp/server.py::_SemanticEdgeContractPayload.
-    Operators want to confirm "yes, semantic_contracts: 1 satisfied" in the
-    UI banner even on success paths — the response carries the same
-    structured payload regardless of the overall pass/fail outcome.
-    """
-    return [
-        SemanticEdgeContractResponse(
-            from_id=c.from_id,
-            to_id=c.to_id,
-            consumer_plugin=c.consumer_plugin,
-            producer_plugin=c.producer_plugin,
-            producer_field=c.producer_field,
-            consumer_field=c.consumer_field,
-            outcome=c.outcome.value,
-            requirement_code=c.requirement.requirement_code,
-        )
-        for c in contracts
-    ]
-
-
-def _assistance_suggestion_for(
-    entry: ValidationEntry,
-    contracts: tuple[SemanticEdgeContract, ...],
-) -> str | None:
-    """Look up plugin-owned guidance for a semantic error.
-
-    Uses SemanticEdgeContract.consumer_plugin (and producer_plugin as
-    a fallback) to address a SPECIFIC plugin class. Looping every
-    registered transform and returning the first match was registry-
-    order dependent — fixed by carrying the plugin names on the
-    contract (Phase 1 Task 1.3).
-    """
-    from typing import cast
-
-    from elspeth.plugins.infrastructure.base import BaseTransform
-    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
-
-    component_id = entry.component.removeprefix("node:")
-    matching = next((c for c in contracts if c.to_id == component_id), None)
-    if matching is None:
-        return None
-
-    manager = get_shared_plugin_manager()
-    issue_code = matching.requirement.requirement_code
-
-    # Consumer plugin owns the requirement, so it's the authoritative
-    # source for guidance about the requirement_code. Verified method
-    # name: get_transform_by_name (manager.py:183), NOT get_transform_class.
-    # The registry returns type[TransformProtocol]; assistance lives on
-    # BaseTransform — every in-tree plugin is a BaseTransform subclass,
-    # so the cast is sound (per CLAUDE.md plugin-as-system-code policy).
-    consumer_cls = cast(type[BaseTransform], manager.get_transform_by_name(matching.consumer_plugin))
-    consumer_assistance = consumer_cls.get_agent_assistance(issue_code=issue_code)
-    if consumer_assistance is not None:
-        return consumer_assistance.summary
-
-    # Producer plugin may also publish guidance for the producer-side
-    # fact_code. The validator could attach that fact_code on the
-    # contract in a later phase; for now, only consumer assistance is
-    # surfaced as suggestion text.
-    return None
 
 
 def validate_pipeline(
@@ -359,7 +293,7 @@ def validate_pipeline(
                     component_id=entry.component.removeprefix("node:"),
                     component_type="transform",
                     message=entry.message,
-                    suggestion=_assistance_suggestion_for(entry, semantic_contracts),
+                    suggestion=assistance_suggestion_for(entry, semantic_contracts),
                 )
             )
         checks.extend(_skipped_checks(_CHECK_SEMANTIC_CONTRACTS))
@@ -367,7 +301,7 @@ def validate_pipeline(
             is_valid=False,
             checks=checks,
             errors=errors,
-            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+            semantic_contracts=serialize_semantic_contracts(semantic_contracts),
         )
 
     checks.append(
@@ -440,7 +374,7 @@ def validate_pipeline(
             is_valid=False,
             checks=checks,
             errors=errors,
-            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+            semantic_contracts=serialize_semantic_contracts(semantic_contracts),
         )
 
     # Step 4: Plugin instantiation
@@ -482,7 +416,7 @@ def validate_pipeline(
             is_valid=False,
             checks=checks,
             errors=errors,
-            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+            semantic_contracts=serialize_semantic_contracts(semantic_contracts),
         )
 
     # Step 5: Graph construction + structural validation
@@ -525,7 +459,7 @@ def validate_pipeline(
             is_valid=False,
             checks=checks,
             errors=errors,
-            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+            semantic_contracts=serialize_semantic_contracts(semantic_contracts),
         )
 
     # Step 6: Schema compatibility
@@ -558,12 +492,12 @@ def validate_pipeline(
             is_valid=False,
             checks=checks,
             errors=errors,
-            semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+            semantic_contracts=serialize_semantic_contracts(semantic_contracts),
         )
 
     return ValidationResult(
         is_valid=True,
         checks=checks,
         errors=errors,
-        semantic_contracts=_serialize_semantic_contracts(semantic_contracts),
+        semantic_contracts=serialize_semantic_contracts(semantic_contracts),
     )
