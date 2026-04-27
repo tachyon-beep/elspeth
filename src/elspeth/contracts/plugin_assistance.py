@@ -51,11 +51,8 @@ class PluginAssistance:
     composer_hints: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        # examples is tuple[PluginAssistanceExample, ...]; the elements
-        # already deep-freeze their own dict fields in their own __post_init__.
-        # No additional freeze_fields needed for examples itself, because
-        # tuple of frozen-dataclass elements is natively immutable AND
-        # element fields are already frozen at element construction time.
-        # suggested_fixes / composer_hints are tuple[str, ...]: natively
-        # immutable, no guard needed.
-        pass
+        # The type annotations name tuples, but Python does not enforce that —
+        # callers can pass lists. freeze_fields coerces list -> tuple
+        # (identity-preserving when already a tuple). Element-level dict
+        # freezing is handled by PluginAssistanceExample.__post_init__.
+        freeze_fields(self, "suggested_fixes", "examples", "composer_hints")

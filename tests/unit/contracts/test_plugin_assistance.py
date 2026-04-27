@@ -62,3 +62,25 @@ class TestPluginAssistanceFreeze:
         assert assistance.suggested_fixes == ()
         assert assistance.examples == ()
         assert assistance.composer_hints == ()
+
+    def test_list_inputs_are_coerced_to_tuples(self):
+        # Type annotations name tuples, but Python does not enforce that.
+        # A caller passing a list must produce an immutable tuple field
+        # rather than a live list reference back to caller-mutable state.
+        suggested = ["fix-a", "fix-b"]
+        examples = [PluginAssistanceExample(title="t")]
+        hints = ["hint-a"]
+        assistance = PluginAssistance(
+            plugin_name="p",
+            issue_code=None,
+            summary="s",
+            suggested_fixes=suggested,  # type: ignore[arg-type]
+            examples=examples,  # type: ignore[arg-type]
+            composer_hints=hints,  # type: ignore[arg-type]
+        )
+        assert isinstance(assistance.suggested_fixes, tuple)
+        assert isinstance(assistance.examples, tuple)
+        assert isinstance(assistance.composer_hints, tuple)
+        # Mutating the original list MUST NOT affect the frozen field.
+        suggested.append("fix-c")
+        assert "fix-c" not in assistance.suggested_fixes

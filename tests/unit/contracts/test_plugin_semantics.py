@@ -136,6 +136,46 @@ class TestFieldSemanticRequirement:
         with pytest.raises(FrozenInstanceError):
             requirement.field_name = "y"  # type: ignore[misc]
 
+    def test_set_inputs_are_coerced_to_frozenset(self):
+        # Type annotations name frozensets, but Python does not enforce that.
+        # A caller passing a mutable set must produce an immutable
+        # frozenset rather than a live set reference.
+        kinds = {ContentKind.PLAIN_TEXT}
+        framings = {TextFraming.NEWLINE_FRAMED}
+        configured_by = ["source_field"]
+        requirement = FieldSemanticRequirement(
+            field_name="x",
+            accepted_content_kinds=kinds,  # type: ignore[arg-type]
+            accepted_text_framings=framings,  # type: ignore[arg-type]
+            requirement_code="t.x.req",
+            configured_by=configured_by,  # type: ignore[arg-type]
+        )
+        assert isinstance(requirement.accepted_content_kinds, frozenset)
+        assert isinstance(requirement.accepted_text_framings, frozenset)
+        assert isinstance(requirement.configured_by, tuple)
+        # Mutating the original containers MUST NOT affect the frozen fields.
+        kinds.add(ContentKind.MARKDOWN)
+        framings.add(TextFraming.LINE_COMPATIBLE)
+        configured_by.append("extra")
+        assert ContentKind.MARKDOWN not in requirement.accepted_content_kinds
+        assert TextFraming.LINE_COMPATIBLE not in requirement.accepted_text_framings
+        assert "extra" not in requirement.configured_by
+
+
+class TestFieldSemanticFactsCoercion:
+    def test_list_configured_by_coerced_to_tuple(self):
+        configured_by = ["format", "text_separator"]
+        facts = FieldSemanticFacts(
+            field_name="x",
+            content_kind=ContentKind.PLAIN_TEXT,
+            text_framing=TextFraming.NEWLINE_FRAMED,
+            fact_code="t.x.nl",
+            configured_by=configured_by,  # type: ignore[arg-type]
+        )
+        assert isinstance(facts.configured_by, tuple)
+        configured_by.append("extra")
+        assert "extra" not in facts.configured_by
+
 
 class TestOutputSemanticDeclaration:
     def test_default_is_empty(self):
@@ -148,11 +188,34 @@ class TestOutputSemanticDeclaration:
         decl = OutputSemanticDeclaration(fields=(f1, f2))
         assert decl.fields == (f1, f2)
 
+    def test_list_input_is_coerced_to_tuple(self):
+        f1 = FieldSemanticFacts("a", ContentKind.PLAIN_TEXT, fact_code="t.a")
+        fields = [f1]
+        decl = OutputSemanticDeclaration(fields=fields)  # type: ignore[arg-type]
+        assert isinstance(decl.fields, tuple)
+        # Mutating the source list MUST NOT affect the frozen field.
+        fields.append(FieldSemanticFacts("b", ContentKind.MARKDOWN, fact_code="t.b"))
+        assert len(decl.fields) == 1
+
 
 class TestInputSemanticRequirements:
     def test_default_is_empty(self):
         reqs = InputSemanticRequirements()
         assert reqs.fields == ()
+
+    def test_list_input_is_coerced_to_tuple(self):
+        req = FieldSemanticRequirement(
+            field_name="x",
+            accepted_content_kinds=frozenset({ContentKind.PLAIN_TEXT}),
+            accepted_text_framings=frozenset({TextFraming.NEWLINE_FRAMED}),
+            requirement_code="t.x.req",
+        )
+        fields = [req]
+        reqs = InputSemanticRequirements(fields=fields)  # type: ignore[arg-type]
+        assert isinstance(reqs.fields, tuple)
+        # Mutating the source list MUST NOT affect the frozen field.
+        fields.append(req)
+        assert len(reqs.fields) == 1
 
 
 class TestSemanticEdgeContract:

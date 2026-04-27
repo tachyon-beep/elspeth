@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
+from elspeth.contracts.freeze import freeze_fields
+
 
 class ContentKind(StrEnum):
     """The kind of content a field carries."""
@@ -71,12 +73,18 @@ class FieldSemanticFacts:
     fact_code: str = "field_semantics"
     configured_by: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        freeze_fields(self, "configured_by")
+
 
 @dataclass(frozen=True, slots=True)
 class OutputSemanticDeclaration:
     """A producer's full semantic facts across the fields it emits."""
 
     fields: tuple[FieldSemanticFacts, ...] = ()
+
+    def __post_init__(self) -> None:
+        freeze_fields(self, "fields")
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,12 +99,26 @@ class FieldSemanticRequirement:
     unknown_policy: UnknownSemanticPolicy = UnknownSemanticPolicy.FAIL
     configured_by: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        # accepted_*_kinds/framings annotated as frozenset, but callers can
+        # pass set/list. freeze_fields coerces set -> frozenset and
+        # list -> tuple. Identity-preserving when already deeply frozen.
+        freeze_fields(
+            self,
+            "accepted_content_kinds",
+            "accepted_text_framings",
+            "configured_by",
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class InputSemanticRequirements:
     """A consumer's full semantic requirements across the fields it consumes."""
 
     fields: tuple[FieldSemanticRequirement, ...] = ()
+
+    def __post_init__(self) -> None:
+        freeze_fields(self, "fields")
 
 
 @dataclass(frozen=True, slots=True)
