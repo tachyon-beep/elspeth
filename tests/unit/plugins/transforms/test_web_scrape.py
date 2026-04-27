@@ -1488,3 +1488,171 @@ class TestOutputSchemaConfig:
         )
         assert transform._output_schema_config is not None
         assert frozenset(transform._output_schema_config.guaranteed_fields) == expected
+
+
+class TestWebScrapeOutputSemantics:
+    def _build(self, **option_overrides):
+        # WebScrapeConfig is a TransformDataConfig subclass — schema is
+        # REQUIRED at construction. Omitting it raises PluginConfigError
+        # which the validator's tolerant probe path silently absorbs;
+        # the test would then pass vacuously without exercising
+        # output_semantics() at all.
+        from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+        defaults = {
+            "schema": {"mode": "flexible", "fields": ["url: str"]},
+            "required_input_fields": ["url"],
+            "url_field": "url",
+            "content_field": "content",
+            "fingerprint_field": "fingerprint",
+            "format": "markdown",
+            "http": {
+                "abuse_contact": "x@example.com",
+                "scraping_reason": "t",
+                "timeout": 5,
+                "allowed_hosts": "public_only",
+            },
+        }
+        defaults.update(option_overrides)
+        return get_shared_plugin_manager().create_transform("web_scrape", defaults)
+
+    def test_text_compact_separator_declares_plain_text_compact(self):
+        from elspeth.contracts.plugin_semantics import ContentKind, TextFraming
+
+        ws = self._build(format="text", text_separator=" ")
+        decl = ws.output_semantics()
+        facts = next(f for f in decl.fields if f.field_name == "content")
+        assert facts.content_kind is ContentKind.PLAIN_TEXT
+        assert facts.text_framing is TextFraming.COMPACT
+        assert facts.fact_code == "web_scrape.content.compact_text"
+        assert facts.configured_by == ("format", "text_separator")
+
+    def test_text_newline_separator_declares_plain_text_newline_framed(self):
+        from elspeth.contracts.plugin_semantics import ContentKind, TextFraming
+
+        ws = self._build(format="text", text_separator="\n")
+        facts = next(f for f in ws.output_semantics().fields if f.field_name == "content")
+        assert facts.content_kind is ContentKind.PLAIN_TEXT
+        assert facts.text_framing is TextFraming.NEWLINE_FRAMED
+
+    def test_markdown_declares_markdown_line_compatible(self):
+        from elspeth.contracts.plugin_semantics import ContentKind, TextFraming
+
+        ws = self._build(format="markdown")
+        facts = next(f for f in ws.output_semantics().fields if f.field_name == "content")
+        assert facts.content_kind is ContentKind.MARKDOWN
+        assert facts.text_framing is TextFraming.LINE_COMPATIBLE
+
+    def test_raw_declares_html_raw_not_text(self):
+        from elspeth.contracts.plugin_semantics import ContentKind, TextFraming
+
+        ws = self._build(format="raw")
+        facts = next(f for f in ws.output_semantics().fields if f.field_name == "content")
+        assert facts.content_kind is ContentKind.HTML_RAW
+        assert facts.text_framing is TextFraming.NOT_TEXT
+
+    def test_custom_content_field_changes_semantic_field_name(self):
+        ws = self._build(format="text", text_separator="\n", content_field="body")
+        facts = next(f for f in ws.output_semantics().fields if f.field_name == "body")
+        assert facts.field_name == "body"
+
+
+class TestWebScrapeAssistance:
+    def test_returns_assistance_for_compact_text_issue(self):
+        from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+
+        result = WebScrapeTransform.get_agent_assistance(
+            issue_code="web_scrape.content.compact_text",
+        )
+        assert result is not None
+        assert result.plugin_name == "web_scrape"
+        assert result.issue_code == "web_scrape.content.compact_text"
+        # Suggested fixes mention configuration knobs only — no values.
+        assert any("text_separator" in fix for fix in result.suggested_fixes)
+        assert any("markdown" in fix.lower() for fix in result.suggested_fixes)
+
+    def test_returns_none_for_unknown_issue(self):
+        from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+
+        assert WebScrapeTransform.get_agent_assistance(issue_code="nope.unknown") is None
+
+    def test_returns_none_when_no_issue_code(self):
+        from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+
+        assert WebScrapeTransform.get_agent_assistance(issue_code=None) is None
+
+    def test_assistance_does_not_leak_secret_options(self):
+        """Sentinel test: configured option values must not bleed into assistance prose.
+
+        Construct a plugin with sentinel-laced options (abuse_contact, scraping_reason
+        — the realistic credential-shaped leak surface) and assert the returned
+        PluginAssistance carries none of those raw values. Also covers
+        output_semantics() against accidental value-bearing fields.
+
+        Field names must be Python identifiers (config layer enforces this), so
+        the sentinel only appears in HTTP option values where leakage would
+        actually be a B5 incident.
+        """
+        from elspeth.contracts.plugin_assistance import PluginAssistance, PluginAssistanceExample
+        from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+        from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+
+        sentinel_contact = "SENTINEL_LEAK_CONTACT@example.com"
+        sentinel_reason = "SENTINEL_LEAK_REASON_credential_shape"
+
+        plugin = get_shared_plugin_manager().create_transform(
+            "web_scrape",
+            {
+                "schema": {"mode": "flexible", "fields": ["url: str"]},
+                "required_input_fields": ["url"],
+                "url_field": "url",
+                "content_field": "content",
+                "fingerprint_field": "fingerprint",
+                "format": "text",
+                "text_separator": " ",
+                "http": {
+                    "abuse_contact": sentinel_contact,
+                    "scraping_reason": sentinel_reason,
+                    "timeout": 5,
+                    "allowed_hosts": "public_only",
+                },
+            },
+        )
+
+        # output_semantics() must not echo any HTTP option value.
+        decl = plugin.output_semantics()
+        for fact in decl.fields:
+            assert sentinel_contact not in fact.field_name
+            assert sentinel_contact not in fact.fact_code
+            assert all(sentinel_contact not in entry for entry in fact.configured_by)
+            assert sentinel_reason not in fact.field_name
+            assert sentinel_reason not in fact.fact_code
+            assert all(sentinel_reason not in entry for entry in fact.configured_by)
+
+        result = WebScrapeTransform.get_agent_assistance(
+            issue_code="web_scrape.content.compact_text",
+        )
+        assert result is not None
+        assert isinstance(result, PluginAssistance)
+
+        def _scan(text: str) -> None:
+            assert sentinel_contact not in text
+            assert sentinel_reason not in text
+
+        _scan(result.plugin_name)
+        if result.issue_code is not None:
+            _scan(result.issue_code)
+        _scan(result.summary)
+        for fix in result.suggested_fixes:
+            _scan(fix)
+        for hint in result.composer_hints:
+            _scan(hint)
+        for example in result.examples:
+            assert isinstance(example, PluginAssistanceExample)
+            _scan(example.title)
+            for mapping_field in (example.before, example.after):
+                if mapping_field is None:
+                    continue
+                for key, value in mapping_field.items():
+                    _scan(str(key))
+                    _scan(str(value))

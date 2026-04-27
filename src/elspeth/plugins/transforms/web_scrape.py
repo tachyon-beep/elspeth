@@ -17,7 +17,7 @@ Audit Trail:
 
 import ipaddress
 from ipaddress import IPv4Network, IPv6Network
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import httpx
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -54,6 +54,10 @@ from elspeth.plugins.transforms.web_scrape_errors import (
 )
 from elspeth.plugins.transforms.web_scrape_extraction import extract_content
 from elspeth.plugins.transforms.web_scrape_fingerprint import compute_fingerprint
+
+if TYPE_CHECKING:
+    from elspeth.contracts.plugin_assistance import PluginAssistance
+    from elspeth.contracts.plugin_semantics import OutputSemanticDeclaration
 
 # Audit-only fields — provenance metadata that lives in success_reason["metadata"],
 # not in pipeline rows. See spec: 2026-03-21-audit-provenance-boundary-design.md
@@ -197,6 +201,56 @@ def _build_web_scrape_output_schema_config(
     )
 
 
+def _build_web_scrape_output_semantics(
+    *,
+    content_field: str,
+    format: str,
+    text_separator: str,
+) -> "OutputSemanticDeclaration":
+    """Map WebScrapeConfig values to declared output facts for the content field."""
+    from elspeth.contracts.plugin_semantics import (
+        ContentKind,
+        FieldSemanticFacts,
+        OutputSemanticDeclaration,
+        TextFraming,
+    )
+
+    if format == "markdown":
+        kind = ContentKind.MARKDOWN
+        framing = TextFraming.LINE_COMPATIBLE
+        fact_code = "web_scrape.content.markdown"
+    elif format == "raw":
+        kind = ContentKind.HTML_RAW
+        framing = TextFraming.NOT_TEXT
+        fact_code = "web_scrape.content.raw_html"
+    elif format == "text":
+        kind = ContentKind.PLAIN_TEXT
+        if "\n" in text_separator:
+            framing = TextFraming.NEWLINE_FRAMED
+            fact_code = "web_scrape.content.newline_framed_text"
+        else:
+            framing = TextFraming.COMPACT
+            fact_code = "web_scrape.content.compact_text"
+    else:
+        # Unknown format value — let the schema layer handle it.
+        # Returning UNKNOWN here is honest: we don't know.
+        kind = ContentKind.UNKNOWN
+        framing = TextFraming.UNKNOWN
+        fact_code = "web_scrape.content.unknown_format"
+
+    return OutputSemanticDeclaration(
+        fields=(
+            FieldSemanticFacts(
+                field_name=content_field,
+                content_kind=kind,
+                text_framing=framing,
+                fact_code=fact_code,
+                configured_by=("format", "text_separator"),
+            ),
+        ),
+    )
+
+
 def _final_response_ip(response: httpx.Response) -> str:
     """Extract the final IP-pinned destination from an SSRF-safe response."""
     try:
@@ -262,7 +316,7 @@ class WebScrapeTransform(BaseTransform):
     name = "web_scrape"
     determinism = Determinism.EXTERNAL_CALL
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:f60fb40c235352e1"
+    source_file_hash: str | None = "sha256:b1339397350c2ffc"
     config_model = WebScrapeConfig
     passes_through_input = True
 
@@ -352,6 +406,52 @@ class WebScrapeTransform(BaseTransform):
             self._output_schema_config,
             "WebScrapeOutput",
             allow_coercion=False,
+        )
+
+    def output_semantics(self) -> "OutputSemanticDeclaration":
+        return _build_web_scrape_output_semantics(
+            content_field=self._content_field,
+            format=self._format,
+            text_separator=self._text_separator,
+        )
+
+    @classmethod
+    def get_agent_assistance(
+        cls,
+        *,
+        issue_code: str | None = None,
+    ) -> "PluginAssistance | None":
+        from elspeth.contracts.plugin_assistance import (
+            PluginAssistance,
+            PluginAssistanceExample,
+        )
+
+        if issue_code != "web_scrape.content.compact_text":
+            return None
+        return PluginAssistance(
+            plugin_name="web_scrape",
+            issue_code="web_scrape.content.compact_text",
+            summary=(
+                "format='text' with a non-newline text_separator produces a "
+                "compact single-line string. Downstream line-oriented "
+                "transforms (line_explode) cannot recover line boundaries."
+            ),
+            suggested_fixes=(
+                "Set text_separator: '\\n' to preserve line boundaries.",
+                "Or use format: markdown — markdown extraction preserves line-oriented structure.",
+            ),
+            examples=(
+                PluginAssistanceExample(
+                    title="Use newline separator with text format",
+                    before={"format": "text", "text_separator": " "},
+                    after={"format": "text", "text_separator": "\n"},
+                ),
+                PluginAssistanceExample(
+                    title="Switch to markdown format",
+                    before={"format": "text", "text_separator": " "},
+                    after={"format": "markdown"},
+                ),
+            ),
         )
 
     def forward_invariant_probe_rows(self, probe: PipelineRow) -> list[PipelineRow]:
