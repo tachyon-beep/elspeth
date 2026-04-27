@@ -258,6 +258,32 @@ export interface ValidationWarning {
 }
 
 /**
+ * Per-edge semantic-contract result.
+ *
+ * Populated by /validate when the semantic_contracts check runs.
+ * Mirrors the backend SemanticEdgeContractResponse Pydantic model
+ * (web/execution/schemas.py) and the MCP _SemanticEdgeContractPayload
+ * (composer_mcp/server.py) so all three surfaces carry identical shapes.
+ *
+ * - outcome=satisfied: producer facts match consumer requirement
+ * - outcome=conflict:  producer facts violate consumer requirement
+ * - outcome=unknown:   producer declared no facts for that field, or
+ *                      facts contained an UNKNOWN dimension; under
+ *                      consumer unknown_policy=FAIL this is treated as
+ *                      a blocking error.
+ */
+export interface SemanticEdgeContract {
+  from_id: string;
+  to_id: string;
+  consumer_plugin: string;
+  producer_plugin: string | null;
+  producer_field: string;
+  consumer_field: string;
+  outcome: "satisfied" | "conflict" | "unknown";
+  requirement_code: string;
+}
+
+/**
  * Full validation result from POST /api/sessions/{id}/validate.
  * Stage 2 validation with per-component detail.
  */
@@ -267,6 +293,7 @@ export interface ValidationResult {
   checks: ValidationCheck[];
   errors: ValidationError[];
   warnings?: ValidationWarning[];
+  semantic_contracts?: SemanticEdgeContract[];
 }
 
 /**
