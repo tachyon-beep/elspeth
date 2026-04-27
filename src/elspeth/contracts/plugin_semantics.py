@@ -9,6 +9,7 @@ ends up rebuilding ad hoc runtime validation as expanding prose.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 
@@ -52,3 +53,47 @@ class SemanticOutcome(StrEnum):
     SATISFIED = "satisfied"
     CONFLICT = "conflict"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class FieldSemanticFacts:
+    """Structured facts a producer declares about a field it emits.
+
+    All container fields are tuples / enum values. ``configured_by``
+    names option paths that influenced this fact; it MUST contain only
+    safe option names, never values, URLs, headers, prompts, row data,
+    or exception text.
+    """
+
+    field_name: str
+    content_kind: ContentKind
+    text_framing: TextFraming = TextFraming.UNKNOWN
+    fact_code: str = "field_semantics"
+    configured_by: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class OutputSemanticDeclaration:
+    """A producer's full semantic facts across the fields it emits."""
+
+    fields: tuple[FieldSemanticFacts, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FieldSemanticRequirement:
+    """Structured requirements a consumer declares for a field it consumes."""
+
+    field_name: str
+    accepted_content_kinds: frozenset[ContentKind]
+    accepted_text_framings: frozenset[TextFraming]
+    requirement_code: str
+    severity: str = "high"
+    unknown_policy: UnknownSemanticPolicy = UnknownSemanticPolicy.FAIL
+    configured_by: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class InputSemanticRequirements:
+    """A consumer's full semantic requirements across the fields it consumes."""
+
+    fields: tuple[FieldSemanticRequirement, ...] = ()
