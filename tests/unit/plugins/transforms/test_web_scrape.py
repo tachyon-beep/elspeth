@@ -1656,3 +1656,45 @@ class TestWebScrapeAssistance:
                 for key, value in mapping_field.items():
                     _scan(str(key))
                     _scan(str(value))
+
+
+class TestWebScrapeSecretLeakage:
+    SENTINEL = "PASSWORD_SENTINEL_x9q7r3"
+
+    def test_sentinel_url_not_in_output_semantics_or_assistance(self):
+        from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+        from elspeth.plugins.transforms.web_scrape import WebScrapeTransform
+
+        ws = get_shared_plugin_manager().create_transform(
+            "web_scrape",
+            {
+                "schema": {"mode": "flexible", "fields": ["url: str"]},
+                "required_input_fields": ["url"],
+                "url_field": "url",
+                "content_field": f"content_{self.SENTINEL}",  # field name SHOULD appear
+                "fingerprint_field": "fingerprint",
+                "format": "text",
+                "text_separator": " ",
+                "http": {
+                    "abuse_contact": f"x+{self.SENTINEL}@example.com",
+                    "scraping_reason": f"reason-{self.SENTINEL}",
+                    "timeout": 5,
+                    "allowed_hosts": "public_only",
+                },
+            },
+        )
+
+        # Output semantics: the configured content_field name DOES include
+        # the sentinel - that's not a leak, the user wrote that field name.
+        # What MUST NOT appear: the abuse_contact email, the scraping_reason.
+        decl = ws.output_semantics()
+        decl_repr = repr(decl)
+        assert f"x+{self.SENTINEL}" not in decl_repr
+        assert f"reason-{self.SENTINEL}" not in decl_repr
+
+        # Assistance is class-level, no instance state - but verify anyway.
+        assistance = WebScrapeTransform.get_agent_assistance(
+            issue_code="web_scrape.content.compact_text",
+        )
+        assistance_repr = repr(assistance)
+        assert self.SENTINEL not in assistance_repr

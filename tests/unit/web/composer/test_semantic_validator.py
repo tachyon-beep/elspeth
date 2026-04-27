@@ -444,3 +444,94 @@ class TestParityWithLegacyFramingValidator:
         assert legacy_blocked == expect_blocked
         assert semantic_blocked == expect_blocked
         assert legacy_blocked == semantic_blocked
+
+
+class TestSemanticValidatorSecretLeakage:
+    SENTINEL = "PASSWORD_SENTINEL_x9q7r3"
+
+    def test_sentinel_does_not_appear_in_validator_output(self):
+        # Build a Wardline state with sentinel in non-field-name options.
+        state = CompositionState(
+            metadata=PipelineMetadata(name="t"),
+            version=1,
+            edges=(),
+            source=SourceSpec(
+                plugin="csv",
+                on_success="scrape_in",
+                options={
+                    "path": f"data/{self.SENTINEL}/url.csv",
+                    "schema": {"mode": "fixed", "fields": ["url: str"]},
+                },
+                on_validation_failure="quarantine",
+            ),
+            nodes=(
+                NodeSpec(
+                    id="scrape",
+                    node_type="transform",
+                    plugin="web_scrape",
+                    input="scrape_in",
+                    on_success="explode_in",
+                    on_error="errors",
+                    options={
+                        "schema": {"mode": "flexible", "fields": ["url: str"]},
+                        "required_input_fields": ["url"],
+                        "url_field": "url",
+                        "content_field": "content",
+                        "fingerprint_field": "fingerprint",
+                        "format": "text",
+                        "text_separator": " ",
+                        "http": {
+                            "abuse_contact": f"x+{self.SENTINEL}@example.com",
+                            "scraping_reason": f"reason-{self.SENTINEL}",
+                            "timeout": 5,
+                            "allowed_hosts": "public_only",
+                        },
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+                NodeSpec(
+                    id="explode",
+                    node_type="transform",
+                    plugin="line_explode",
+                    input="explode_in",
+                    on_success="sink",
+                    on_error="errors",
+                    options={
+                        "schema": {"mode": "flexible", "fields": ["content: str"]},
+                        "source_field": "content",
+                    },
+                    condition=None,
+                    routes=None,
+                    fork_to=None,
+                    branches=None,
+                    policy=None,
+                    merge=None,
+                ),
+            ),
+            outputs=(
+                OutputSpec(
+                    name="sink",
+                    plugin="json",
+                    options={"path": f"out-{self.SENTINEL}.json"},
+                    on_write_failure="discard",
+                ),
+                OutputSpec(
+                    name="errors",
+                    plugin="json",
+                    options={"path": "err.json"},
+                    on_write_failure="discard",
+                ),
+            ),
+        )
+
+        errors, contracts = validate_semantic_contracts(state)
+        for entry in errors:
+            assert self.SENTINEL not in entry.message, f"Sentinel leaked in error message: {entry.message!r}"
+            assert self.SENTINEL not in entry.component
+        for contract in contracts:
+            assert self.SENTINEL not in repr(contract)
