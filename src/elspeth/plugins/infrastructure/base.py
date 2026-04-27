@@ -45,6 +45,11 @@ from elspeth.contracts.schema_contract import FieldContract, PipelineRow, Schema
 if TYPE_CHECKING:
     from elspeth.contracts.contexts import LifecycleContext, SinkContext, SourceContext, TransformContext
     from elspeth.contracts.header_modes import HeaderMode
+    from elspeth.contracts.plugin_assistance import PluginAssistance
+    from elspeth.contracts.plugin_semantics import (
+        InputSemanticRequirements,
+        OutputSemanticDeclaration,
+    )
     from elspeth.contracts.schema import SchemaConfig
     from elspeth.contracts.schema_contract import SchemaContract
     from elspeth.contracts.sink import OutputValidationResult
@@ -599,6 +604,49 @@ class BaseTransform(ABC):
         if this raises, other plugins still get their on_complete/close calls.
         """
         pass
+
+    # ── Plugin-declared semantics (Phase 1: optional, default empty) ──
+    # Override on a subclass to declare what the plugin emits / requires.
+    # The generic semantic validator compares producer facts to consumer
+    # requirements when the configured field names match.
+
+    def output_semantics(self) -> OutputSemanticDeclaration:
+        """Return semantic facts for the fields this transform emits.
+
+        Default returns an empty declaration: the transform makes no
+        semantic claims beyond what the schema contract already
+        expresses. Override to declare ContentKind/TextFraming for
+        configured output fields.
+        """
+        from elspeth.contracts.plugin_semantics import OutputSemanticDeclaration
+
+        return OutputSemanticDeclaration()
+
+    def input_semantic_requirements(self) -> InputSemanticRequirements:
+        """Return semantic requirements for fields this transform consumes.
+
+        Default returns no requirements. Override to declare that a
+        configured input field must satisfy specific ContentKind /
+        TextFraming acceptance sets.
+        """
+        from elspeth.contracts.plugin_semantics import InputSemanticRequirements
+
+        return InputSemanticRequirements()
+
+    @classmethod
+    def get_agent_assistance(
+        cls,
+        *,
+        issue_code: str | None = None,
+    ) -> PluginAssistance | None:
+        """Return deterministic guidance keyed by an issue code.
+
+        Default returns None: the plugin offers no specific guidance.
+        Override to return a PluginAssistance instance describing fixes
+        for this plugin's issue codes. Validators attach the issue
+        code; the plugin owns the prose.
+        """
+        return None
 
 
 class BaseSink(ABC):
