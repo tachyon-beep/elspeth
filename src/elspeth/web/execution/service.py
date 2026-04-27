@@ -43,8 +43,9 @@ from elspeth.engine.orchestrator.types import PipelineConfig
 from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError, BlobServiceProtocol, BlobStateError
-from elspeth.web.composer.state import validate_transform_framing_contracts
+from elspeth.web.composer._semantic_validator import validate_semantic_contracts
 from elspeth.web.config import WebSettings
+from elspeth.web.execution.errors import SemanticContractViolationError
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError, YamlGenerator
 from elspeth.web.execution.schemas import (
@@ -322,9 +323,12 @@ class ExecutionServiceImpl:
         # The record stores raw dicts; generate_yaml() needs the typed domain object.
         composition_state = state_from_record(state_record)
 
-        framing_errors = validate_transform_framing_contracts(composition_state.nodes)
-        if framing_errors:
-            raise ValueError("; ".join(error.message for error in framing_errors))
+        semantic_errors, semantic_contracts = validate_semantic_contracts(composition_state)
+        if semantic_errors:
+            raise SemanticContractViolationError(
+                entries=semantic_errors,
+                contracts=semantic_contracts,
+            )
 
         # Path allowlist check — defense-in-depth. The validate endpoint also
         # checks this, but /execute does not require /validate first. An

@@ -568,82 +568,82 @@ allow_hits:
   reason: Best-effort quarantine-root cleanup after staged blob purge — the parent directory may still contain other files or be recreated concurrently
   safety: Failing to remove the parent leaves only a manual-cleanup directory behind; session archival has already succeeded
   expires: null
-- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=5a0ca90c8be7e0ff
+- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=49c97610e8b4ec32
   owner: web-execution
   reason: Session lock map creates per-session lock lazily on first execution
   safety: Mutation is thread-safe; setdefault is atomic for dict
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=4146b9aee1adf450
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=0eeafcbd3bbe2c95
   owner: web-execution
   reason: Optional keys in user-authored config — source options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=942b309eba14ca2a
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=5e4ae9cc380c828c
   owner: web-execution
   reason: Optional keys in user-authored config — output options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=b5228b56df818b33
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=3a03c862bc17470a
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=2659de825227fd32
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=31200374947f5c38
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_execute_locked:fp=03e5eafacd57f2a8
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_execute_locked:fp=7d5ea6f2932659d8
   owner: web-execution
   reason: Best-effort run status cleanup on setup failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb so programmer bugs in update_run_status propagate. Logs exc_class only (no str(exc)) to avoid SQLAlchemy `__cause__` chains exposing DB URLs/credentials.
   safety: Logged with slog.error; original exception always re-raised
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=4d73fa1c03a49a3b
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=1d1791f508d2ace8
   owner: web-execution
   reason: Check for live shutdown event before fallback handling
   safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=342bb9816ab71a92
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=8167764d485683fd
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=1eb88e5480673964
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=e29ffb764b58334c
   owner: web-execution
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=c21fd576c9a7a783
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=499ef0a5bc16fada
   owner: web-execution
   reason: Progress broadcasting via call_soon_threadsafe raises RuntimeError when event loop is closed during shutdown
   safety: Only RuntimeError caught (narrowed from bare Exception); logged with canonical exc_class; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=f19cefd9535e138e
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=7d6aecfbfd79ed5c
   owner: web-execution
   reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=1edde4f1fef0aec7
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=fe2c7fdafbc8413e
   owner: web-execution
   reason: Signal classification — KeyboardInterrupt/SystemExit skip async status update during interpreter or loop shutdown
   safety: Non-signal BaseException paths still update failed status; signal paths emit a structured warning and rely on orphan cleanup
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=b0e9574dd1303d34
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=0850b713f0c90ba0
   owner: web-execution
   reason: Status update after pipeline failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb. Logs exc_class only (no str(status_err)) to avoid leaking SQL + bound parameters or `__cause__` text with DB credentials. The sanitized client_msg already reached the DB update call above, so the slog's exc_class is the complete triage surface.
   safety: Logged; original exception re-raised
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=35b849c2507772ec
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=7e74e6f561cf22a4
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=aabff81a11a28aa7
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=1b7189174a9396ca
   owner: web-execution
   reason: Blob finalization before terminal broadcast — failure must not mask run outcome
   safety: _FINALIZE_SUPPRESSED covers blob-domain exceptions (OSError, SQLAlchemyError, BlobNotFoundError, BlobQuotaExceededError, BlobStateError); RuntimeError deliberately excluded (too broad); programmer bugs propagate; partial failures logged from structured result
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=d53605b9638395d8
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=58ddfdb0aa94ef2d
   owner: web-execution
   reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
@@ -916,7 +916,7 @@ allow_hits:
     never created (edge case). pop() with default is idempotent cleanup, not error suppression.
   safety: Stale lock removal is best-effort; missing key means no cleanup needed
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:cleanup_session_lock:fp=60ead98d4ff2f30d
+- key: web/execution/service.py:R9:ExecutionServiceImpl:cleanup_session_lock:fp=5eebcdf4e44f4051
   owner: web-execution
   reason: Session may never have called execute(), so no lock exists in _session_locks.
     Cleanup is called on every session delete regardless. Matches ProgressBroadcaster.cleanup_run() pattern.
@@ -994,67 +994,67 @@ allow_hits:
   reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator
   expires: null
-- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=ae92f62eeb95d2ef
+- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=1378dc4c3a5c6dec
   owner: web-execution
   reason: Security boundary — isinstance dispatches SecretResolutionError to safe message (no secret name leakage)
   safety: Type dispatch for sanitization, not error suppression
   expires: null
-- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=9657d90efee2b5fd
+- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=dab71b7562298e03
   owner: web-execution
   reason: Security boundary — isinstance check allowlists exception types safe to expose to clients
   safety: All others reduced to generic message; no sensitive info leaked
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=2c32bb9f471b1d6b
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=224a5655cb3c31d2
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (source must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=31e4258e1a6a86dd
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=87937af05dcdb1f4
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (source.options must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
-- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=669d628efdad44a8
+- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=015af88b04ebd350
   owner: web-execution
   reason: YAML navigation — source.options keys (path/file) may be absent
   safety: Absent keys skipped; no fabrication
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=04d9aab883e1472e
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=37099d91ec12aec4
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (sinks must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
-- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=e759d5d2853c7e42
+- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=ff84e0c8388e2aa5
   owner: web-execution
   reason: YAML navigation — sink options keys (path/file) may be absent
   safety: Absent keys skipped; no fabrication
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=5cac57cae2f51e81
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=beb59c3f53674905
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (sink config must be dict)
   safety: Raises TypeError with diagnostic message naming the sink
   expires: null
-- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=86eee69c2926aea6
+- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=983b930e146b6ebd
   owner: web-execution
   reason: YAML navigation — sink options keys (path/file) may be absent
   safety: Absent keys skipped; no fabrication
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=d9ea2178a9cf6a4d
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=361f60430a4ae9c5
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (sink options must be dict)
   safety: Raises TypeError with diagnostic message naming the sink
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=4514554dd455b4dc
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=c22cb28f7e3f991f
   owner: web-execution
   reason: Tier 3 — isinstance check on YAML top-level after safe_load (may be non-dict)
   safety: Raises TypeError with diagnostic; no silent default
   expires: null
-- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=3cb6baf07c310842
+- key: web/execution/service.py:R1:_resolve_yaml_paths:fp=03ea35e540ddc1aa
   owner: web-execution
   reason: YAML navigation — source key may be absent in generated YAML
   safety: Returns None; source path rewriting skipped
   expires: null
-- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=d989b1da9dd49416
+- key: web/execution/service.py:R5:_resolve_yaml_paths:fp=5e675050c35c7855
   owner: web-execution
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default

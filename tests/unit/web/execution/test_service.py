@@ -1971,8 +1971,16 @@ class TestSinkPathRestriction:
 # ── Transform Framing Restriction ─────────────────────────────────────
 
 
-class TestTransformFramingRestriction:
-    """Execution must reject transform pairings that violate framing contracts."""
+class TestExecuteSemanticContractViolation:
+    """Execution must reject transform pairings that violate semantic contracts.
+
+    Replaces the legacy TestTransformFramingRestriction. The new
+    SemanticContractViolationError carries structured ``entries`` and
+    ``contracts`` records; the regex assertions still anchor on
+    ``line_explode``/``Semantic contract`` because the diagnostic now
+    names the consumer plugin and the contract code in the message,
+    not the option that the operator must edit (``text_separator``).
+    """
 
     @staticmethod
     def _set_web_scrape_line_explode_state(
@@ -2060,10 +2068,40 @@ class TestTransformFramingRestriction:
         mock_settings.data_dir = "/tmp/elspeth_data"
         self._set_web_scrape_line_explode_state(mock_session_service)
 
-        with pytest.raises(ValueError, match="text_separator"):
+        # SemanticContractViolationError IS a ValueError, so legacy
+        # ``except ValueError`` paths still catch it. New callers should
+        # catch the specific type and read .entries/.contracts.
+        with pytest.raises(ValueError, match="line_explode"):
             await service.execute(session_id=uuid4())
 
         mock_session_service.create_run.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_compact_text_raises_structured_exception(
+        self,
+        service: ExecutionServiceImpl,
+        mock_session_service: MagicMock,
+        mock_settings: MagicMock,
+    ) -> None:
+        """Verify the structured payload — the whole point of the new exception.
+
+        Frontend banners and MCP error renderers consume entries and
+        contracts directly; falling back to ``str(exc)`` parsing would
+        make this surface as fragile as the pre-Phase-4 string concat.
+        """
+        from elspeth.web.execution.errors import SemanticContractViolationError
+
+        mock_settings.data_dir = "/tmp/elspeth_data"
+        self._set_web_scrape_line_explode_state(mock_session_service)
+
+        with pytest.raises(SemanticContractViolationError) as excinfo:
+            await service.execute(session_id=uuid4())
+
+        exc = excinfo.value
+        assert len(exc.entries) >= 1
+        assert any("Semantic contract" in e.message for e in exc.entries)
+        assert any(c.outcome.value == "conflict" for c in exc.contracts)
+        assert any(c.consumer_plugin == "line_explode" for c in exc.contracts)
 
     @pytest.mark.asyncio
     async def test_execute_allows_newline_framed_web_scrape_text(
