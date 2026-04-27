@@ -324,6 +324,11 @@ allow_hits:
   reason: Composer preview classifies only known plugin config/probe exception types while probing plugin-computed output contracts for shape-changing transforms. The caught exception message is NOT surfaced to the UI — only type(exc).__name__ is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials, filesystem paths) via the preview response. ADR-007 adds fail-closed handling for known pass-through plugins; non-pass-through plugins retain the v2 fallback to raw guarantees.
   safety: Unexpected exceptions are re-raised. Known config/probe exceptions are converted into a warning and preview falls back to raw declared schema guarantees (or frozenset() for known pass-through plugins, which then forces Stage 1 rejection) instead of crashing or fabricating a stronger contract
   expires: null
+- key: web/composer/_semantic_validator.py:R5:_is_config_probe_exception:fp=f4dd333a133b13c6
+  owner: web-composer
+  reason: The semantic-contract validator probes producer plugins to read their output_semantics() during draft pipeline composition. Producer construction can fail with known draft/config exceptions (PluginConfigError, PluginNotFoundError, TemplateError, UnknownPluginTypeError, or "Invalid configuration for transform" ValueError) when the user has not finished filling in options. Mirrors the same predicate at web/composer/state.py:_is_config_probe_exception used by the schema-contract probe path. The caught exception text is NEVER embedded in any ValidationEntry or SemanticEdgeContract — the only signal exposed downstream is "no semantic facts" (treated as UNKNOWN by compare_semantic), preventing plugin-option leaks via validator diagnostics.
+  safety: Unexpected exceptions are re-raised (per CLAUDE.md plugin-as-system-code policy). Known draft/config exceptions yield producer_decl=None, which compare_semantic translates to SemanticOutcome.UNKNOWN; FAIL-policy consumers then emit a structured error naming only the requirement_code and plugin names, never the exception text.
+  expires: null
 - key: web/composer/state.py:R6:_check_schema_contracts:fp=b759e0cdbf50e586
   owner: web-composer
   reason: Contract helper ValueError is intentionally converted into a blocking ValidationEntry on the consumer node instead of raising immediately
