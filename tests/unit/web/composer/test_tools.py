@@ -174,6 +174,69 @@ class TestToolResult:
         assert d["validation"]["suggestions"] == []
 
 
+class TestToolResultSemanticContracts:
+    """ToolResult.to_dict() must surface semantic_contracts.
+
+    Every mutation tool (upsert_node, set_source, patch_*) returns a
+    ToolResult; validation produced by state.validate() now carries
+    semantic_contracts. Without exposing them in to_dict(), MCP clients
+    only see the legacy errors/warnings fields and miss the structured
+    plugin-declared contract records.
+    """
+
+    def test_tool_result_to_dict_includes_semantic_contracts(self) -> None:
+        from tests.unit.web.composer.test_semantic_validator import _wardline_state
+
+        state = _wardline_state(text_separator=" ")
+        validation = state.validate()
+        tr = ToolResult(
+            success=True,
+            updated_state=state,
+            validation=validation,
+            affected_nodes=(),
+        )
+        payload = tr.to_dict()
+        assert "semantic_contracts" in payload["validation"]
+        assert len(payload["validation"]["semantic_contracts"]) == 1
+        contract = payload["validation"]["semantic_contracts"][0]
+        assert contract["outcome"] == "conflict"
+        assert contract["consumer_plugin"] == "line_explode"
+        assert contract["producer_plugin"] == "web_scrape"
+        assert contract["from_id"] == "scrape"
+        assert contract["to_id"] == "explode"
+        assert contract["requirement_code"] == "line_explode.source_field.line_framed_text"
+
+    def test_tool_result_to_dict_emits_empty_list_for_no_contracts(self) -> None:
+        """Surface parity: empty list when no contracts, not omitted."""
+        state = _empty_state()
+        from elspeth.web.composer.state import ValidationSummary
+
+        result = ToolResult(
+            success=True,
+            updated_state=state,
+            validation=ValidationSummary(is_valid=True, errors=()),
+            affected_nodes=(),
+        )
+        d = result.to_dict()
+        assert "semantic_contracts" in d["validation"]
+        assert d["validation"]["semantic_contracts"] == []
+
+
+class TestPreviewPipelineSemanticContracts:
+    """_execute_preview_pipeline summary must include semantic_contracts."""
+
+    def test_summary_includes_semantic_contracts(self) -> None:
+        from elspeth.web.composer.tools import _execute_preview_pipeline
+        from tests.unit.web.composer.test_semantic_validator import _wardline_state
+
+        state = _wardline_state(text_separator=" ")
+        result = _execute_preview_pipeline({}, state, catalog=_mock_catalog())
+        assert "semantic_contracts" in result.data
+        assert len(result.data["semantic_contracts"]) == 1
+        assert result.data["semantic_contracts"][0]["outcome"] == "conflict"
+        assert result.data["semantic_contracts"][0]["consumer_plugin"] == "line_explode"
+
+
 class TestSetSource:
     def test_sets_source(self) -> None:
         state = _empty_state()

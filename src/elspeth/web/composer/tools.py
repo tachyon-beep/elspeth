@@ -45,6 +45,54 @@ from elspeth.web.paths import allowed_sink_directories, allowed_source_directori
 from elspeth.web.sessions.models import blob_run_links_table, blobs_table, composition_states_table, runs_table
 
 
+class _SemanticEdgeContractPayload(TypedDict):
+    """Wire shape for a serialized SemanticEdgeContract.
+
+    Mirrors composer_mcp.server._SemanticEdgeContractPayload and
+    web.execution.schemas.SemanticEdgeContractResponse exactly so HTTP,
+    MCP, and ToolResult surfaces stay identical modulo transport
+    envelope. If a field changes here, change it in all three places.
+    """
+
+    from_id: str
+    to_id: str
+    consumer_plugin: str
+    producer_plugin: str | None
+    producer_field: str
+    consumer_field: str
+    outcome: str
+    requirement_code: str
+
+
+def _semantic_contracts_payload(
+    contracts: tuple[Any, ...],
+) -> list[_SemanticEdgeContractPayload]:
+    """Serialize a SemanticEdgeContract tuple to JSON-friendly dicts.
+
+    Centralized so ToolResult.to_dict and _execute_preview_pipeline
+    emit identical shapes — and so adding a field updates both
+    surfaces in one place.
+
+    SemanticEdgeContract intentionally has no .to_dict() of its own:
+    serialization happens at consumption sites so L0 stays free of
+    JSON-encoding concerns. (See composer_mcp/server.py for the same
+    pattern.)
+    """
+    return [
+        _SemanticEdgeContractPayload(
+            from_id=sc.from_id,
+            to_id=sc.to_id,
+            consumer_plugin=sc.consumer_plugin,
+            producer_plugin=sc.producer_plugin,
+            producer_field=sc.producer_field,
+            consumer_field=sc.consumer_field,
+            outcome=sc.outcome.value,
+            requirement_code=sc.requirement.requirement_code,
+        )
+        for sc in contracts
+    ]
+
+
 def _compute_validation_delta(
     before: ValidationSummary,
     after: ValidationSummary,
@@ -118,6 +166,9 @@ class ToolResult:
                 "errors": [e.to_dict() for e in self.validation.errors],
                 "warnings": [e.to_dict() for e in self.validation.warnings],
                 "suggestions": [e.to_dict() for e in self.validation.suggestions],
+                "semantic_contracts": _semantic_contracts_payload(
+                    self.validation.semantic_contracts,
+                ),
             },
             "affected_nodes": list(self.affected_nodes),
             "version": self.updated_state.version,
@@ -3343,6 +3394,9 @@ def _execute_preview_pipeline(
         "warnings": [e.to_dict() for e in validation.warnings],
         "suggestions": [e.to_dict() for e in validation.suggestions],
         "edge_contracts": [ec.to_dict() for ec in validation.edge_contracts],
+        "semantic_contracts": _semantic_contracts_payload(
+            validation.semantic_contracts,
+        ),
         "source": None,
         "node_count": len(state.nodes),
         "output_count": len(state.outputs),
