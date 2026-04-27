@@ -17,6 +17,7 @@ from typing import Any, Literal, Self, TypedDict
 
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.contracts.guarantee_propagation import compose_propagation
+from elspeth.contracts.plugin_semantics import SemanticEdgeContract
 from elspeth.contracts.schema import (
     SchemaConfig,
     get_raw_node_required_fields,
@@ -284,8 +285,10 @@ class ValidationSummary:
 
     errors block execution. warnings are advisory but actionable.
     suggestions are optional improvements. edge_contracts shows
-    per-edge schema contract check results. All are tuples for
-    structured component attribution.
+    per-edge schema contract check results. semantic_contracts shows
+    per-edge semantic contract check results (Phase 1: line_explode +
+    web_scrape only). All are tuples for structured component
+    attribution.
     """
 
     is_valid: bool
@@ -293,6 +296,7 @@ class ValidationSummary:
     warnings: tuple[ValidationEntry, ...] = ()
     suggestions: tuple[ValidationEntry, ...] = ()
     edge_contracts: tuple[EdgeContract, ...] = ()
+    semantic_contracts: tuple[SemanticEdgeContract, ...] = ()
 
 
 def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
