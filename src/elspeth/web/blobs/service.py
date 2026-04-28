@@ -195,7 +195,7 @@ class BlobServiceImpl:
 
     def __init__(self, engine: Engine, data_dir: Path, max_storage_per_session: int = 500 * 1024 * 1024) -> None:
         self._engine = engine
-        self._data_dir = data_dir
+        self._data_dir = data_dir.expanduser().resolve()
         self._max_storage_per_session = max_storage_per_session
 
     async def _run_sync(self, func: Callable[[], _T]) -> _T:

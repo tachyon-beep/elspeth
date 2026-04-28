@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -163,9 +164,32 @@ class TestCreateAndRead:
         assert read_back == content
 
         # File exists on disk
-        from pathlib import Path
-
         assert Path(record.storage_path).exists()
+
+    @pytest.mark.asyncio
+    async def test_create_blob_with_relative_data_dir_stores_absolute_storage_path(
+        self,
+        db_engine,
+        session_id: UUID,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Blob storage paths are internal paths, not data-dir-relative source paths."""
+        monkeypatch.chdir(tmp_path)
+        blob_service = BlobServiceImpl(db_engine, Path("data"))
+
+        record = await blob_service.create_blob(
+            session_id=session_id,
+            filename="tickets.csv",
+            content=b"ticket_id\nT-001\n",
+            mime_type="text/csv",
+            created_by="user",
+        )
+
+        storage_path = Path(record.storage_path)
+        assert storage_path.is_absolute()
+        assert storage_path == tmp_path / "data" / "blobs" / str(session_id) / f"{record.id}_tickets.csv"
+        assert storage_path.exists()
 
     @pytest.mark.asyncio
     async def test_create_blob_stores_correct_hash(self, blob_service, session_id) -> None:

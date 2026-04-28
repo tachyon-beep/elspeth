@@ -288,10 +288,6 @@ def _make_pipeline_row(data: dict[str, Any]):
     return make_row(data, contract=contract)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=f"{ISSUE_BLOB_PATH}: composer blob storage_path with data/ prefix must validate through runtime allowlist",
-)
 def test_scenario_1b_blob_service_storage_path_validates_through_runtime_path_allowlist(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -14,14 +14,24 @@ def resolve_data_path(value: str, data_dir: str) -> Path:
     """Resolve a path value against data_dir (relative) or as-is (absolute).
 
     Relative paths are joined to data_dir before resolving; absolute paths
-    are resolved directly.  Traversal (``../``) is resolved by the OS —
-    blocking traversals outside allowed directories is the caller's job
-    (via the allowlist helpers below).
+    are resolved directly.  Legacy blob-backed sources may carry storage
+    paths like ``data/blobs/...`` when ``data_dir`` itself is the relative
+    path ``data``.  Those paths already point inside data_dir from the
+    process working directory, so return them as-is instead of producing a
+    duplicated ``data/data/...`` path.  Traversal (``../``) is resolved by
+    the OS — blocking traversals outside allowed directories is the caller's
+    job (via the allowlist helpers below).
     """
     raw = Path(value)
     if raw.is_absolute():
         return raw.resolve()
-    return (Path(data_dir).resolve() / raw).resolve()
+
+    base = Path(data_dir).resolve()
+    resolved_from_cwd = raw.resolve()
+    if resolved_from_cwd.is_relative_to(base):
+        return resolved_from_cwd
+
+    return (base / raw).resolve()
 
 
 def allowed_source_directories(data_dir: str) -> tuple[Path, ...]:
