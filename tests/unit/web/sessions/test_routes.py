@@ -634,6 +634,42 @@ class TestSessionCRUDRoutes:
             "sink_discards": 1,
         }
 
+    @pytest.mark.asyncio
+    async def test_list_session_runs_skips_discard_summary_for_running_run(
+        self,
+        tmp_path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Running run cards must not inspect an audit DB that may still be initializing."""
+        app, service = _make_app(tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        create_resp = client.post("/api/sessions", json={"title": "Running Run"})
+        session_id = uuid.UUID(create_resp.json()["id"])
+
+        state = await service.save_composition_state(
+            session_id,
+            CompositionStateData(is_valid=True),
+        )
+        run = await service.create_run(session_id, state.id)
+        await service.update_run_status(run.id, "running", landscape_run_id="lscape-running")
+
+        def fail_if_called(*args: object, **kwargs: object) -> dict[str, object]:
+            raise AssertionError("discard summary lookup should not run for non-terminal runs")
+
+        monkeypatch.setattr(
+            "elspeth.web.execution.discard_summary.load_discard_summaries_for_settings",
+            fail_if_called,
+        )
+
+        runs_resp = client.get(f"/api/sessions/{session_id}/runs")
+
+        assert runs_resp.status_code == 200
+        runs = runs_resp.json()
+        assert len(runs) == 1
+        assert runs[0]["status"] == "running"
+        assert runs[0]["discard_summary"] is None
+
 
 def _collect_ownership_call_site_identities(module: ModuleType, helper_name: str) -> set[str]:
     """Walk ``module``'s AST and return enclosing function names for each call to ``helper_name``.

@@ -1,0 +1,572 @@
+"""Replay scoreboard for the 2026-04-28 composer LLM evaluation.
+
+These tests intentionally describe the desired post-remediation behavior for
+known defects as strict xfails. Run this module with ``--runxfail`` to get the
+red characterization failures that later child tickets must turn green.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import yaml
+
+from elspeth.contracts.schema_contract import SchemaContract
+from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.core.security.secret_loader import EnvSecretLoader
+from elspeth.plugins.transforms.batch_stats import BatchStats
+from elspeth.testing import make_field, make_row
+from elspeth.web.catalog.protocol import CatalogService
+from elspeth.web.catalog.schemas import PluginSchemaInfo, PluginSummary
+from elspeth.web.composer import yaml_generator as composer_yaml_generator
+from elspeth.web.composer.progress import ComposerProgressEvent
+from elspeth.web.composer.protocol import ComposerConvergenceError
+from elspeth.web.composer.service import ComposerServiceImpl
+from elspeth.web.composer.state import (
+    CompositionState,
+    EdgeSpec,
+    NodeSpec,
+    OutputSpec,
+    PipelineMetadata,
+    SourceSpec,
+    ValidationSummary,
+)
+from elspeth.web.composer.tools import execute_tool
+from elspeth.web.config import WebSettings
+from elspeth.web.execution.schemas import ValidationResult
+from elspeth.web.execution.validation import validate_pipeline
+from elspeth.web.secrets.server_store import ServerSecretStore
+from elspeth.web.secrets.service import ScopedSecretResolver, WebSecretService
+from tests.fixtures.factories import make_context
+
+pytestmark = pytest.mark.composer_llm_eval
+
+
+SOURCE_REPORT = "notes/composer-llm-eval-2026-04-28.md"
+EVAL_MODEL = "openrouter/openai/gpt-5.5"
+EVAL_USER_ID = "dta_user"
+
+ISSUE_CHARACTERIZATION = "elspeth-a5481032bd"
+ISSUE_BLOB_PATH = "elspeth-411435710b"
+ISSUE_RUNTIME_PREFLIGHT = "elspeth-34baf10c01"
+ISSUE_TRIGGER_END_OF_SOURCE = "elspeth-fa94309e28"
+ISSUE_BATCH_STATS_REQUIRED_FIELDS = "elspeth-178f765792"
+ISSUE_BATCH_STATS_GROUP_BY = "elspeth-95904149b2"
+ISSUE_SECRET_AVAILABILITY = "elspeth-cd5d811121"
+ISSUE_INTROSPECTION_PATH = "elspeth-0380d5119f"
+ISSUE_PROGRESS_CLASSIFICATION = "elspeth-5030f7373d"
+
+SCENARIO_1A_SESSION_ID = "c549bb63-47e9-427f-9a27-35467f877395"
+SCENARIO_1B_SESSION_ID = "6472ff67-1052-406c-98c3-b3278e9ef4ea"
+SCENARIO_2_SESSION_ID = "ae6816aa-1f75-4103-b176-886d14f9e104"
+SCENARIO_3_SESSION_ID = "9002ed1f-3046-4c00-86be-2f1e3b3bd932"
+
+
+@dataclass
+class FakeFunction:
+    name: str
+    arguments: str
+
+
+@dataclass
+class FakeToolCall:
+    id: str
+    function: FakeFunction
+
+
+@dataclass
+class FakeMessage:
+    content: str | None
+    tool_calls: list[FakeToolCall] | None
+
+
+@dataclass
+class FakeChoice:
+    message: FakeMessage
+
+
+@dataclass
+class FakeLLMResponse:
+    choices: list[FakeChoice]
+
+
+class _NoUserSecretStore:
+    """User secret store stub for server-secret-only replay cases."""
+
+    def list_secrets(self, *, user_id: str, auth_provider_type: str) -> list[SecretInventoryItem]:
+        del user_id, auth_provider_type
+        return []
+
+    def has_secret_record(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
+        del name, user_id, auth_provider_type
+        return False
+
+    def has_secret(self, name: str, *, user_id: str, auth_provider_type: str) -> bool:
+        del name, user_id, auth_provider_type
+        return False
+
+
+def _mock_catalog() -> MagicMock:
+    catalog = MagicMock(spec=CatalogService)
+    catalog.list_sources.return_value = [
+        PluginSummary(name="csv", description="CSV source", plugin_type="source", config_fields=[]),
+    ]
+    catalog.list_transforms.return_value = [
+        PluginSummary(name="batch_stats", description="Batch stats", plugin_type="transform", config_fields=[]),
+    ]
+    catalog.list_sinks.return_value = [
+        PluginSummary(name="json", description="JSON sink", plugin_type="sink", config_fields=[]),
+    ]
+    catalog.get_schema.return_value = PluginSchemaInfo(
+        name="csv",
+        plugin_type="source",
+        description="CSV source",
+        json_schema={"title": "Config", "properties": {}},
+    )
+    return catalog
+
+
+def _make_llm_response(
+    content: str | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
+) -> FakeLLMResponse:
+    fake_tool_calls: list[FakeToolCall] | None = None
+    if tool_calls is not None:
+        fake_tool_calls = [
+            FakeToolCall(
+                id=tool_call["id"],
+                function=FakeFunction(
+                    name=tool_call["name"],
+                    arguments=json.dumps(tool_call["arguments"]),
+                ),
+            )
+            for tool_call in tool_calls
+        ]
+    return FakeLLMResponse(choices=[FakeChoice(message=FakeMessage(content=content, tool_calls=fake_tool_calls))])
+
+
+def _empty_state() -> CompositionState:
+    return CompositionState(
+        source=None,
+        nodes=(),
+        edges=(),
+        outputs=(),
+        metadata=PipelineMetadata(name=f"Composer LLM eval replay ({ISSUE_CHARACTERIZATION})"),
+        version=1,
+    )
+
+
+def _web_settings(data_dir: Path, **overrides: Any) -> WebSettings:
+    defaults: dict[str, Any] = {
+        "data_dir": data_dir,
+        "composer_model": EVAL_MODEL,
+        "composer_max_composition_turns": 15,
+        "composer_max_discovery_turns": 10,
+        "composer_timeout_seconds": 180.0,
+        "composer_rate_limit_per_minute": 60,
+    }
+    defaults.update(overrides)
+    return WebSettings(**defaults)
+
+
+def _write_scenario_csv(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "ticket_id,customer_tier,amount\nT-001,gold,10.0\nT-002,silver,20.0\n",
+        encoding="utf-8",
+    )
+
+
+def _output(name: str, path: str | Path) -> OutputSpec:
+    return OutputSpec(
+        name=name,
+        plugin="json",
+        options={"path": str(path), "format": "jsonl", "schema": {"mode": "observed"}},
+        on_write_failure="discard",
+    )
+
+
+def _source(source_path: str | Path, *, on_success: str, extra_options: dict[str, Any] | None = None) -> SourceSpec:
+    options: dict[str, Any] = {
+        "path": str(source_path),
+        "schema": {"mode": "fixed", "fields": ["ticket_id: str", "customer_tier: str", "amount: float"]},
+    }
+    options.update(extra_options or {})
+    return SourceSpec(
+        plugin="csv",
+        on_success=on_success,
+        options=options,
+        on_validation_failure="quarantine",
+    )
+
+
+def _direct_source_state(
+    source_path: str | Path,
+    output_path: str | Path,
+    *,
+    blob_ref: str | None = None,
+) -> CompositionState:
+    extra_options = {"blob_ref": blob_ref} if blob_ref is not None else None
+    return CompositionState(
+        source=_source(source_path, on_success="summary", extra_options=extra_options),
+        nodes=(),
+        edges=(EdgeSpec(id="e_source_summary", from_node="source", to_node="summary", edge_type="on_success", label=None),),
+        outputs=(_output("summary", output_path),),
+        metadata=PipelineMetadata(name=f"{SOURCE_REPORT} scenario 1B"),
+        version=1,
+    )
+
+
+def _aggregation_state(
+    source_path: str | Path,
+    output_path: str | Path,
+    *,
+    trigger: dict[str, Any],
+    aggregation_options: dict[str, Any],
+) -> CompositionState:
+    return CompositionState(
+        source=_source(source_path, on_success="aggregate_in"),
+        nodes=(
+            NodeSpec(
+                id="tier_summary",
+                node_type="aggregation",
+                plugin="batch_stats",
+                input="aggregate_in",
+                on_success="summary",
+                on_error="discard",
+                options=aggregation_options,
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+                trigger=trigger,
+                output_mode="transform",
+                expected_output_count=1,
+            ),
+        ),
+        edges=(
+            EdgeSpec(id="e_source_agg", from_node="source", to_node="tier_summary", edge_type="on_success", label=None),
+            EdgeSpec(id="e_agg_summary", from_node="tier_summary", to_node="summary", edge_type="on_success", label=None),
+        ),
+        outputs=(_output("summary", output_path),),
+        metadata=PipelineMetadata(name=f"{SOURCE_REPORT} scenario 2"),
+        version=1,
+    )
+
+
+def _scenario_2_files(tmp_path: Path) -> tuple[Path, Path, Path]:
+    data_dir = tmp_path / "data"
+    source_path = data_dir / "blobs" / SCENARIO_2_SESSION_ID / "tickets.csv"
+    output_path = data_dir / "outputs" / "tier_summary.jsonl"
+    _write_scenario_csv(source_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    return data_dir, source_path, output_path
+
+
+def _format_validation_errors(result: ValidationResult) -> str:
+    return "\n".join(error.message for error in result.errors)
+
+
+def _format_composer_errors(summary: ValidationSummary) -> str:
+    return "\n".join(entry.message for entry in summary.errors)
+
+
+def _make_pipeline_row(data: dict[str, Any]):
+    fields = tuple(
+        make_field(key, type(value) if value is not None else object, original_name=key, required=False, source="inferred")
+        for key, value in data.items()
+    )
+    contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+    return make_row(data, contract=contract)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=f"{ISSUE_BLOB_PATH}: composer blob storage_path with data/ prefix must validate through runtime allowlist",
+)
+def test_scenario_1b_blob_service_storage_path_validates_through_runtime_path_allowlist(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Protects the Scenario 1B/3 blob-path failure captured in the report."""
+    monkeypatch.chdir(tmp_path)
+    blob_id = "11111111-1111-4111-8111-111111111111"
+    relative_storage_path = f"data/blobs/{SCENARIO_1B_SESSION_ID}/{blob_id}_tickets.csv"
+    _write_scenario_csv(tmp_path / relative_storage_path)
+
+    state = _direct_source_state(
+        relative_storage_path,
+        "outputs/scenario_1b_summary.jsonl",
+        blob_ref=blob_id,
+    )
+
+    composer_summary = state.validate()
+    assert composer_summary.is_valid, _format_composer_errors(composer_summary)
+
+    runtime_result = validate_pipeline(
+        state,
+        _web_settings(Path("data")),
+        composer_yaml_generator,
+    )
+
+    assert runtime_result.is_valid, _format_validation_errors(runtime_result)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=f"{ISSUE_TRIGGER_END_OF_SOURCE}: trigger.condition=end_of_source must be composer-visible invalid",
+)
+def test_scenario_2_end_of_source_condition_rejected_before_runtime_settings_load(tmp_path: Path) -> None:
+    """Protects Scenario 2 aggregation trigger shape drift."""
+    data_dir, source_path, output_path = _scenario_2_files(tmp_path)
+    state = _aggregation_state(
+        source_path,
+        output_path,
+        trigger={"condition": "end_of_source"},
+        aggregation_options={"schema": {"mode": "observed"}, "value_field": "amount"},
+    )
+
+    runtime_result = validate_pipeline(state, _web_settings(data_dir), composer_yaml_generator)
+    assert not runtime_result.is_valid
+    assert "end_of_source" in _format_validation_errors(runtime_result)
+
+    composer_summary = state.validate()
+    assert not composer_summary.is_valid, "composer accepted an end_of_source token in the boolean condition slot"
+    assert "end_of_source" in _format_composer_errors(composer_summary)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=f"{ISSUE_BATCH_STATS_REQUIRED_FIELDS}: batch_stats.required_input_fields must fail before execution",
+)
+def test_scenario_2_batch_stats_required_input_fields_returns_pre_execution_validation_error(tmp_path: Path) -> None:
+    """Protects the ADR-013 batch-aware dispatch gap from Scenario 2."""
+    data_dir, source_path, output_path = _scenario_2_files(tmp_path)
+    state = _aggregation_state(
+        source_path,
+        output_path,
+        trigger={"count": 100},
+        aggregation_options={
+            "schema": {"mode": "observed"},
+            "value_field": "amount",
+            "required_input_fields": ["amount"],
+        },
+    )
+
+    runtime_result = validate_pipeline(state, _web_settings(data_dir), composer_yaml_generator)
+    assert not runtime_result.is_valid
+    assert "batch-aware" in _format_validation_errors(runtime_result)
+
+    composer_summary = state.validate()
+    assert not composer_summary.is_valid
+    assert "required_input_fields" in _format_composer_errors(composer_summary)
+
+
+def test_scenario_2_batch_stats_group_by_is_homogeneity_assertion_not_rollup_operator() -> None:
+    """Protects elspeth-95904149b2 with the actual batch_stats runtime contract."""
+    transform = BatchStats(
+        {
+            "schema": {"mode": "observed"},
+            "value_field": "amount",
+            "group_by": "customer_tier",
+        }
+    )
+    rows = [
+        _make_pipeline_row({"ticket_id": "T-001", "customer_tier": "gold", "amount": 10.0}),
+        _make_pipeline_row({"ticket_id": "T-002", "customer_tier": "silver", "amount": 20.0}),
+    ]
+
+    with pytest.raises(ValueError) as exc_info:
+        transform.process(rows, make_context())
+
+    assert "Heterogeneous 'customer_tier' values in batch" in str(exc_info.value)
+
+
+def test_secret_ref_tool_can_report_openrouter_key_unavailable_while_runtime_env_loader_can_resolve_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Characterizes elspeth-cd5d811121 without any live provider call."""
+    secret_name = "OPENROUTER_API_KEY"
+    secret_value = "test-openrouter-key"
+    monkeypatch.setenv(secret_name, secret_value)
+    monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+
+    loaded_value, secret_ref = EnvSecretLoader().get_secret(secret_name)
+    assert loaded_value == secret_value
+    assert secret_ref.source == "env"
+
+    settings = _web_settings(
+        tmp_path / "data",
+        composer_model=EVAL_MODEL,
+        server_secret_allowlist=(secret_name,),
+    )
+    composer = ComposerServiceImpl(catalog=_mock_catalog(), settings=settings)
+    assert composer._availability.available is True
+    assert composer._availability.provider == "openrouter"
+
+    web_secret_service = WebSecretService(
+        user_store=_NoUserSecretStore(),  # type: ignore[arg-type]
+        server_store=ServerSecretStore(allowlist=(secret_name,)),
+    )
+    resolver = ScopedSecretResolver(web_secret_service, auth_provider_type=settings.auth_provider)
+
+    result = execute_tool(
+        "validate_secret_ref",
+        {"name": secret_name},
+        _empty_state(),
+        _mock_catalog(),
+        secret_service=resolver,
+        user_id=EVAL_USER_ID,
+    )
+
+    assert result.success is True
+    assert result.to_dict()["data"] == {"name": secret_name, "available": False}
+
+
+def test_scenario_3_get_pipeline_state_hides_patched_blob_path_that_yaml_preserves(tmp_path: Path) -> None:
+    """Characterizes elspeth-0380d5119f using the composer patch and state tools."""
+    data_dir = tmp_path / "data"
+    blob_id = "33333333-3333-4333-8333-333333333333"
+    source_path = data_dir / "blobs" / SCENARIO_3_SESSION_ID / f"{blob_id}_tickets.csv"
+    output_path = data_dir / "outputs" / "scenario_3_summary.jsonl"
+    _write_scenario_csv(source_path)
+
+    initial_state = CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            on_success="summary",
+            options={"blob_ref": blob_id, "schema": {"mode": "observed"}},
+            on_validation_failure="quarantine",
+        ),
+        nodes=(),
+        edges=(EdgeSpec(id="e_source_summary", from_node="source", to_node="summary", edge_type="on_success", label=None),),
+        outputs=(_output("summary", output_path),),
+        metadata=PipelineMetadata(name=f"{SOURCE_REPORT} scenario 3 patched path"),
+        version=1,
+    )
+
+    patched = execute_tool(
+        "patch_source_options",
+        {"patch": {"path": str(source_path)}},
+        initial_state,
+        _mock_catalog(),
+        data_dir=str(data_dir),
+    )
+    assert patched.success is True
+
+    introspection = execute_tool(
+        "get_pipeline_state",
+        {"component": "source"},
+        patched.updated_state,
+        _mock_catalog(),
+    )
+    assert introspection.success is True
+    introspected_source = introspection.to_dict()["data"]["source"]
+    assert "path" not in introspected_source["options"]
+    assert introspected_source["options"]["blob_ref"] == blob_id
+
+    yaml_doc = yaml.safe_load(composer_yaml_generator.generate_yaml(patched.updated_state))
+    assert yaml_doc["source"]["options"]["path"] == str(source_path)
+
+
+async def _failed_progress_for_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ComposerProgressEvent:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    settings = _web_settings(tmp_path / "data", composer_timeout_seconds=0.05)
+    service = ComposerServiceImpl(catalog=_mock_catalog(), settings=settings)
+    events: list[ComposerProgressEvent] = []
+
+    async def record_progress(event: ComposerProgressEvent) -> None:
+        events.append(event)
+
+    async def slow_llm(*args: Any, **kwargs: Any) -> FakeLLMResponse:
+        del args, kwargs
+        await asyncio.sleep(1.0)
+        return _make_llm_response(content="too late")
+
+    with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = slow_llm
+        with pytest.raises(ComposerConvergenceError) as exc_info:
+            await service.compose(
+                "Scenario 1A monolithic request",
+                [],
+                _empty_state(),
+                session_id=SCENARIO_1A_SESSION_ID,
+                user_id=EVAL_USER_ID,
+                progress=record_progress,
+            )
+
+    assert exc_info.value.budget_exhausted == "timeout"
+    return next(event for event in reversed(events) if event.phase == "failed")
+
+
+async def _failed_progress_for_composition_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ComposerProgressEvent:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    settings = _web_settings(tmp_path / "data", composer_max_composition_turns=1)
+    service = ComposerServiceImpl(catalog=_mock_catalog(), settings=settings)
+    events: list[ComposerProgressEvent] = []
+
+    async def record_progress(event: ComposerProgressEvent) -> None:
+        events.append(event)
+
+    mutation = _make_llm_response(
+        tool_calls=[
+            {
+                "id": "call_1",
+                "name": "set_metadata",
+                "arguments": {"patch": {"name": "budget replay"}},
+            }
+        ]
+    )
+    bonus_mutation = _make_llm_response(
+        tool_calls=[
+            {
+                "id": "call_2",
+                "name": "set_metadata",
+                "arguments": {"patch": {"description": "still mutating"}},
+            }
+        ]
+    )
+
+    with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+        mock_llm.side_effect = [mutation, bonus_mutation]
+        with pytest.raises(ComposerConvergenceError) as exc_info:
+            await service.compose(
+                "Keep editing forever",
+                [],
+                _empty_state(),
+                session_id=SCENARIO_1A_SESSION_ID,
+                user_id=EVAL_USER_ID,
+                progress=record_progress,
+            )
+
+    assert exc_info.value.budget_exhausted == "composition"
+    return next(event for event in reversed(events) if event.phase == "failed")
+
+
+def _progress_copy(event: ComposerProgressEvent) -> tuple[str, tuple[str, ...], str | None]:
+    return (event.headline, event.evidence, event.likely_next)
+
+
+@pytest.mark.asyncio
+@pytest.mark.xfail(
+    strict=True,
+    reason=f"{ISSUE_PROGRESS_CLASSIFICATION}: failed progress must distinguish timeout from turn-budget exhaustion",
+)
+async def test_long_running_compose_failures_expose_distinct_progress_guidance(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Protects the report's long-running failure-classification finding."""
+    timeout_event = await _failed_progress_for_timeout(tmp_path, monkeypatch)
+    composition_event = await _failed_progress_for_composition_budget(tmp_path, monkeypatch)
+
+    assert _progress_copy(timeout_event) != _progress_copy(composition_event)

@@ -36,6 +36,7 @@ from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError
 from elspeth.web.execution.schemas import (
     RUN_STATUS_NON_TERMINAL_VALUES,
+    RUN_STATUS_TERMINAL_VALUES,
     CancelledData,
     CompletedData,
     FailedData,
@@ -402,7 +403,7 @@ def create_execution_router() -> APIRouter:
             status = await service.get_status(run_id)
         except ValueError:
             raise _run_not_found_http() from None
-        if status.landscape_run_id is not None and status.discard_summary is None:
+        if status.status in RUN_STATUS_TERMINAL_VALUES and status.landscape_run_id is not None and status.discard_summary is None:
             from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
 
             discard_summaries = await run_sync_in_worker(
@@ -519,6 +520,11 @@ def create_execution_router() -> APIRouter:
             status = await service.get_status(run_id)
         except ValueError:
             raise _run_not_found_http() from None
+        if status.status in RUN_STATUS_NON_TERMINAL_VALUES:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Run is still {status.status}",
+            )
         if status.landscape_run_id is not None and status.discard_summary is None:
             from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
 
@@ -529,11 +535,6 @@ def create_execution_router() -> APIRouter:
             )
             if status.landscape_run_id in discard_summaries:
                 status = status.model_copy(update={"discard_summary": discard_summaries[status.landscape_run_id]})
-        if status.status in RUN_STATUS_NON_TERMINAL_VALUES:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Run is still {status.status}",
-            )
         # mypy can't narrow a Literal through frozenset membership — the
         # cast is safe because RUN_STATUS_NON_TERMINAL_VALUES is the exact
         # complement of RunResultsResponse's Literal values, enforced by a

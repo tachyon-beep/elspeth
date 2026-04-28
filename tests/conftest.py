@@ -67,6 +67,10 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line("markers", "slow: long-running tests (>10s)")
     config.addinivalue_line(
         "markers",
+        "composer_llm_eval: characterization/replay tests for the 2026-04-28 composer LLM evaluation scenarios",
+    )
+    config.addinivalue_line(
+        "markers",
         "chaosllm(preset=None, **kwargs): Configure ChaosLLM server for the test. "
         "Use preset='name' to load a preset, and keyword args to override specific settings.",
     )

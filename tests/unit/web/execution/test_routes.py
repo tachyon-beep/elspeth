@@ -779,6 +779,49 @@ class TestRunStatusEndpoint:
             assert body["rows_routed"] == 1
 
     @pytest.mark.asyncio
+    async def test_running_status_with_landscape_id_skips_discard_summary_lookup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Running status must not inspect an audit DB that may still be initializing."""
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="running",
+                started_at=datetime.now(tz=UTC),
+                finished_at=None,
+                rows_processed=0,
+                rows_succeeded=0,
+                rows_failed=0,
+                rows_routed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=str(run_id),
+            )
+        )
+
+        def fail_if_called(*args: object, **kwargs: object) -> dict[str, DiscardSummary]:
+            raise AssertionError("discard summary lookup should not run for non-terminal status")
+
+        monkeypatch.setattr(
+            "elspeth.web.execution.discard_summary.load_discard_summaries_for_settings",
+            fail_if_called,
+        )
+
+        app = _create_test_app(execution_service=svc)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/runs/{run_id}")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "running"
+        assert body["landscape_run_id"] == str(run_id)
+        assert body["discard_summary"] is None
+
+    @pytest.mark.asyncio
     async def test_status_returns_404_when_run_disappears_after_ownership_check(self) -> None:
         """TOCTOU: post-verification ValueError must collapse to 404."""
         run_id = uuid4()
@@ -939,6 +982,43 @@ class TestResultsEndpoint:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get(f"/api/runs/{run_id}/results")
             assert resp.status_code == 409
+
+    @pytest.mark.asyncio
+    async def test_results_returns_409_for_running_with_landscape_id_without_discard_summary_lookup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run_id = uuid4()
+        svc = MagicMock()
+        svc.get_status = AsyncMock(
+            return_value=RunStatusResponse(
+                run_id=str(run_id),
+                status="running",
+                started_at=datetime.now(tz=UTC),
+                finished_at=None,
+                rows_processed=5,
+                rows_succeeded=5,
+                rows_failed=0,
+                rows_quarantined=0,
+                error=None,
+                landscape_run_id=str(run_id),
+            )
+        )
+
+        def fail_if_called(*args: object, **kwargs: object) -> dict[str, DiscardSummary]:
+            raise AssertionError("discard summary lookup should not run before terminal results")
+
+        monkeypatch.setattr(
+            "elspeth.web.execution.discard_summary.load_discard_summaries_for_settings",
+            fail_if_called,
+        )
+
+        app = _create_test_app(execution_service=svc)
+        transport = ASGITransport(app=app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.get(f"/api/runs/{run_id}/results")
+
+        assert resp.status_code == 409
 
     @pytest.mark.asyncio
     async def test_results_returns_409_for_pending(self) -> None:

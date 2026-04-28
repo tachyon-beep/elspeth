@@ -39,6 +39,7 @@ from elspeth.web.composer.yaml_generator import generate_yaml
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
 from elspeth.web.sessions.protocol import (
+    SESSION_TERMINAL_RUN_STATUS_VALUES,
     ChatMessageRecord,
     CompositionStateData,
     CompositionStateRecord,
@@ -1222,11 +1223,16 @@ def create_session_router() -> APIRouter:
         runs = await service.list_runs_for_session(session.id)
         from elspeth.web.execution.discard_summary import load_discard_summaries_for_settings
 
-        discard_summaries = await run_sync_in_worker(
-            load_discard_summaries_for_settings,
-            request.app.state.settings,
-            (run.landscape_run_id for run in runs),
+        terminal_landscape_run_ids = tuple(
+            run.landscape_run_id for run in runs if run.status in SESSION_TERMINAL_RUN_STATUS_VALUES and run.landscape_run_id is not None
         )
+        discard_summaries = {}
+        if terminal_landscape_run_ids:
+            discard_summaries = await run_sync_in_worker(
+                load_discard_summaries_for_settings,
+                request.app.state.settings,
+                terminal_landscape_run_ids,
+            )
 
         # Resolve composition_version from each run's state_id.
         # A missing state is Tier 1 data corruption — crash, don't hide.
