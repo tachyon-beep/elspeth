@@ -74,6 +74,7 @@ This gives subsystem-level dependency truth at *cross-layer* granularity. **L3�
 - 2026-04-29 15:25 — Wave 2 closed. `02-l1-subsystem-map.md` written (192 lines, 11 entries, 14 [CITES] + 6 [DIVERGES FROM] markers, 12 deep-dive files flagged, 0 Low / 2 Medium confidence: `web/` and `composer_mcp/` due to absence of KNOW-A* coverage).
 - 2026-04-29 15:30 — Wave 3 closed. `03-l1-context-diagram.md` (System Context view + Container view by layer, 27 layer-enforced edges, L3↔L3 explicitly deferred). `04-l1-summary.md` (with 6-cluster L2 dispatch queue, prioritised by risk-density: engine > web > core > plugins > contracts, plus a cross-cutting L3↔L3 import-graph cluster as prerequisite).
 - 2026-04-29 15:40 — Wave 4 closed. Validation `temp/validation-l1.md`: **APPROVED**. 0 CRITICAL, 0 WARNING, 1 MINOR (cosmetic line-number drift). MINOR addressed: catalog/diagram/summary now uniformly cite `enforce_tier_model.py:237–248`. L1 pass complete; ready for L2 dispatch.
+- [2026-04-28T23:00:00Z] Phase 9 doc-correctness pass landed. Resolved L1-deferred tensions T1–T5 (plugin-count drift, ADR-table staleness, schema-mode vocabulary drift, ARCHITECTURE.md LOC drift, KNOW-A18 testing/↔tests/ conflation). Edits made to ARCHITECTURE.md, CLAUDE.md, PLUGIN.md (AGENTS.md verified clean — no T5 conflation site present). Ground truth recorded in `temp/doc-correctness-ground-truth.md`. 13 follow-up observations deferred in `temp/doc-correctness-deferrals.md`. Validator: APPROVED.
 
 ## Phase 0 — L3↔L3 import-graph oracle (completed 2026-04-29 02:32)
 

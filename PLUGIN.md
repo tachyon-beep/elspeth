@@ -546,9 +546,9 @@ All data-processing plugins require schema configuration.
 
 | Mode | Behavior | Extra Fields |
 |------|----------|--------------|
-| `dynamic` | Accept any fields | Allowed |
-| `strict` | Only declared fields | Rejected |
-| `free` | Declared required, extras allowed | Allowed |
+| `observed` | Accept any fields (types inferred from data) | Allowed |
+| `fixed` | Only declared fields | Rejected |
+| `flexible` | Declared required, extras allowed | Allowed |
 
 ### YAML Examples
 
@@ -567,7 +567,7 @@ schema:
 
 # At least these, allow more
 schema:
-  mode: free
+  mode: flexible
   fields:
     - "id: int"
     - "value: float"

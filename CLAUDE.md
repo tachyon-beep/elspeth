@@ -275,7 +275,7 @@ For canonical JSON, retry semantics, secret handling, and detailed test path int
 
 ## Source Layout
 
-Source code lives in `src/elspeth/` with subsystems: `core/` (landscape, checkpoint, dag, config, canonical), `contracts/`, `engine/` (orchestrator, executors, processor, retry), `plugins/` (infrastructure, sources, transforms, sinks), `telemetry/`, `testing/` (chaosllm, chaosweb, chaosengine), `mcp/`, `tui/`, and CLI entry points. Full tree in `engine-patterns-reference` skill.
+Source code lives in `src/elspeth/` with subsystems: `core/` (landscape, checkpoint, dag, config, canonical), `contracts/`, `engine/` (orchestrator, executors, processor, retry), `plugins/` (infrastructure, sources, transforms, sinks), `telemetry/`, `testing/` (the `elspeth-xdist-auto` pytest plugin shipped inside the package — distinct from the project's own `tests/` test suite, which is where the ChaosLLM / ChaosWeb / ChaosEngine fixtures live), `mcp/`, `tui/`, and CLI entry points. Full tree in `engine-patterns-reference` skill.
 
 ## Layer Dependency Rules
 

@@ -17,7 +17,7 @@ C4 model documentation for the ELSPETH auditable pipeline framework.
 | **Data flow?** | Source → Transforms/Gates → Sinks (all recorded) |
 | **Audit storage?** | SQLite/SQLCipher (dev) / PostgreSQL (prod) |
 | **Extension model?** | pluggy-based plugin system |
-| **Production LOC** | ~103,900 lines (315 Python, 46 TypeScript/TSX, 1 CSS) |
+| **Production LOC** | ~121,400 Python lines across 359 files in `src/elspeth/` (frontend TSX/CSS counts not refreshed; see `docs/arch-analysis-2026-04-29-1500/01-discovery-findings.md`) |
 | **Test LOC** | ~274,900 Python lines (731 files, 2.6:1 ratio) |
 
 ---
@@ -156,7 +156,7 @@ C4Container
 | **Engine** | Python | ~12,000 | Run lifecycle, row processing, DAG execution |
 | **Plugins** | pluggy | ~20,600 | Extensible sources, transforms, sinks, LLM, clients |
 | **Landscape** | SQLAlchemy Core | ~8,300 | Audit recording (facade + 4 repositories) and querying, SQLCipher support |
-| **Testing** | Python | ~9,500 | ChaosLLM, ChaosWeb, ChaosEngine test servers |
+| **Testing** (`src/elspeth/testing/`) | Python | ~900 | `elspeth-xdist-auto` pytest plugin shipped inside the `elspeth` package — distinct from the project's own `tests/` test suite, which is not part of the shipped package and is where the ChaosLLM / ChaosWeb / ChaosEngine test fixtures live |
 | **Telemetry** | Python | ~1,200 | Real-time event export (OTLP, Datadog, Azure Monitor) |
 | **Checkpoint** | Python | ~600 | Crash recovery with topology validation |
 | **Rate Limiting** | pyrate-limiter | ~300 | External call throttling with persistence |
@@ -165,7 +165,7 @@ C4Container
 | **Audit DB** | SQLite/SQLCipher/PostgreSQL | — | Complete audit trail storage (21 tables) |
 | **Payload Store** | Filesystem | — | Content-addressable blob storage with retention |
 
-**Total Production LOC:** ~103,900 (315 Python + 47 frontend files) | **Total Test LOC:** ~274,900 (731 files) | **Test Ratio:** 2.6:1
+**Total Production LOC:** ~121,400 (359 Python files in `src/elspeth/`; frontend TSX/CSS not refreshed in this pass) | **Total Test LOC:** ~274,900 (731 files) | **Test Ratio:** 2.6:1
 
 ---
 
@@ -385,7 +385,7 @@ C4Component
 | **Sinks** | 4 plugins (csv, json, database, azure_blob) |
 | **Clients** | 4 audited clients (HTTP, LLM, Replayer, Verifier) |
 
-**Total Plugin Ecosystem:** 25 plugins across 4 categories (organized into `infrastructure/`, `sources/`, `transforms/`, `sinks/`)
+**Total Plugin Ecosystem:** 29 plugins across the Source/Transform/Sink categories (6 sources + 17 transforms + 6 sinks, verified against the `discover_all_plugins()` registry; the per-category breakdown above is from an earlier RC and has drifted — see `docs/arch-analysis-2026-04-29-1500/01-discovery-findings.md`). Sub-package layout: `infrastructure/`, `sources/`, `transforms/`, `sinks/`.
 
 #### Plugin Context Protocols
 
@@ -889,6 +889,17 @@ ELSPETH uses ADRs to document significant architectural choices.
 | **ADR-004** | Explicit sink routing | Named DAG edges replace implicit convention | Enables auditable routing decisions |
 | **ADR-005** | Declarative DAG wiring | `input`/`on_success` connections | Every edge explicitly declared and validated |
 | **ADR-006** | Layer dependency remediation | Strict 4-layer model (`contracts → core → engine → plugins`) | 10 violations → 0, CI enforcement |
+| **ADR-007** | Pass-through contract propagation (AMENDED by ADR-009/010) | Add `passes_through_input: bool = False` to BaseTransform / TransformProtocol | Annotation is an unconditional contract that `process()` preserves every input field on every row |
+| **ADR-008** | Runtime contract cross-check (AMENDED by ADR-009/010) | Per-row cross-check in `TransformExecutor.execute_transform` after `process()` returns | Catches pass-through contract violations at runtime; `PassThroughContractViolation` is `TIER_1_ERRORS` |
+| **ADR-009** | Pass-through pathway fusion | Shared `verify_pass_through` primitive in `engine/executors/pass_through.py`; `compose_propagation()` aggregation rule | Closes duplicated walkers and single-path runtime cross-check; supersedes ADR-007 §Decision 1 / ADR-008 §Decision scope |
+| **ADR-010** | Declaration-trust framework | Nominal `AuditEvidenceBase` ABC + `@tier_1_error` decorator + `DeclarationContract` protocol with frozen registry | Generalised contract protocol for plugin declarations; audit-complete dispatch raises `AggregateDeclarationContractViolation` when M > 1 |
+| **ADR-011** | Declared output fields contract | `DeclaredOutputFieldsContract` adopter on `post_emission_check` and `batch_flush_check` | Per-emitted-row guarantee that runtime fields cover declared output fields |
+| **ADR-012** | `can_drop_rows` governance contract | Add `can_drop_rows: bool = False` to BaseTransform / TransformProtocol; new terminal state `RowOutcome.DROPPED_BY_FILTER` | Retires ADR-009 Clause 3 carve-out; legitimate zero-emission success becomes queryable in Landscape, distinct from FAILED |
+| **ADR-013** | Declared required input fields contract | New `declared_input_fields` runtime attribute; `DeclaredRequiredFieldsContract` on `pre_emission_check` | Runtime input not satisfying declared preconditions = audit-integrity problem; first adopter on the `pre_emission_check` surface |
+| **ADR-014** | Schema config mode contract | `SchemaConfigModeContract` on `post_emission_check` and `batch_flush_check`; modes are `fixed` / `flexible` / `observed` | Verifies declared mode matches emitted contract.mode; for `fixed`, no undeclared extras |
+| **ADR-015** | `creates_tokens` remains a permission flag | Path 1 chosen — `creates_tokens=True` means multi-row expansion permitted, not required | Dispatcher cannot distinguish "single-row is correct, expansion permitted" from "single-row is incorrect, expansion required" |
+| **ADR-016** | Source guaranteed fields contract | `SourceGuaranteedFieldsContract` on `boundary_check`; new `declared_guaranteed_fields` runtime attribute | Runs after token creation in `RowProcessor.process_row()`, never on `process_existing_row()` (resume must not re-cross source boundary) |
+| **ADR-017** | Sink required fields contract | Two-layer architecture: dispatcher-owned `SinkRequiredFieldsViolation` plus inline `SinkTransactionalInvariantError` backstop | The two signals must not be merged; runs before `_validate_sink_input()` and before sink I/O on both primary and failsink paths |
 
 ### Implicit Architectural Decisions
 
@@ -980,11 +991,11 @@ Based on automated analysis (2026-03-26) and ongoing CI enforcement.
 
 **Key Metrics:**
 
-- Production LOC: ~103,900 (315 Python + 47 frontend files)
+- Production LOC: ~121,400 (359 Python files in `src/elspeth/`; frontend TSX/CSS not refreshed in this pass)
 - Test LOC: ~274,900 (731 Python files, 2.6:1 ratio)
 - Subsystems: 11 major (20+ including sub-components)
-- Plugins: 46
-- ADRs: 8
+- Plugins: 29 (6 sources + 17 transforms + 6 sinks; verified via the registry's `discover_all_plugins()` — same code path as `elspeth plugins list`)
+- ADRs: 17 (001–017)
 - Status: Pre-release (RC-5)
 
 All diagrams use Mermaid syntax for version control compatibility.
