@@ -398,7 +398,7 @@ If the user's intent matches a known pattern, use its safe defaults and build im
 | `keyword_filter` | Filter rows by keyword presence | no | no | no | (none — routes matching/non-matching rows) |
 | `json_explode` | Expand nested JSON field into row fields | no | no | no | Adds fields from nested JSON object |
 | `line_explode` | Split a string field into one row per line | **yes** | no | no | Emits one row per line with `line`/`line_index` fields |
-| `batch_stats` | Compute statistics over a batch of rows | **yes** | no | no | Emits aggregate result row(s) |
+| `batch_stats` | Compute statistics over a batch of rows | **yes** | no | no | Emits one aggregate row per batch, or per `group_by` value |
 | `batch_replicate` | Replicate rows for fan-out | no | no | no | Emits multiple copies per input row |
 | `web_scrape` | Fetch and extract content from URLs | no | no | yes | Adds `content` field (scraped text/HTML) |
 | `llm` | Send row data to an LLM via template | no | yes | yes | Adds `llm_response` field (or custom `response_field`) |
@@ -640,7 +640,7 @@ Never ask the user to upload a file when the data is already in the conversation
 **Required inputs:** Input file, what kind of summary (per-row or aggregate)
 **Ask exactly:** "What file should I read?", "Should I summarise each row individually, or produce one summary of the whole file?"
 **Safe defaults:** LLM temperature `0.0`, json sink
-**Caveats:** For per-row summaries, the LLM processes each row independently. For aggregate summaries, use `batch_stats` or an aggregation node before the LLM step.
+**Caveats:** For per-row summaries, the LLM processes each row independently. For aggregate summaries, use `batch_stats` or an aggregation node before the LLM step. For requests like "count per customer_tier", configure `batch_stats` with `group_by: customer_tier`; it emits one aggregate row per distinct tier.
 
 ### 5. File → Structured Extraction → JSON/CSV
 
@@ -764,7 +764,7 @@ Always check `list_secret_refs` to see what secrets the user has configured befo
 | `web_scrape` | Row + `content` field (scraped text) | New field added to row | Original fields + `content` string |
 | `llm` | Row + response field (default: `llm_response`) | New field added to row | Original fields + `llm_response` string |
 | `llm` (multi-query) | Row + one field per query | New fields added to row | Original fields + named response fields |
-| `batch_stats` | Aggregate result row(s) — NOT input rows | **Replaces** input rows | Aggregate statistics only |
+| `batch_stats` | Aggregate row per batch, or per `group_by` value — NOT input rows | **Replaces** input rows | Aggregate statistics plus `group_by` field when configured |
 | `batch_replicate` | Multiple copies of each input row | Emits N rows per 1 input | Copies of original row |
 | `azure_content_safety` | Row + safety category score fields | New fields added to row | Original fields + safety scores |
 | `azure_prompt_shield` | Row + shield result fields | New fields added to row | Original fields + shield results |
@@ -775,7 +775,7 @@ Always check `list_secret_refs` to see what secrets the user has configured befo
 ### Key rules
 
 - **Most transforms ADD fields** — the original row fields are preserved, and the transform appends its output field(s). The sink receives all accumulated fields.
-- **`batch_stats` is the exception** — it consumes input rows and emits new aggregate rows. Input row fields are NOT preserved.
+- **`batch_stats` is the exception** — it consumes input rows and emits new aggregate rows. With `group_by`, it emits one row per distinct group value. Input row fields other than the configured `group_by` field are NOT preserved.
 - **LLM response is always a string** — even if the model returns JSON, the `llm_response` field contains a string. Use `json_explode` after the LLM step to parse it into structured fields.
 - **Gates don't modify data** — they route the unchanged row to different outputs based on the condition result.
 - **Sinks serialize the full row** — all fields accumulated through the pipeline appear in the output. Use `field_mapper` before the sink to remove unwanted fields.

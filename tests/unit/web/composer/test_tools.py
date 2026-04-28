@@ -1517,6 +1517,13 @@ class TestToolDefinitions:
         assert "end-of-source-only" in trigger_schema["description"]
         assert "do not use end_of_source" in trigger_schema["properties"]["condition"]["description"]
 
+    def test_upsert_node_expected_output_count_warns_about_group_by(self) -> None:
+        """Aggregation schema must not steer grouped rollups toward fixed cardinality."""
+        upsert_node = next(defn for defn in get_tool_definitions() if defn["name"] == "upsert_node")
+        expected_schema = upsert_node["parameters"]["properties"]["expected_output_count"]
+
+        assert "omit when output count depends on group_by" in expected_schema["description"]
+
     def _assert_no_enum_on_validation_failure(self, schema: object, tool_name: str) -> None:
         """Recursively walk a JSON schema and assert no on_validation_failure has enum."""
         if isinstance(schema, dict):
@@ -5656,6 +5663,40 @@ class TestPrevalidatePluginOptions:
         assert node.id == "agg1"
         assert node.node_type == "aggregation"
         assert node.plugin == "batch_stats"
+
+    def test_upsert_node_batch_stats_group_by_keeps_expected_count_open(self) -> None:
+        """Grouped rollups may emit one row per group, so cardinality stays unset."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        catalog.list_transforms.return_value = [
+            *catalog.list_transforms.return_value,
+            PluginSummary(
+                name="batch_stats",
+                description="Batch statistics aggregation",
+                plugin_type="transform",
+                config_fields=[],
+            ),
+        ]
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "agg1",
+                "node_type": "aggregation",
+                "plugin": "batch_stats",
+                "input": "source",
+                "on_success": "out",
+                "options": {
+                    "schema": {"mode": "observed"},
+                    "value_field": "amount",
+                    "group_by": "customer_tier",
+                },
+            },
+            state,
+            catalog,
+        )
+        assert result.success is True
+        node = result.updated_state.nodes[0]
+        assert node.expected_output_count is None
 
     def test_upsert_node_aggregation_rejects_required_input_fields(self) -> None:
         """ADR-013 declared input fields are not valid for batch-aware aggregation nodes."""

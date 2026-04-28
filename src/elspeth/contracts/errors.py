@@ -570,6 +570,8 @@ class TransformErrorReason(TypedDict):
     batch_id: NotRequired[str]
     operation: NotRequired[str]
     batch_size: NotRequired[int]  # Total rows in batch
+    group_by: NotRequired[str]  # Grouping field for grouped batch errors
+    group_value: NotRequired[Any]  # Group value for grouped batch errors
     valid_count: NotRequired[int]  # Rows that passed validation within batch
     queries_completed: NotRequired[int]
     row_errors: NotRequired[list[RowErrorEntry]]

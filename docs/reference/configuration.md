@@ -348,7 +348,7 @@ fields = extract_jinja2_fields(template)  # frozenset({'customer_id', 'message_t
 | `truncate` | Limit string field lengths |
 | `keyword_filter` | Filter rows by regex patterns |
 | `json_explode` | Expand JSON arrays to multiple rows |
-| `batch_stats` | Compute statistics over batch |
+| `batch_stats` | Compute statistics over a batch, optionally one row per `group_by` value |
 | `batch_replicate` | Replicate rows N times |
 | `web_scrape` | HTML content extraction with SSRF prevention |
 | `llm` | Unified LLM transform (azure/openrouter providers, single/multi-query) |
@@ -445,7 +445,7 @@ Batch rows until a trigger fires, then process as a group.
 ```yaml
 aggregations:
   - name: batch_stats
-    plugin: stats_aggregation
+    plugin: batch_stats
     input: enriched
     on_success: output
     on_error: discard           # Sink name for batch errors, or 'discard'
@@ -453,9 +453,12 @@ aggregations:
       count: 100              # Fire after 100 rows
       timeout_seconds: 3600   # Or after 1 hour
     output_mode: transform
-    expected_output_count: 1  # Optional: validate N→1 cardinality
+    expected_output_count: 1  # Optional; omit when group_by can emit multiple rows
     options:
-      fields: ["value"]
+      schema:
+        mode: observed
+      value_field: amount
+      group_by: customer_tier  # Optional: one aggregate row per tier
       compute_mean: true
 ```
 

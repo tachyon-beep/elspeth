@@ -338,12 +338,8 @@ class TestBatchStatsFloatOverflow:
         assert "skipped_non_finite_indices" not in result.row.to_dict()
 
 
-class TestBatchStatsGroupByHomogeneity:
-    """Tests for group_by value validation across batch rows.
-
-    When group_by is configured, all rows in the batch must have the same
-    value for that field. Mixed values indicate a trigger/topology bug.
-    """
+class TestBatchStatsGroupByRollups:
+    """Tests for group_by rollup behavior across batch rows."""
 
     @pytest.fixture
     def ctx(self) -> PluginContext:
@@ -375,8 +371,37 @@ class TestBatchStatsGroupByHomogeneity:
         assert result.row is not None
         assert result.row["category"] == "sales"
 
-    def test_heterogeneous_group_by_raises(self, ctx: PluginContext) -> None:
-        """Mixed group_by values raise ValueError — topology/config bug."""
+    def test_heterogeneous_group_by_emits_one_rollup_per_group(self, ctx: PluginContext) -> None:
+        """Mixed group_by values produce per-group aggregate rows."""
+        from elspeth.plugins.transforms.batch_stats import BatchStats
+
+        transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
+
+        rows = [
+            _make_row({"id": 1, "amount": 10.0, "category": "sales"}),
+            _make_row({"id": 2, "amount": 20.0, "category": "returns"}),
+            _make_row({"id": 3, "amount": 30.0, "category": "sales"}),
+        ]
+
+        result = transform.process(rows, ctx)
+
+        assert result.status == "success"
+        assert result.is_multi_row
+        assert result.rows is not None
+
+        rollups = {row["category"]: row for row in result.rows}
+        assert set(rollups) == {"sales", "returns"}
+        assert rollups["sales"]["count"] == 2
+        assert rollups["sales"]["sum"] == 40.0
+        assert rollups["sales"]["mean"] == 20.0
+        assert rollups["sales"]["batch_size"] == 2
+        assert rollups["returns"]["count"] == 1
+        assert rollups["returns"]["sum"] == 20.0
+        assert rollups["returns"]["mean"] == 20.0
+        assert rollups["returns"]["batch_size"] == 1
+
+    def test_two_group_batch_emits_two_rollups(self, ctx: PluginContext) -> None:
+        """Mixed group_by values emit one aggregate row per group."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
@@ -386,11 +411,15 @@ class TestBatchStatsGroupByHomogeneity:
             _make_row({"id": 2, "amount": 20.0, "category": "returns"}),
         ]
 
-        with pytest.raises(ValueError, match="Heterogeneous"):
-            transform.process(rows, ctx)
+        result = transform.process(rows, ctx)
 
-    def test_heterogeneous_group_by_raises_before_all_non_finite_error(self, ctx: PluginContext) -> None:
-        """Grouping invariant failures surface before data-dependent batch errors."""
+        assert result.status == "success"
+        assert result.is_multi_row
+        assert result.rows is not None
+        assert [row["category"] for row in result.rows] == ["sales", "returns"]
+
+    def test_all_non_finite_group_returns_group_error(self, ctx: PluginContext) -> None:
+        """A group with no finite values errors without fabricating statistics."""
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats({"schema": DYNAMIC_SCHEMA, "value_field": "amount", "group_by": "category"})
@@ -400,8 +429,14 @@ class TestBatchStatsGroupByHomogeneity:
             _make_row({"id": 2, "amount": float("inf"), "category": "returns"}),
         ]
 
-        with pytest.raises(ValueError, match="Heterogeneous"):
-            transform.process(rows, ctx)
+        result = transform.process(rows, ctx)
+
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "all_non_finite"
+        assert result.reason["group_by"] == "category"
+        assert result.reason["group_value"] == "sales"
+        assert result.reason["skipped_non_finite_indices"] == [0]
 
     def test_group_by_field_missing_from_all_rows_raises(self, ctx: PluginContext) -> None:
         """Configured group_by missing from all rows should fail fast."""

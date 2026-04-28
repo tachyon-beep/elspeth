@@ -470,7 +470,7 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     },
                     "expected_output_count": {
                         "type": ["integer", "null"],
-                        "description": "Expected number of output rows from aggregation (aggregation only). Optional.",
+                        "description": "Expected number of output rows from aggregation (aggregation only). Optional; omit when output count depends on group_by distinct values.",
                     },
                 },
                 "required": ["id", "node_type", "input"],

@@ -13,23 +13,30 @@ from typing import Any
 from pydantic import Field, field_validator, model_validator
 
 from elspeth.contracts.contexts import TransformContext
+from elspeth.contracts.errors import TransformErrorReason
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.contracts.schema_contract import FieldContract, PipelineRow, SchemaContract
 from elspeth.plugins.infrastructure.base import BaseTransform
 from elspeth.plugins.infrastructure.config_base import TransformDataConfig
 from elspeth.plugins.infrastructure.results import TransformResult
 
+type BatchStatsAggregateRow = dict[str, object]
+
 
 class BatchStatsConfig(TransformDataConfig):
     """Configuration for batch statistics transform.
 
-    Requires a numeric field to aggregate and optionally a group_by field.
+    Requires a numeric field to aggregate. When group_by is configured, rows
+    are partitioned by that field and one aggregate row is emitted per group.
     """
 
     value_field: str = Field(description="Name of the numeric field to aggregate (sum/mean)")
     group_by: str | None = Field(
         default=None,
-        description="Optional field to include in output for grouping context",
+        description=(
+            "Optional field that partitions the batch and emits one aggregate row per distinct value. "
+            "The group_by field is included in each output row."
+        ),
     )
     compute_mean: bool = Field(
         default=True,
@@ -75,7 +82,9 @@ class BatchStats(BaseTransform):
     """Compute aggregate statistics over a batch of rows.
 
     This is a batch-aware transform that receives multiple rows at once
-    when an aggregation trigger fires. It computes:
+    when an aggregation trigger fires. Without group_by, it emits one
+    aggregate row for the full batch. With group_by, it emits one aggregate
+    row per distinct group value. It computes:
     - count: Number of rows in the batch
     - sum: Sum of the value_field across all rows
     - mean: Average of value_field (if compute_mean=True)
@@ -83,7 +92,7 @@ class BatchStats(BaseTransform):
     Config options:
         schema: Required. Schema for input validation
         value_field: Required. Numeric field to aggregate
-        group_by: Optional. Field to include in output for context
+        group_by: Optional. Field to partition by; included in each output row
         compute_mean: Whether to compute mean (default: True)
 
     Example YAML:
@@ -102,7 +111,7 @@ class BatchStats(BaseTransform):
 
     name = "batch_stats"
     plugin_version = "1.0.0"
-    source_file_hash: str | None = "sha256:d22e8793d914b7a5"
+    source_file_hash: str | None = "sha256:4b558dfc1d85fef2"
     config_model = BatchStatsConfig
     is_batch_aware = True  # CRITICAL: Engine buffers rows for batch processing
 
@@ -183,6 +192,138 @@ class BatchStats(BaseTransform):
             )
         ]
 
+    def _group_rows(self, rows: list[PipelineRow]) -> list[tuple[Any, list[tuple[int, PipelineRow]]]]:
+        """Partition rows by group_by value while preserving first-seen order."""
+        if self._group_by is None:
+            return [(None, list(enumerate(rows)))]
+
+        groups: list[tuple[Any, list[tuple[int, PipelineRow]]]] = []
+        for row_index, row in enumerate(rows):
+            group_value = row[self._group_by]
+            for existing_value, grouped_rows in groups:
+                if group_value == existing_value:
+                    grouped_rows.append((row_index, row))
+                    break
+            else:
+                groups.append((group_value, [(row_index, row)]))
+        return groups
+
+    def _aggregate_group(
+        self,
+        grouped_rows: list[tuple[int, PipelineRow]],
+        group_value: Any,
+    ) -> tuple[BatchStatsAggregateRow, TransformResult | None]:
+        """Aggregate one already-partitioned group."""
+        values: list[int | float] = []
+        skipped_non_finite_indices: list[int] = []
+        for row_index, row in grouped_rows:
+            # Direct access - field must exist (KeyError = upstream bug)
+            raw_value = row[self._value_field]
+
+            # Contract enforcement: value_field must be numeric (int or float)
+            # Tier 2 pipeline data - wrong types indicate upstream bug
+            # Use type() instead of isinstance() to reject bool (bool is subclass of int)
+            if type(raw_value) not in (int, float):
+                raise TypeError(
+                    f"Field '{self._value_field}' must be numeric (int or float), "
+                    f"got {type(raw_value).__name__} in row {row_index}. "
+                    f"This indicates an upstream validation bug - check source schema or prior transforms."
+                )
+
+            # NaN/Inf are type-valid floats but operation-unsafe — they produce
+            # garbage in arithmetic and crash downstream canonical JSON (RFC 8785).
+            # Integers are always finite — only check floats.
+            if isinstance(raw_value, float) and not math.isfinite(raw_value):
+                skipped_non_finite_indices.append(row_index)
+                continue
+
+            # Preserve original type: int stays int (arbitrary precision),
+            # float stays float. Avoids precision loss for ints > 2^53.
+            values.append(raw_value)
+
+        count = len(values)
+
+        # All-non-finite is the same condition as empty batch — no real data to aggregate.
+        # Fabricating sum=0/count=0 would produce phantom statistics indistinguishable
+        # from a legitimate computation over zero-valued data.
+        if count == 0 and skipped_non_finite_indices:
+            reason: TransformErrorReason = {
+                "reason": "all_non_finite",
+                "batch_size": len(grouped_rows),
+                "skipped_non_finite": len(skipped_non_finite_indices),
+                "skipped_non_finite_indices": skipped_non_finite_indices,
+            }
+            if self._group_by is not None:
+                reason["group_by"] = self._group_by
+                reason["group_value"] = group_value
+            return {}, TransformResult.error(
+                reason,
+                retryable=False,
+            )
+
+        # At this point, values is guaranteed non-empty: empty batch returns error
+        # before grouping, and all-non-finite returns error above. count > 0.
+        total = sum(values)
+
+        # Guard against overflow: summing many large-but-valid floats can produce inf.
+        # Integer sums use arbitrary precision and cannot overflow.
+        if isinstance(total, float) and not math.isfinite(total):
+            overflow_reason: TransformErrorReason = {
+                "reason": "float_overflow",
+                "batch_size": len(grouped_rows),
+                "valid_count": count,
+            }
+            if self._group_by is not None:
+                overflow_reason["group_by"] = self._group_by
+                overflow_reason["group_value"] = group_value
+            return {}, TransformResult.error(overflow_reason, retryable=False)
+
+        result: BatchStatsAggregateRow = {
+            "count": count,
+            "sum": total,
+            "batch_size": len(grouped_rows),
+        }
+
+        if self._compute_mean:
+            try:
+                result["mean"] = total / count
+            except OverflowError:
+                mean_error_reason: TransformErrorReason = {
+                    "reason": "float_overflow",
+                    "operation": "mean",
+                    "batch_size": len(grouped_rows),
+                    "valid_count": count,
+                }
+                if self._group_by is not None:
+                    mean_error_reason["group_by"] = self._group_by
+                    mean_error_reason["group_value"] = group_value
+                return {}, TransformResult.error(mean_error_reason, retryable=False)
+
+        if skipped_non_finite_indices:
+            result["skipped_non_finite"] = len(skipped_non_finite_indices)
+            result["skipped_non_finite_indices"] = skipped_non_finite_indices
+
+        if self._group_by is not None:
+            result[self._group_by] = group_value
+
+        return result, None
+
+    def _output_contract_for(self, results: list[BatchStatsAggregateRow]) -> SchemaContract:
+        """Build one shared output contract for aggregate result rows."""
+        field_names = list(dict.fromkeys(key for result in results for key in result))
+        fields = tuple(
+            FieldContract(
+                normalized_name=key,
+                original_name=key,
+                python_type=object,  # OBSERVED mode - infer all as object type
+                required=False,
+                source="inferred",
+            )
+            for key in field_names
+        )
+        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
+        return self._align_output_contract(output_contract)
+
     def process(  # type: ignore[override] # Batch signature: list[PipelineRow] instead of PipelineRow
         self, rows: list[PipelineRow], ctx: TransformContext
     ) -> TransformResult:
@@ -207,127 +348,25 @@ class BatchStats(BaseTransform):
                 retryable=False,
             )
 
-        # group_by is a structural batch invariant: if configured, every row
-        # must belong to the same group before data-dependent error paths fire.
-        group_value: Any = None
-        if self._group_by is not None:
-            group_value = rows[0][self._group_by]
-            for row in rows[1:]:
-                val = row[self._group_by]
-                if val != group_value:
-                    raise ValueError(
-                        f"Heterogeneous '{self._group_by}' values in batch: "
-                        f"first row has {group_value!r}, found {val!r}. "
-                        f"Configure the aggregation trigger to group by "
-                        f"'{self._group_by}' or remove group_by config."
-                    )
+        results: list[BatchStatsAggregateRow] = []
+        for group_value, grouped_rows in self._group_rows(rows):
+            aggregate, error = self._aggregate_group(grouped_rows, group_value)
+            if error is not None:
+                return error
+            results.append(aggregate)
 
-        # Extract numeric values - enforce type contract
-        # Tier 2 pipeline data should already be validated; wrong types = upstream bug
-        values: list[int | float] = []
-        skipped_non_finite_indices: list[int] = []
-        for i, row in enumerate(rows):
-            # Direct access - field must exist (KeyError = upstream bug)
-            raw_value = row[self._value_field]
+        output_contract = self._output_contract_for(results)
+        fields_added = [field.normalized_name for field in output_contract.fields]
+        pipeline_rows = [PipelineRow(result, output_contract) for result in results]
 
-            # Contract enforcement: value_field must be numeric (int or float)
-            # Tier 2 pipeline data - wrong types indicate upstream bug
-            # Use type() instead of isinstance() to reject bool (bool is subclass of int)
-            if type(raw_value) not in (int, float):
-                raise TypeError(
-                    f"Field '{self._value_field}' must be numeric (int or float), "
-                    f"got {type(raw_value).__name__} in row {i}. "
-                    f"This indicates an upstream validation bug - check source schema or prior transforms."
-                )
-
-            # NaN/Inf are type-valid floats but operation-unsafe — they produce
-            # garbage in arithmetic and crash downstream canonical JSON (RFC 8785).
-            # Integers are always finite — only check floats.
-            if isinstance(raw_value, float) and not math.isfinite(raw_value):
-                skipped_non_finite_indices.append(i)
-                continue
-
-            # Preserve original type: int stays int (arbitrary precision),
-            # float stays float. Avoids precision loss for ints > 2^53.
-            values.append(raw_value)
-
-        count = len(values)
-
-        # All-non-finite is the same condition as empty batch — no real data to aggregate.
-        # Fabricating sum=0/count=0 would produce phantom statistics indistinguishable
-        # from a legitimate computation over zero-valued data.
-        if count == 0 and skipped_non_finite_indices:
-            return TransformResult.error(
-                {
-                    "reason": "all_non_finite",
-                    "batch_size": len(rows),
-                    "skipped_non_finite": len(skipped_non_finite_indices),
-                    "skipped_non_finite_indices": skipped_non_finite_indices,
-                },
-                retryable=False,
+        if len(pipeline_rows) > 1:
+            return TransformResult.success_multi(
+                pipeline_rows,
+                success_reason={"action": "processed", "fields_added": fields_added},
             )
-
-        # At this point, values is guaranteed non-empty: empty batch returns error
-        # at line 127, and all-non-finite returns error above. count > 0.
-        total = sum(values)
-
-        # Guard against overflow: summing many large-but-valid floats can produce inf.
-        # Integer sums use arbitrary precision and cannot overflow.
-        if isinstance(total, float) and not math.isfinite(total):
-            return TransformResult.error(
-                {"reason": "float_overflow", "batch_size": len(rows), "valid_count": count},
-                retryable=False,
-            )
-
-        result: dict[str, Any] = {
-            "count": count,
-            "sum": total,
-            "batch_size": len(rows),  # Total rows, including those with missing values
-        }
-
-        if self._compute_mean:
-            try:
-                result["mean"] = total / count
-            except OverflowError:
-                return TransformResult.error(
-                    {
-                        "reason": "float_overflow",
-                        "operation": "mean",
-                        "batch_size": len(rows),
-                        "valid_count": count,
-                    },
-                    retryable=False,
-                )
-
-        if skipped_non_finite_indices:
-            result["skipped_non_finite"] = len(skipped_non_finite_indices)
-            result["skipped_non_finite_indices"] = skipped_non_finite_indices
-
-        # Include prevalidated group_by field. Missing fields and heterogeneous
-        # values were checked before data-dependent error paths above.
-        # Collision between group_by and output keys is caught at init time.
-        if self._group_by is not None:
-            result[self._group_by] = group_value
-
-        # Derive fields_added directly from result dict — single source of truth.
-        # No parallel list to diverge from the actual output.
-        fields_added = list(result.keys())
-
-        fields = tuple(
-            FieldContract(
-                normalized_name=key,
-                original_name=key,
-                python_type=object,  # OBSERVED mode - infer all as object type
-                required=False,
-                source="inferred",
-            )
-            for key in result
-        )
-        output_contract = SchemaContract(mode="OBSERVED", fields=fields, locked=True)
-        output_contract = self._align_output_contract(output_contract)
 
         return TransformResult.success(
-            PipelineRow(result, output_contract),
+            pipeline_rows[0],
             success_reason={"action": "processed", "fields_added": fields_added},
         )
 

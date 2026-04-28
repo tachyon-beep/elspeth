@@ -143,7 +143,7 @@ SOURCES:
 
 TRANSFORMS:
   batch_replicate      - Replicate rows based on a copies field.
-  batch_stats          - Compute aggregate statistics over a batch of rows.
+  batch_stats          - Compute aggregate statistics over a batch, optionally per group_by value.
   field_mapper         - Map, rename, and select row fields.
   json_explode         - Explode a JSON array field into multiple rows.
   keyword_filter       - Filter rows containing blocked content patterns.

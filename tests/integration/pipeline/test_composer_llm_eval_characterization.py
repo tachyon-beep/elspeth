@@ -381,8 +381,8 @@ def test_scenario_2_batch_stats_required_input_fields_returns_pre_execution_vali
     assert "required_input_fields" in _format_composer_errors(composer_summary)
 
 
-def test_scenario_2_batch_stats_group_by_is_homogeneity_assertion_not_rollup_operator() -> None:
-    """Protects elspeth-95904149b2 with the actual batch_stats runtime contract."""
+def test_scenario_2_batch_stats_group_by_emits_per_tier_rollups() -> None:
+    """Protects elspeth-95904149b2 with the batch_stats per-group rollup contract."""
     transform = BatchStats(
         {
             "schema": {"mode": "observed"},
@@ -393,12 +393,20 @@ def test_scenario_2_batch_stats_group_by_is_homogeneity_assertion_not_rollup_ope
     rows = [
         _make_pipeline_row({"ticket_id": "T-001", "customer_tier": "gold", "amount": 10.0}),
         _make_pipeline_row({"ticket_id": "T-002", "customer_tier": "silver", "amount": 20.0}),
+        _make_pipeline_row({"ticket_id": "T-003", "customer_tier": "gold", "amount": 30.0}),
     ]
 
-    with pytest.raises(ValueError) as exc_info:
-        transform.process(rows, make_context())
+    result = transform.process(rows, make_context())
 
-    assert "Heterogeneous 'customer_tier' values in batch" in str(exc_info.value)
+    assert result.status == "success"
+    assert result.is_multi_row
+    assert result.rows is not None
+    rollups = {row["customer_tier"]: row for row in result.rows}
+    assert set(rollups) == {"gold", "silver"}
+    assert rollups["gold"]["count"] == 2
+    assert rollups["gold"]["sum"] == 40.0
+    assert rollups["silver"]["count"] == 1
+    assert rollups["silver"]["sum"] == 20.0
 
 
 def test_known_secret_env_marker_cannot_bypass_unavailable_web_secret_contract(

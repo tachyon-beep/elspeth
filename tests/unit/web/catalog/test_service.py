@@ -173,6 +173,13 @@ class TestGetSchema:
 
         assert "required_input_fields" not in info.json_schema["properties"]
 
+    def test_batch_stats_group_by_schema_describes_per_group_rollups(self, catalog: CatalogServiceImpl) -> None:
+        """Composer-visible schema must describe group_by as a rollup partition."""
+        info = catalog.get_schema("transform", "batch_stats")
+
+        description = info.json_schema["properties"]["group_by"]["description"]
+        assert "one aggregate row per distinct value" in description
+
     def test_csv_sink_schema(self, catalog: CatalogServiceImpl) -> None:
         info = catalog.get_schema("sink", "csv")
         assert info.name == "csv"
