@@ -30,7 +30,7 @@ from elspeth.core.secrets import resolve_secret_refs, secret_env_ref_name
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
-from elspeth.web.composer.state import CompositionState
+from elspeth.web.composer.state import CompositionState, _batch_aware_required_input_fields_error
 from elspeth.web.config import WebSettings
 from elspeth.web.execution._semantic_helpers import (
     assistance_suggestion_for,
@@ -47,6 +47,7 @@ from elspeth.web.execution.schemas import (
 _CHECK_PATH_ALLOWLIST = "path_allowlist"
 _CHECK_SECRET_REFS = "secret_refs"
 _CHECK_SEMANTIC_CONTRACTS = "semantic_contracts"
+_CHECK_BATCH_TRANSFORM_OPTIONS = "batch_transform_options"
 _CHECK_SETTINGS = "settings_load"
 _CHECK_PLUGINS = "plugin_instantiation"
 _CHECK_GRAPH = "graph_structure"
@@ -56,6 +57,7 @@ _ALL_CHECKS = [
     _CHECK_PATH_ALLOWLIST,
     _CHECK_SECRET_REFS,
     _CHECK_SEMANTIC_CONTRACTS,
+    _CHECK_BATCH_TRANSFORM_OPTIONS,
     _CHECK_SETTINGS,
     _CHECK_PLUGINS,
     _CHECK_GRAPH,
@@ -317,6 +319,43 @@ def validate_pipeline(
             detail=(
                 f"All {len(semantic_contracts)} semantic contract(s) satisfied" if semantic_contracts else "No semantic contracts to check"
             ),
+        )
+    )
+
+    batch_option_errors: list[tuple[str, str]] = []
+    for node in state.nodes:
+        batch_required_error = _batch_aware_required_input_fields_error(node.id, node.plugin, node.options)
+        if batch_required_error is not None:
+            batch_option_errors.append((node.id, batch_required_error))
+    if batch_option_errors:
+        checks.append(
+            ValidationCheck(
+                name=_CHECK_BATCH_TRANSFORM_OPTIONS,
+                passed=False,
+                detail="Batch-aware transform option check failed",
+            )
+        )
+        for node_id, message in batch_option_errors:
+            errors.append(
+                ValidationError(
+                    component_id=node_id,
+                    component_type="transform",
+                    message=message,
+                    suggestion="Remove required_input_fields from batch-aware transform options; use schema.required_fields for batch input validation.",
+                )
+            )
+        checks.extend(_skipped_checks(_CHECK_BATCH_TRANSFORM_OPTIONS))
+        return ValidationResult(
+            is_valid=False,
+            checks=checks,
+            errors=errors,
+            semantic_contracts=serialize_semantic_contracts(semantic_contracts),
+        )
+    checks.append(
+        ValidationCheck(
+            name=_CHECK_BATCH_TRANSFORM_OPTIONS,
+            passed=True,
+            detail="Batch-aware transform options are compatible with ADR-013",
         )
     )
 

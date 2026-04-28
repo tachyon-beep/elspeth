@@ -37,6 +37,9 @@ from elspeth.engine.orchestrator.validation import (
 NodeType = Literal["transform", "gate", "aggregation", "coalesce"]
 EdgeType = Literal["on_success", "on_error", "route_true", "route_false", "fork"]
 
+_DECLARED_INPUT_FIELDS_OPTION = "required_input_fields"
+_MISSING_DECLARED_INPUT_FIELDS = object()
+
 
 @dataclass(frozen=True, slots=True)
 class PipelineMetadata:
@@ -311,6 +314,49 @@ def _source_options_have_schema(options: Mapping[str, Any]) -> bool:
     same rule so they cannot drift.
     """
     return raw_options_have_schema(options)
+
+
+def _known_batch_aware_transform_plugins() -> frozenset[str]:
+    """Return transform names whose runtime config rejects declared inputs."""
+    from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+
+    transforms = get_shared_plugin_manager().get_transforms()
+    return frozenset(cls.name for cls in transforms if cls.is_batch_aware)
+
+
+def _declared_input_fields_option(options: Mapping[str, Any]) -> object:
+    """Return the raw declared-input-field option, including wrapper-shaped aggregations."""
+    if _DECLARED_INPUT_FIELDS_OPTION in options:
+        return options[_DECLARED_INPUT_FIELDS_OPTION]
+
+    if "options" in options:
+        nested_options = options["options"]
+        if isinstance(nested_options, Mapping) and _DECLARED_INPUT_FIELDS_OPTION in nested_options:
+            return nested_options[_DECLARED_INPUT_FIELDS_OPTION]
+
+    return _MISSING_DECLARED_INPUT_FIELDS
+
+
+def _batch_aware_required_input_fields_error(
+    node_id: str,
+    plugin_name: str | None,
+    options: Mapping[str, Any],
+) -> str | None:
+    """Reject ADR-013 declared input fields on batch-aware transform configs."""
+    if plugin_name is None or plugin_name not in _known_batch_aware_transform_plugins():
+        return None
+
+    declared_input_fields = _declared_input_fields_option(options)
+    if declared_input_fields is _MISSING_DECLARED_INPUT_FIELDS or declared_input_fields in (None, [], ()):
+        return None
+
+    return (
+        f"Node '{node_id}' sets required_input_fields={declared_input_fields!r}, "
+        f"but transform '{plugin_name}' is batch-aware. ADR-013 declared input "
+        "fields only have a non-batch pre-emission dispatch site; remove "
+        "required_input_fields and express batch input requirements with "
+        "schema.required_fields."
+    )
 
 
 def _runtime_connection_targets(
@@ -1312,6 +1358,10 @@ class CompositionState:
 
         # 7. Node type field consistency
         for node in self.nodes:
+            batch_required_error = _batch_aware_required_input_fields_error(node.id, node.plugin, node.options)
+            if batch_required_error is not None:
+                errors.append(_err(f"node:{node.id}", batch_required_error, "high"))
+
             if node.node_type == "gate":
                 if node.condition is None:
                     errors.append(_err(f"node:{node.id}", f"Gate '{node.id}' is missing required field 'condition'.", "high"))

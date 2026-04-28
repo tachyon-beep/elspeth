@@ -207,6 +207,9 @@ allowed_dict_patterns:
   # Catalog service - JSON Schema traversal (helpers receive raw Pydantic-
   # generated schema dicts and walk them; there is no stable TypedDict for
   # arbitrary JSON Schema, including discriminated unions with $defs).
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._catalog_schema:return"
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._without_declared_input_fields:schema"
+  - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._without_declared_input_fields:return"
   - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._extract_config_fields:schema"
   - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._fields_from_discriminated:schema"
   - "src/elspeth/web/catalog/service.py:CatalogServiceImpl._field_summary:field_schema"

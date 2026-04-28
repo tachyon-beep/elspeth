@@ -40,6 +40,7 @@ from elspeth.web.composer.state import (
     PipelineMetadata,
     SourceSpec,
     ValidationSummary,
+    _batch_aware_required_input_fields_error,
     _source_options_have_schema,
     _validate_gate_expression,
 )
@@ -1574,6 +1575,10 @@ def _execute_upsert_node(
             return _failure_result(state, plugin_error)
 
         node_options = args.get("options", {})
+        batch_required_error = _batch_aware_required_input_fields_error(args["id"], plugin, node_options)
+        if batch_required_error is not None:
+            return _failure_result(state, batch_required_error)
+
         prevalidation_error = _prevalidate_transform(plugin, node_options)
         if prevalidation_error is not None:
             return _failure_result(state, prevalidation_error)
@@ -2835,6 +2840,10 @@ def _execute_set_pipeline(
             if plugin_error is not None:
                 return _failure_result(state, f"Node '{node_id}': {plugin_error}")
             node_options = node_args.get("options", {})
+            batch_required_error = _batch_aware_required_input_fields_error(node_id, node_plugin, node_options)
+            if batch_required_error is not None:
+                return _failure_result(state, f"Node '{node_id}': {batch_required_error}")
+
             node_prevalidation = _prevalidate_transform(node_plugin, node_options)
             if node_prevalidation is not None:
                 return _failure_result(state, f"Node '{node_id}': {node_prevalidation}")

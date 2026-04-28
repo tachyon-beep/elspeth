@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from elspeth.contracts.plugin_protocols import SinkProtocol, SourceProtocol, TransformProtocol
 from elspeth.plugins.infrastructure.discovery import get_plugin_description
@@ -24,6 +24,11 @@ _VALID_TYPES = frozenset({"source", "transform", "sink"})
 
 # JSON-Schema $ref prefix for local $defs used by Pydantic discriminated unions.
 _DEFS_REF_PREFIX = "#/$defs/"
+
+# ADR-013 declared-input-field checks currently dispatch only for non-batch
+# transforms. Batch-aware transform schemas must not advertise this option
+# until a batch pre-emission dispatch site exists.
+_DECLARED_INPUT_FIELDS_OPTION = "required_input_fields"
 
 
 class CatalogServiceImpl:
@@ -63,7 +68,7 @@ class CatalogServiceImpl:
 
         # Plugins own schema emission — single-model plugins use the default
         # on the plugin base, discriminated-union plugins override.
-        json_schema: dict[str, Any] = plugin_cls.get_config_schema()
+        json_schema = self._catalog_schema(plugin_cls, plugin_type)
 
         # Full docstring for schema view (not just first line)
         description = (plugin_cls.__doc__ or "").strip()
@@ -112,7 +117,7 @@ class CatalogServiceImpl:
         """Convert a plugin class to a PluginSummary."""
         name: str = plugin_cls.name
         description = get_plugin_description(plugin_cls)
-        schema: dict[str, Any] = plugin_cls.get_config_schema()
+        schema = self._catalog_schema(plugin_cls, plugin_type)
         config_fields = self._extract_config_fields(schema)
         return PluginSummary(
             name=name,
@@ -120,6 +125,36 @@ class CatalogServiceImpl:
             plugin_type=plugin_type,
             config_fields=config_fields,
         )
+
+    def _catalog_schema(self, plugin_cls: PluginClass, plugin_type: PluginKind) -> dict[str, Any]:
+        """Return the composer-visible schema for a plugin class."""
+        schema: dict[str, Any] = plugin_cls.get_config_schema()
+        if plugin_type != "transform":
+            return schema
+
+        transform_cls = cast(type[TransformProtocol], plugin_cls)
+        if not transform_cls.is_batch_aware:
+            return schema
+
+        return self._without_declared_input_fields(schema)
+
+    def _without_declared_input_fields(self, schema: dict[str, Any]) -> dict[str, Any]:
+        """Remove ADR-013 non-batch-only fields from a JSON schema object."""
+        sanitized = dict(schema)
+        if "properties" in schema:
+            sanitized["properties"] = {
+                field_name: field_schema
+                for field_name, field_schema in schema["properties"].items()
+                if field_name != _DECLARED_INPUT_FIELDS_OPTION
+            }
+        if "required" in schema:
+            sanitized["required"] = [field_name for field_name in schema["required"] if field_name != _DECLARED_INPUT_FIELDS_OPTION]
+        if "$defs" in schema:
+            sanitized["$defs"] = {
+                definition_name: self._without_declared_input_fields(definition_schema)
+                for definition_name, definition_schema in schema["$defs"].items()
+            }
+        return sanitized
 
     def _extract_config_fields(self, schema: dict[str, Any]) -> list[ConfigFieldSummary]:
         """Flatten a plugin's JSON schema into ConfigFieldSummary entries.

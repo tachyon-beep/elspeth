@@ -5657,6 +5657,44 @@ class TestPrevalidatePluginOptions:
         assert node.node_type == "aggregation"
         assert node.plugin == "batch_stats"
 
+    def test_upsert_node_aggregation_rejects_required_input_fields(self) -> None:
+        """ADR-013 declared input fields are not valid for batch-aware aggregation nodes."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        catalog.list_transforms.return_value = [
+            *catalog.list_transforms.return_value,
+            PluginSummary(
+                name="batch_stats",
+                description="Batch statistics aggregation",
+                plugin_type="transform",
+                config_fields=[],
+            ),
+        ]
+
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "agg1",
+                "node_type": "aggregation",
+                "plugin": "batch_stats",
+                "input": "source",
+                "on_success": "out",
+                "options": {
+                    "schema": {"mode": "observed"},
+                    "value_field": "amount",
+                    "required_input_fields": ["amount"],
+                },
+            },
+            state,
+            catalog,
+        )
+
+        assert result.success is False
+        assert result.data is not None
+        messages = result.data["error"]
+        assert "required_input_fields" in messages
+        assert "batch-aware" in messages
+
     def test_secret_ref_field_passes_prevalidation(self) -> None:
         """Options with secret_ref markers pass prevalidation.
 

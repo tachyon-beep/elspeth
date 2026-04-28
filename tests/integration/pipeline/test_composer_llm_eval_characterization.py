@@ -358,10 +358,6 @@ def test_scenario_2_omitted_trigger_is_end_of_source_only_contract(tmp_path: Pat
     assert runtime_result.is_valid, _format_validation_errors(runtime_result)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=f"{ISSUE_BATCH_STATS_REQUIRED_FIELDS}: batch_stats.required_input_fields must fail before execution",
-)
 def test_scenario_2_batch_stats_required_input_fields_returns_pre_execution_validation_error(tmp_path: Path) -> None:
     """Protects the ADR-013 batch-aware dispatch gap from Scenario 2."""
     data_dir, source_path, output_path = _scenario_2_files(tmp_path)

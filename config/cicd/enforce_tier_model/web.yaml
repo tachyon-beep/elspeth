@@ -23,57 +23,57 @@ allow_hits:
 # (the routing predicate in _extract_config_fields enforces their presence
 # before delegating), and a dangling ``$ref`` is treated as a Pydantic-schema
 # bug — neither is allowlisted.
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=e31f4b88326ac0a7
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=b4a0510125abce03
   owner: web-catalog
   reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent
   safety: Default empty dict; no properties means no config fields
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=7ad871f9822bf790
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=816144ac56504e6d
   owner: web-catalog
   reason: Tier 3 boundary — Pydantic JSON schema 'required' key may be absent
   safety: Default empty list; no required fields
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=52678cca41000fa1
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=787f2794ac1e0cec
   owner: web-catalog
   reason: Tier 3 boundary — JSON Schema oneOf entry may carry inline schema instead of $ref
   safety: Default empty string fails the startswith(prefix) guard and the branch is skipped
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=2d4289c382a71d90
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=0593034aa10317db
   owner: web-catalog
   reason: Tier 3 boundary — variant $defs entry may declare no 'properties' (empty config)
   safety: Default empty dict; variant contributes no field names to the union
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=00411f51f2db205b
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=ea2d38196092229b
   owner: web-catalog
   reason: Tier 3 boundary — variant $defs entry may declare no 'required' list (no mandatory fields)
   safety: Default empty list; variant's required set is empty; intersection-required handles correctly
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=eaa1c6ea19364bd7
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=bb6ceaf2795988d5
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema field 'type' may be absent (e.g. anyOf unions)
   safety: Default 'object'; conservative fallback
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=efc9fdd73ebba933
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=a2ccfc6d5b785984
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema anyOf branch may lack 'type' at top level
   safety: Checked before use; null branch skipped
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=8bc9de6855ac3a5c
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=999172624d1a782c
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema branch 'type' checked for null filtering
   safety: Skips null branches; extracts real type from remaining
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=444a4c91c0b1c835
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=ebff8b3961d59427
   owner: web-catalog
   reason: Tier 3 boundary — fallback type extraction from anyOf branch
   safety: Default 'object'; conservative
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=e21ad9215a5abf9d
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=06b1817a3b6d9d39
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema field 'description' is optional
   safety: Returns None; ConfigFieldSummary.description accepts None
   expires: null
-- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=4e494b46ffc2656b
+- key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=8b1571451dd2c4d9
   owner: web-catalog
   reason: Tier 3 boundary — JSON schema field 'default' is optional
   safety: Returns None; ConfigFieldSummary.default accepts None
@@ -319,7 +319,12 @@ allow_hits:
   reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
   safety: Missing iat returns None; no fabrication
   expires: null
-- key: web/composer/state.py:R5:_check_schema_contracts:_is_config_probe_exception:fp=817c492519af9f65
+- key: web/composer/state.py:R5:_declared_input_fields_option:fp=3b81988b405ac7b0
+  owner: web-composer
+  reason: Composer state options are Tier 3 LLM/user-supplied plugin config; wrapper-shaped aggregation options may carry an optional nested options mapping that must be inspected only when it is actually a mapping
+  safety: Non-mapping wrapper values are not accepted as valid; existing schema-contract validation reports malformed aggregation wrapper options as blocking ValidationEntry results, while top-level required_input_fields is still rejected
+  expires: null
+- key: web/composer/state.py:R5:_check_schema_contracts:_is_config_probe_exception:fp=392eb7ac8346848d
   owner: web-composer
   reason: Composer preview classifies only known plugin config/probe exception types while probing plugin-computed output contracts for shape-changing transforms. The caught exception message is NOT surfaced to the UI — only type(exc).__name__ is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials, filesystem paths) via the preview response. ADR-007 adds fail-closed handling for known pass-through plugins; non-pass-through plugins retain the v2 fallback to raw guarantees.
   safety: Unexpected exceptions are re-raised. Known config/probe exceptions are converted into a warning and preview falls back to raw declared schema guarantees (or frozenset() for known pass-through plugins, which then forces Stage 1 rejection) instead of crashing or fabricating a stronger contract
@@ -329,27 +334,27 @@ allow_hits:
   reason: The semantic-contract validator probes producer plugins to read their output_semantics() during draft pipeline composition. Producer construction can fail with known draft/config exceptions (PluginConfigError, PluginNotFoundError, TemplateError, UnknownPluginTypeError, or "Invalid configuration for transform" ValueError) when the user has not finished filling in options. Mirrors the same predicate at web/composer/state.py:_is_config_probe_exception used by the schema-contract probe path. The caught exception text is NEVER embedded in any ValidationEntry or SemanticEdgeContract — the only signal exposed downstream is "no semantic facts" (treated as UNKNOWN by compare_semantic), preventing plugin-option leaks via validator diagnostics.
   safety: Unexpected exceptions are re-raised (per CLAUDE.md plugin-as-system-code policy). Known draft/config exceptions yield producer_decl=None, which compare_semantic translates to SemanticOutcome.UNKNOWN; FAIL-policy consumers then emit a structured error naming only the requirement_code and plugin names, never the exception text.
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=420201cb78a0cae8
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=c9553ec19974f8bb
   owner: web-composer
   reason: Contract helper ValueError is intentionally converted into a blocking ValidationEntry on the consumer node instead of raising immediately
   safety: The pipeline remains invalid; no contract telemetry is fabricated for that consumer edge
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=69526bbb2e8dfcef
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=be6716b7244eab96
   owner: web-composer
   reason: Producer contract parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The invalid producer blocks validation and suppresses downstream edge contracts instead of silently continuing
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=ce31ba8365656406
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=6b38000cc28451a9
   owner: web-composer
   reason: Sink contract parse failures are intentionally converted into blocking ValidationEntry results on the output
   safety: The pipeline remains invalid and the sink edge contract is skipped rather than fabricated
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=989c9cfe4df37892
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=68a7fbbf6670f83c
   owner: web-composer
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/state.py:R6:CompositionState:validate:fp=3fb28a05771a3d98
+- key: web/composer/state.py:R6:CompositionState:validate:fp=dede8aff4f04ddfb
   owner: web-composer
   reason: Aggregation trigger PydanticValidationError is intentionally converted into a blocking ValidationEntry so composer rejects malformed trigger.condition values before runtime settings load
   safety: The pipeline remains invalid; no trigger config is fabricated and unexpected exception types propagate
@@ -406,22 +411,22 @@ allow_hits:
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
   safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=ee990126daae4233
+- key: web/execution/validation.py:R5:validate_pipeline:fp=cbaab347db2ee123
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=9bfa44f5e1d76ae4
+- key: web/execution/validation.py:R5:validate_pipeline:fp=e13fdf327aeaa4d8
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=33a2b79c5bd8b730
+- key: web/execution/validation.py:R1:validate_pipeline:fp=801c7d036f72ff2b
   owner: web-execution
   reason: Validation checks optional source path/file keys supplied by composition state
   safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=2383164f7555b8f7
+- key: web/execution/validation.py:R1:validate_pipeline:fp=cb8f3cf812e3756e
   owner: web-execution
   reason: Validation checks optional output path/file keys supplied by composition state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
@@ -504,22 +509,22 @@ allow_hits:
     pinned by the resolve/has_ref invariant regressions covering user-row
     deletion and server env-var clearing between the probe and the fetch.
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=37e51986585e3b97
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=d0e69f4d79adbde8
   owner: web-execution
   reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=e97c65781b7e6225
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=2f72704518b7254e
   owner: web-execution
   reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
   safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=46a71cc27fceaa19
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=3562a31e9f2a60af
   owner: web-execution
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=74bc2d9a49a4be13
+- key: web/execution/validation.py:R5:validate_pipeline:fp=b124f4651e49a170
   owner: web-execution
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
@@ -904,7 +909,7 @@ allow_hits:
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
   expires: null
-- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=4e99de25e7b391f1
+- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=6521ed28e55d2739
   owner: web-validation
   reason: Union type dispatch — function receives PluginNotFoundError | PluginConfigError, isinstance needed to read component_type attribute only present on PluginConfigError
   safety: Returns None for non-matching type; no error suppression

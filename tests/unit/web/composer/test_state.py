@@ -3494,6 +3494,48 @@ class TestSchemaContractValidation:
         assert not result.is_valid
         assert any("value" in e.message for e in result.errors)
 
+    def test_aggregation_required_input_fields_rejected_even_when_upstream_satisfies_contract(self) -> None:
+        """ADR-013 has no batch-aware pre-emission dispatch for required_input_fields."""
+        state = self._empty_state()
+        state = state.with_source(
+            self._make_source(
+                on_success="agg1",
+                options={"schema": {"mode": "fixed", "fields": ["amount: float"]}},
+            )
+        )
+        state = state.with_node(
+            NodeSpec(
+                id="agg1",
+                node_type="aggregation",
+                plugin="batch_stats",
+                input="agg1",
+                on_success="main",
+                on_error="discard",
+                options={
+                    "value_field": "amount",
+                    "required_input_fields": ["amount"],
+                    "schema": {"mode": "observed"},
+                },
+                condition=None,
+                routes=None,
+                fork_to=None,
+                branches=None,
+                policy=None,
+                merge=None,
+            )
+        )
+        state = state.with_output(self._make_output(name="main"))
+        state = state.with_edge(self._make_edge("e1", "source", "agg1"))
+
+        result = state.validate()
+
+        assert not result.is_valid
+        messages = "\n".join(entry.message for entry in result.errors)
+        assert "required_input_fields" in messages
+        assert "batch-aware" in messages
+        agg_contract = next(ec for ec in result.edge_contracts if ec.to_id == "agg1")
+        assert agg_contract.satisfied is True
+
     def test_aggregation_nested_wrapper_required_input_fields_fail(self) -> None:
         """Aggregation wrapper-shaped options.required_input_fields is honored."""
         state = self._empty_state()

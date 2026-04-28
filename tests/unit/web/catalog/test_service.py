@@ -103,6 +103,15 @@ class TestListTransforms:
         gate_names = {"threshold_gate", "routing_gate", "classification_gate"}
         assert names.isdisjoint(gate_names), f"Gates found in transforms: {names & gate_names}"
 
+    def test_batch_aware_transform_summary_hides_required_input_fields(self, catalog: CatalogServiceImpl) -> None:
+        """ADR-013: batch-aware transforms cannot advertise declared input fields."""
+        transforms = catalog.list_transforms()
+        batch_stats = next(t for t in transforms if t.name == "batch_stats")
+
+        field_names = {field.name for field in batch_stats.config_fields}
+
+        assert "required_input_fields" not in field_names
+
 
 class TestListSinks:
     """list_sinks() returns all registered sink plugins."""
@@ -157,6 +166,12 @@ class TestGetSchema:
         assert info.name == "passthrough"
         assert info.plugin_type == "transform"
         assert isinstance(info.json_schema, dict)
+
+    def test_batch_aware_transform_schema_hides_required_input_fields(self, catalog: CatalogServiceImpl) -> None:
+        """Full schema must not offer fields the batch-aware runtime rejects."""
+        info = catalog.get_schema("transform", "batch_stats")
+
+        assert "required_input_fields" not in info.json_schema["properties"]
 
     def test_csv_sink_schema(self, catalog: CatalogServiceImpl) -> None:
         info = catalog.get_schema("sink", "csv")

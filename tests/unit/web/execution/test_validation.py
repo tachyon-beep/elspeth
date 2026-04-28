@@ -167,6 +167,57 @@ class TestValidatePipelinePathAllowlist:
         assert "skipped" in path_check.detail.lower()
 
 
+class TestValidatePipelineBatchTransformOptions:
+    """ADR-013 composer/runtime agreement for batch-aware transform options."""
+
+    def test_required_input_fields_returns_structured_validation_error(self) -> None:
+        source = SourceSpec(
+            plugin="csv",
+            on_success="agg1",
+            options={"schema": {"mode": "fixed", "fields": ["amount: float"]}},
+            on_validation_failure="discard",
+        )
+        agg = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_stats",
+            input="agg1",
+            on_success="primary",
+            on_error="discard",
+            options={
+                "schema": {"mode": "observed"},
+                "value_field": "amount",
+                "required_input_fields": ["amount"],
+            },
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+        )
+        state = CompositionState(
+            source=source,
+            nodes=(agg,),
+            edges=(),
+            outputs=(_make_output({"schema": {"mode": "observed"}}),),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        settings = _make_settings()
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = "source:\n  plugin: csv\n"
+
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert result.is_valid is False
+        assert _check(result, "batch_transform_options").passed is False
+        messages = "\n".join(error.message for error in result.errors)
+        assert "required_input_fields" in messages
+        assert "batch-aware" in messages
+        mock_yaml_gen.generate_yaml.assert_not_called()
+
+
 class TestValidatePipelineSinkPathAllowlist:
     """Sink path allowlist — prevents arbitrary file writes via sink options."""
 
@@ -582,12 +633,13 @@ class TestValidatePipelineSuccess:
         result = validate_pipeline(state, settings, mock_yaml_gen)
 
         assert result.is_valid is True
-        assert len(result.checks) == 7
+        assert len(result.checks) == 8
         assert all(c.passed for c in result.checks)
         # B11 fix: path_allowlist check is always recorded
         assert _check(result, "path_allowlist").passed is True
         assert _check(result, "secret_refs").passed is True
         assert _check(result, "semantic_contracts").passed is True
+        assert _check(result, "batch_transform_options").passed is True
         assert result.errors == []
 
         # Verify real engine functions were called
