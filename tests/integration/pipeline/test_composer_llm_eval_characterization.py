@@ -230,7 +230,7 @@ def _aggregation_state(
     source_path: str | Path,
     output_path: str | Path,
     *,
-    trigger: dict[str, Any],
+    trigger: dict[str, Any] | None,
     aggregation_options: dict[str, Any],
 ) -> CompositionState:
     return CompositionState(
@@ -319,10 +319,6 @@ def test_scenario_1b_blob_service_storage_path_validates_through_runtime_path_al
     assert runtime_result.is_valid, _format_validation_errors(runtime_result)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=f"{ISSUE_TRIGGER_END_OF_SOURCE}: trigger.condition=end_of_source must be composer-visible invalid",
-)
 def test_scenario_2_end_of_source_condition_rejected_before_runtime_settings_load(tmp_path: Path) -> None:
     """Protects Scenario 2 aggregation trigger shape drift."""
     data_dir, source_path, output_path = _scenario_2_files(tmp_path)
@@ -340,6 +336,26 @@ def test_scenario_2_end_of_source_condition_rejected_before_runtime_settings_loa
     composer_summary = state.validate()
     assert not composer_summary.is_valid, "composer accepted an end_of_source token in the boolean condition slot"
     assert "end_of_source" in _format_composer_errors(composer_summary)
+
+
+def test_scenario_2_omitted_trigger_is_end_of_source_only_contract(tmp_path: Path) -> None:
+    """Composer and runtime agree that omitted trigger means end-of-source-only aggregation."""
+    data_dir, source_path, output_path = _scenario_2_files(tmp_path)
+    state = _aggregation_state(
+        source_path,
+        output_path,
+        trigger=None,
+        aggregation_options={"schema": {"mode": "observed"}, "value_field": "amount"},
+    )
+
+    composer_summary = state.validate()
+    assert composer_summary.is_valid, _format_composer_errors(composer_summary)
+
+    yaml_doc = yaml.safe_load(composer_yaml_generator.generate_yaml(state))
+    assert "trigger" not in yaml_doc["aggregations"][0]
+
+    runtime_result = validate_pipeline(state, _web_settings(data_dir), composer_yaml_generator)
+    assert runtime_result.is_valid, _format_validation_errors(runtime_result)
 
 
 @pytest.mark.xfail(

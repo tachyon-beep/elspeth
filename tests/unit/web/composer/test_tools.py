@@ -604,6 +604,29 @@ class TestUpsertNode:
         assert result.success is True
         assert len(result.updated_state.nodes) == 1
 
+    def test_aggregation_end_of_source_condition_rejected(self) -> None:
+        """upsert_node rejects end_of_source in the aggregation condition slot."""
+        state = _empty_state()
+        catalog = _mock_catalog()
+        result = execute_tool(
+            "upsert_node",
+            {
+                "id": "agg1",
+                "node_type": "aggregation",
+                "plugin": "batch_stats",
+                "input": "source_out",
+                "on_success": "main",
+                "options": {"schema": {"mode": "observed"}, "value_field": "amount"},
+                "trigger": {"condition": "end_of_source"},
+            },
+            state,
+            catalog,
+        )
+
+        assert result.success is False
+        assert "end_of_source" in result.data["error"]
+        assert result.updated_state.version == 1
+
     def test_gate_none_condition_not_validated(self) -> None:
         """upsert_node with condition=None skips expression validation.
 
@@ -1482,6 +1505,17 @@ class TestToolDefinitions:
         """
         for defn in get_tool_definitions():
             self._assert_no_enum_on_validation_failure(defn.get("parameters", {}), defn["name"])
+
+    def test_upsert_node_trigger_schema_documents_end_of_source_only_shape(self) -> None:
+        """Aggregation trigger schema must expose the end-of-source-only shape."""
+        upsert_node = next(defn for defn in get_tool_definitions() if defn["name"] == "upsert_node")
+        trigger_schema = upsert_node["parameters"]["properties"]["trigger"]
+
+        assert "null" in trigger_schema["type"]
+        assert trigger_schema["additionalProperties"] is False
+        assert set(trigger_schema["properties"]) == {"count", "timeout_seconds", "condition"}
+        assert "end-of-source-only" in trigger_schema["description"]
+        assert "do not use end_of_source" in trigger_schema["properties"]["condition"]["description"]
 
     def _assert_no_enum_on_validation_failure(self, schema: object, tool_name: str) -> None:
         """Recursively walk a JSON schema and assert no on_validation_failure has enum."""

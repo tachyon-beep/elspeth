@@ -319,7 +319,7 @@ allow_hits:
   reason: Tier 3 boundary — JWT claims dict .get() for optional iat claim
   safety: Missing iat returns None; no fabrication
   expires: null
-- key: web/composer/state.py:R5:_check_schema_contracts:_is_config_probe_exception:fp=7ed135442550e46b
+- key: web/composer/state.py:R5:_check_schema_contracts:_is_config_probe_exception:fp=817c492519af9f65
   owner: web-composer
   reason: Composer preview classifies only known plugin config/probe exception types while probing plugin-computed output contracts for shape-changing transforms. The caught exception message is NOT surfaced to the UI — only type(exc).__name__ is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials, filesystem paths) via the preview response. ADR-007 adds fail-closed handling for known pass-through plugins; non-pass-through plugins retain the v2 fallback to raw guarantees.
   safety: Unexpected exceptions are re-raised. Known config/probe exceptions are converted into a warning and preview falls back to raw declared schema guarantees (or frozenset() for known pass-through plugins, which then forces Stage 1 rejection) instead of crashing or fabricating a stronger contract
@@ -329,32 +329,37 @@ allow_hits:
   reason: The semantic-contract validator probes producer plugins to read their output_semantics() during draft pipeline composition. Producer construction can fail with known draft/config exceptions (PluginConfigError, PluginNotFoundError, TemplateError, UnknownPluginTypeError, or "Invalid configuration for transform" ValueError) when the user has not finished filling in options. Mirrors the same predicate at web/composer/state.py:_is_config_probe_exception used by the schema-contract probe path. The caught exception text is NEVER embedded in any ValidationEntry or SemanticEdgeContract — the only signal exposed downstream is "no semantic facts" (treated as UNKNOWN by compare_semantic), preventing plugin-option leaks via validator diagnostics.
   safety: Unexpected exceptions are re-raised (per CLAUDE.md plugin-as-system-code policy). Known draft/config exceptions yield producer_decl=None, which compare_semantic translates to SemanticOutcome.UNKNOWN; FAIL-policy consumers then emit a structured error naming only the requirement_code and plugin names, never the exception text.
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=b759e0cdbf50e586
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=420201cb78a0cae8
   owner: web-composer
   reason: Contract helper ValueError is intentionally converted into a blocking ValidationEntry on the consumer node instead of raising immediately
   safety: The pipeline remains invalid; no contract telemetry is fabricated for that consumer edge
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=4fcdd17c5d787b93
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=69526bbb2e8dfcef
   owner: web-composer
   reason: Producer contract parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The invalid producer blocks validation and suppresses downstream edge contracts instead of silently continuing
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=43dd8b78563e7b89
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=ce31ba8365656406
   owner: web-composer
   reason: Sink contract parse failures are intentionally converted into blocking ValidationEntry results on the output
   safety: The pipeline remains invalid and the sink edge contract is skipped rather than fabricated
   expires: null
-- key: web/composer/state.py:R6:_check_schema_contracts:fp=d5a1dc90b6360d0a
+- key: web/composer/state.py:R6:_check_schema_contracts:fp=989c9cfe4df37892
   owner: web-composer
   reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
   safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=fecd21d55f79c9d3
+- key: web/composer/state.py:R6:CompositionState:validate:fp=3fb28a05771a3d98
+  owner: web-composer
+  reason: Aggregation trigger PydanticValidationError is intentionally converted into a blocking ValidationEntry so composer rejects malformed trigger.condition values before runtime settings load
+  safety: The pipeline remains invalid; no trigger config is fabricated and unexpected exception types propagate
+  expires: null
+- key: web/composer/tools.py:R6:_execute_list_models:fp=2b5ccd34354c1629
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=80d1ac03869c6fa5
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=2feb51a9d81c7c8d
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
@@ -391,12 +396,12 @@ allow_hits:
 # (quota is checked before os.replace, so no file mutation to roll
 # back); the rollback branch is retained as a defensive guardrail
 # for the post-replace commit-failure window only.
-- key: web/composer/tools.py:R6:_execute_update_blob:fp=3940919eb26d852f
+- key: web/composer/tools.py:R6:_execute_update_blob:fp=4b6da695102513a4
   owner: web-composer
   reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk faults during post-replace divergence rollback expected; programmer bugs still propagate
   safety: Rollback failure attached as add_note() on primary_exc with blob_id and "manual reconciliation required"; primary commit exception remains the headline.  Pre-replace failures bypass the rollback branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback and test_quota_breach_returns_failure_without_touching_storage).
   expires: null
-- key: web/composer/tools.py:R6:_execute_delete_blob:fp=a8fa710d95ad440f
+- key: web/composer/tools.py:R6:_execute_delete_blob:fp=3ba309fc86c585cf
   owner: web-composer
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
   safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged

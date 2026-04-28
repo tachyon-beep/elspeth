@@ -15,6 +15,8 @@ from dataclasses import dataclass, replace
 from pathlib import PurePosixPath
 from typing import Any, Literal, Self, TypedDict
 
+from pydantic import ValidationError as PydanticValidationError
+
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
 from elspeth.contracts.guarantee_propagation import compose_propagation
 from elspeth.contracts.plugin_semantics import SemanticEdgeContract
@@ -26,6 +28,7 @@ from elspeth.contracts.schema import (
     get_raw_sink_required_fields,
     raw_options_have_schema,
 )
+from elspeth.core.config import TriggerConfig
 from elspeth.core.dag.coalesce_merge import merge_guaranteed_fields
 from elspeth.engine.orchestrator.validation import (
     _ALLOWED_FAILSINK_PLUGINS,
@@ -1348,18 +1351,15 @@ class CompositionState:
                 # (AggregationSettings.on_error in config.py)
                 if not node.on_error or not node.on_error.strip():
                     errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'on_error'.", "high"))
-                # Engine requires trigger config
-                # (AggregationSettings.trigger: TriggerConfig in config.py)
-                if node.trigger is None:
-                    errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' is missing required field 'trigger'.", "high"))
-                elif not any(k in node.trigger and node.trigger[k] is not None for k in ("count", "timeout_seconds", "condition")):
-                    errors.append(
-                        _err(
-                            f"node:{node.id}",
-                            f"Aggregation '{node.id}' trigger must specify at least one of: count, timeout_seconds, condition.",
-                            "high",
-                        )
-                    )
+                # Runtime treats a missing/empty trigger as end-of-source-only.
+                # If early triggers are present, validate them through the same
+                # TriggerConfig parser used by settings load.
+                if node.trigger is not None:
+                    try:
+                        TriggerConfig.model_validate(deep_thaw(node.trigger))
+                    except PydanticValidationError as exc:
+                        detail = "; ".join(str(error["msg"]) for error in exc.errors())
+                        errors.append(_err(f"node:{node.id}", f"Aggregation '{node.id}' trigger is invalid: {detail}", "high"))
                 # output_mode must be a valid OutputMode value when present
                 if node.output_mode is not None and node.output_mode not in ("passthrough", "transform"):
                     errors.append(

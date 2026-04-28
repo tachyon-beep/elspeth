@@ -233,6 +233,7 @@ class TriggerConfig(BaseModel):
     - count: Fire after N rows accumulated
     - timeout: Fire after N seconds since first accept
     - condition: Fire when expression evaluates to true (batch-level metrics only)
+    - end_of_source: Implicit, represented by omitting trigger or using {}
 
     Note: end_of_source is IMPLICIT - always checked at source exhaustion.
     It is not configured here because it always applies.
@@ -250,6 +251,12 @@ class TriggerConfig(BaseModel):
           count: 1000           # Fire after 1000 rows
           timeout_seconds: 3600         # Or after 1 hour
           condition: "row['batch_count'] >= 100 and row['batch_age_seconds'] < 30"  # Or batch metrics
+
+    Example YAML (end-of-source only):
+        aggregations:
+          - name: final_summary
+            plugin: batch_stats
+            # trigger omitted: flushes remaining batch when the source completes
     """
 
     model_config = {"frozen": True, "extra": "forbid"}
@@ -279,6 +286,12 @@ class TriggerConfig(BaseModel):
         """
         if v is None:
             return v
+
+        if v.strip() == "end_of_source":
+            raise ValueError(
+                "end_of_source is not a trigger.condition expression. End-of-source flush is implicit; "
+                "omit trigger or use trigger: {} for end-of-source-only aggregation."
+            )
 
         from elspeth.core.expression_parser import (
             ExpressionParser,
@@ -354,13 +367,6 @@ class TriggerConfig(BaseModel):
             )
         return v
 
-    @model_validator(mode="after")
-    def validate_at_least_one_trigger(self) -> "TriggerConfig":
-        """At least one trigger must be configured."""
-        if self.count is None and self.timeout_seconds is None and self.condition is None:
-            raise ValueError("at least one trigger must be configured (count, timeout_seconds, or condition)")
-        return self
-
     @property
     def has_count(self) -> bool:
         """Whether count trigger is configured."""
@@ -413,7 +419,10 @@ class AggregationSettings(BaseModel):
     on_error: str = Field(
         description="Sink name for rows that fail batch processing, or 'discard'",
     )
-    trigger: TriggerConfig = Field(description="When to flush the batch")
+    trigger: TriggerConfig = Field(
+        default_factory=TriggerConfig,
+        description="Optional early flush triggers. Omit or use {} for end-of-source-only aggregation.",
+    )
     output_mode: OutputMode = Field(
         default=OutputMode.TRANSFORM,
         description="How batch produces output rows",

@@ -510,7 +510,7 @@ class TestGenerateYaml:
         )
         yaml_str = generate_yaml(state)
         parsed = yaml.safe_load(yaml_str)
-        # trigger absent from YAML — engine will reject, but yaml_generator must not crash
+        # trigger absent from YAML — runtime treats this as end-of-source-only.
         assert "trigger" not in parsed["aggregations"][0]
 
     def test_frozen_state_serializes_without_error(self) -> None:

@@ -1879,8 +1879,8 @@ class TestStage1Validation:
         assert not result.is_valid
         assert any("on_error" in e.message and "t1" in e.message for e in result.errors)
 
-    def test_validate_aggregation_missing_trigger_errors(self) -> None:
-        """Aggregation with trigger=None must fail validation."""
+    def test_validate_aggregation_missing_trigger_is_end_of_source_only(self) -> None:
+        """Aggregation with trigger=None means end-of-source-only flush."""
         state = self._empty_state()
         state = state.with_source(self._make_source(on_success="agg1"))
         node = NodeSpec(
@@ -1902,11 +1902,10 @@ class TestStage1Validation:
         state = state.with_node(node)
         state = state.with_output(self._make_output("main"))
         result = state.validate()
-        assert not result.is_valid
-        assert any("trigger" in e.message and "agg1" in e.message for e in result.errors)
+        assert result.is_valid
 
-    def test_validate_aggregation_empty_trigger_errors(self) -> None:
-        """Aggregation with trigger={} must fail — at least one trigger type required."""
+    def test_validate_aggregation_empty_trigger_is_end_of_source_only(self) -> None:
+        """Aggregation with trigger={} means end-of-source-only flush."""
         state = self._empty_state()
         state = state.with_source(self._make_source(on_success="agg1"))
         node = NodeSpec(
@@ -1928,8 +1927,33 @@ class TestStage1Validation:
         state = state.with_node(node)
         state = state.with_output(self._make_output("main"))
         result = state.validate()
+        assert result.is_valid
+
+    def test_validate_aggregation_end_of_source_condition_errors(self) -> None:
+        """end_of_source must not be accepted in the boolean condition slot."""
+        state = self._empty_state()
+        state = state.with_source(self._make_source(on_success="agg1"))
+        node = NodeSpec(
+            id="agg1",
+            node_type="aggregation",
+            plugin="batch_counter",
+            input="agg1",
+            on_success="main",
+            on_error="discard",
+            options={},
+            condition=None,
+            routes=None,
+            fork_to=None,
+            branches=None,
+            policy=None,
+            merge=None,
+            trigger={"condition": "end_of_source"},
+        )
+        state = state.with_node(node)
+        state = state.with_output(self._make_output("main"))
+        result = state.validate()
         assert not result.is_valid
-        assert any("at least one" in e.message and "agg1" in e.message for e in result.errors)
+        assert any("end_of_source" in e.message and "agg1" in e.message for e in result.errors)
 
     def test_validate_aggregation_invalid_output_mode_errors(self) -> None:
         """Aggregation with invalid output_mode must fail validation."""

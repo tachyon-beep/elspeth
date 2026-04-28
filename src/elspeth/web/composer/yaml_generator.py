@@ -137,7 +137,7 @@ def generate_yaml(state: CompositionState) -> str:
             # trigger, output_mode, expected_output_count are conditionally
             # emitted by to_dict() (only when non-None).  Use "in" checks to
             # match the to_dict() contract — a missing key is not an error
-            # here; the engine's Pydantic model will reject the absence.
+            # here; the engine treats absence as end-of-source-only flush.
             if "trigger" in a:
                 entry["trigger"] = a["trigger"]
             if "output_mode" in a:

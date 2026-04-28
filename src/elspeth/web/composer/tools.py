@@ -21,10 +21,12 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 from uuid import uuid4
 
+from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import Engine, delete, func, select, update
 
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw, freeze_fields
+from elspeth.core.config import TriggerConfig
 from elspeth.web.blobs.protocol import BlobIntegrityError
 from elspeth.web.blobs.service import _guard_blob_row_literals, _source_references_blob, content_hash, sanitize_filename
 from elspeth.web.catalog.protocol import CatalogService, PluginKind
@@ -441,7 +443,24 @@ def get_tool_definitions() -> list[dict[str, Any]]:
                     "merge": {"type": ["string", "null"], "description": "Field merge strategy (coalesce only)."},
                     "trigger": {
                         "type": ["object", "null"],
-                        "description": "Batch trigger config (aggregation only). At least one of: {count: int, timeout_seconds: float, condition: string}.",
+                        "description": "Optional early batch trigger config (aggregation only). Omit, null, or {} for end-of-source-only aggregation.",
+                        "additionalProperties": False,
+                        "properties": {
+                            "count": {
+                                "type": ["integer", "null"],
+                                "minimum": 1,
+                                "description": "Flush after this many accepted rows.",
+                            },
+                            "timeout_seconds": {
+                                "type": ["number", "null"],
+                                "exclusiveMinimum": 0,
+                                "description": "Flush after this many seconds since the first accepted row.",
+                            },
+                            "condition": {
+                                "type": ["string", "null"],
+                                "description": "Boolean expression over row['batch_count'] and row['batch_age_seconds']; do not use end_of_source here.",
+                            },
+                        },
                     },
                     "output_mode": {
                         "type": ["string", "null"],
@@ -1193,6 +1212,18 @@ def _validate_plugin_name(
     return None
 
 
+def _validate_aggregation_trigger(trigger: Any) -> str | None:
+    """Return an error message if an aggregation trigger does not match runtime settings."""
+    if trigger is None:
+        return None
+    try:
+        TriggerConfig.model_validate(trigger)
+    except PydanticValidationError as exc:
+        detail = "; ".join(str(error["msg"]) for error in exc.errors())
+        return f"Invalid aggregation trigger: {detail}"
+    return None
+
+
 # --- Blob helpers (sync — called from worker thread via compose()) ---
 
 _MIME_TO_SOURCE: dict[str, tuple[str, dict[str, str]]] = {
@@ -1554,6 +1585,10 @@ def _execute_upsert_node(
         expr_error = _validate_gate_expression(condition)
         if expr_error is not None:
             return _failure_result(state, f"Node '{args['id']}': {expr_error}")
+    if node_type == "aggregation":
+        trigger_error = _validate_aggregation_trigger(args.get("trigger"))
+        if trigger_error is not None:
+            return _failure_result(state, f"Node '{args['id']}': {trigger_error}")
 
     fork_to = args.get("fork_to")
     if fork_to is not None:
