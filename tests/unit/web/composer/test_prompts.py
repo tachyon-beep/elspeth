@@ -27,6 +27,8 @@ from elspeth.web.composer.prompts import (
 )
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, SourceSpec
 
+EXPECTED_REDACTED_BLOB_SOURCE_PATH = "<redacted-blob-source-path>"
+
 
 class StubCatalog:
     """Minimal CatalogService conforming to the protocol."""
@@ -352,6 +354,7 @@ class TestBuildContextStringRedaction:
         context = build_context_string(state, catalog)
 
         assert "/internal/blobs/sess123/blobid_data.csv" not in context
+        assert EXPECTED_REDACTED_BLOB_SOURCE_PATH in context
         assert "blobid" in context
 
     def test_build_context_string_non_blob_source_unaffected(self) -> None:

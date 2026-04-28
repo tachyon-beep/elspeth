@@ -63,6 +63,8 @@ ISSUE_SECRET_AVAILABILITY = "elspeth-cd5d811121"
 ISSUE_INTROSPECTION_PATH = "elspeth-0380d5119f"
 ISSUE_PROGRESS_CLASSIFICATION = "elspeth-5030f7373d"
 
+EXPECTED_REDACTED_BLOB_SOURCE_PATH = "<redacted-blob-source-path>"
+
 SCENARIO_1A_SESSION_ID = "c549bb63-47e9-427f-9a27-35467f877395"
 SCENARIO_1B_SESSION_ID = "6472ff67-1052-406c-98c3-b3278e9ef4ea"
 SCENARIO_2_SESSION_ID = "ae6816aa-1f75-4103-b176-886d14f9e104"
@@ -439,7 +441,7 @@ def test_known_secret_env_marker_cannot_bypass_unavailable_web_secret_contract(
     assert exc_info.value.missing == [secret_name]
 
 
-def test_scenario_3_get_pipeline_state_hides_patched_blob_path_that_yaml_preserves(tmp_path: Path) -> None:
+def test_scenario_3_get_pipeline_state_preserves_redacted_patched_blob_path_that_yaml_preserves(tmp_path: Path) -> None:
     """Characterizes elspeth-0380d5119f using the composer patch and state tools."""
     data_dir = tmp_path / "data"
     blob_id = "33333333-3333-4333-8333-333333333333"
@@ -478,8 +480,9 @@ def test_scenario_3_get_pipeline_state_hides_patched_blob_path_that_yaml_preserv
     )
     assert introspection.success is True
     introspected_source = introspection.to_dict()["data"]["source"]
-    assert "path" not in introspected_source["options"]
+    assert introspected_source["options"]["path"] == EXPECTED_REDACTED_BLOB_SOURCE_PATH
     assert introspected_source["options"]["blob_ref"] == blob_id
+    assert str(source_path) not in json.dumps(introspection.to_dict()["data"])
 
     yaml_doc = yaml.safe_load(composer_yaml_generator.generate_yaml(patched.updated_state))
     assert yaml_doc["source"]["options"]["path"] == str(source_path)

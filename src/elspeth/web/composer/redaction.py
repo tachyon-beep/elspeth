@@ -9,13 +9,16 @@ from __future__ import annotations
 
 from typing import Any
 
+REDACTED_BLOB_SOURCE_PATH = "<redacted-blob-source-path>"
+
 
 def redact_source_storage_path(state_dict: dict[str, Any]) -> dict[str, Any]:
     """Redact internal storage paths from a serialized state dict.
 
-    When source options contain a ``blob_ref``, the ``path`` key is an
-    internal storage detail that should not be exposed to agents or users.
-    This replaces raw paths with the blob ID reference (B4 requirement).
+    When source options contain a ``blob_ref``, ``path`` points at an
+    internal storage location that must not be exposed to agents or users.
+    Preserve the key with a sentinel value so external consumers can still
+    tell that the source path contract is satisfied.
 
     Returns a shallow copy with source options redacted. Does not mutate
     the input dict.
@@ -32,7 +35,8 @@ def redact_source_storage_path(state_dict: dict[str, Any]) -> dict[str, Any]:
     redacted = dict(state_dict)
     redacted_source = dict(source)
     redacted_options = dict(options)
-    redacted_options.pop("path", None)
+    if "path" in redacted_options:
+        redacted_options["path"] = REDACTED_BLOB_SOURCE_PATH
     redacted_source["options"] = redacted_options
     redacted["source"] = redacted_source
     return redacted

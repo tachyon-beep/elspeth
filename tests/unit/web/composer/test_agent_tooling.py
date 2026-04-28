@@ -36,6 +36,8 @@ from elspeth.web.sessions.engine import create_session_engine
 from elspeth.web.sessions.models import blobs_table
 from elspeth.web.sessions.schema import initialize_session_schema
 
+EXPECTED_REDACTED_BLOB_SOURCE_PATH = "<redacted-blob-source-path>"
+
 
 def _empty_state() -> CompositionState:
     return CompositionState(source=None, nodes=(), edges=(), outputs=(), metadata=PipelineMetadata(), version=1)
@@ -363,8 +365,9 @@ class TestRedactStoragePaths:
             "outputs": [],
         }
         redacted = redact_source_storage_path(state_dict)
-        assert "path" not in redacted["source"]["options"]
+        assert redacted["source"]["options"]["path"] == EXPECTED_REDACTED_BLOB_SOURCE_PATH
         assert redacted["source"]["options"]["blob_ref"] == "abc123"
+        assert "/internal/blobs/abc123_data.csv" not in str(redacted)
 
     def test_preserves_path_without_blob_ref(self) -> None:
         state_dict = {
@@ -392,7 +395,7 @@ class TestRedactStoragePaths:
         # Original unchanged
         assert "path" in state_dict["source"]["options"]
         # Redacted version different
-        assert "path" not in redacted["source"]["options"]
+        assert redacted["source"]["options"]["path"] == EXPECTED_REDACTED_BLOB_SOURCE_PATH
 
 
 # ── B5: Pipeline Diff ───────────────────────────────────────────────────

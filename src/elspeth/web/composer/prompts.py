@@ -67,7 +67,7 @@ def build_context_string(
         system prompt.
     """
     serialized = state.to_dict()
-    serialized = redact_source_storage_path(serialized)  # B4: strip blob paths
+    serialized = redact_source_storage_path(serialized)  # B4: hide blob storage paths
     validation = state.validate()
     serialized["validation"] = {
         "is_valid": validation.is_valid,

@@ -873,21 +873,15 @@ allow_hits:
 # Group E: redact_source_storage_path — polymorphic dict input
 # Called with full to_dict() output (has "source") AND component-specific dicts
 # (e.g. {"node": {...}}) from _execute_get_pipeline_state that have no "source" key.
-- key: web/composer/redaction.py:R1:redact_source_storage_path:fp=1d12f09d47eadc71
+- key: web/composer/redaction.py:R1:redact_source_storage_path:fp=f9cae2269932b86b
   owner: web-composer
   reason: Function receives multiple dict shapes — to_dict() output always has "source", but component dicts from _execute_get_pipeline_state do not. .get() handles the absent-key case (no-op early return).
   safety: Returns input unchanged when "source" key absent — no data loss or fabrication
   expires: null
-- key: web/composer/redaction.py:R1:redact_source_storage_path:fp=f8db9b8669170a63
+- key: web/composer/redaction.py:R1:redact_source_storage_path:fp=87ca61fbdfb63fd5
   owner: web-composer
   reason: Source dict from DB records (CompositionStateRecord.source) may lack "options" — _state_response wraps deep_thaw(state.source) which is raw JSON from the DB. Not all source shapes include "options".
   safety: Returns input unchanged when "options" absent — no data loss or fabrication
-  expires: null
-# Group E (cont): redact_source_storage_path pop("path", None) — key is genuinely optional
-- key: web/composer/redaction.py:R9:redact_source_storage_path:fp=38dc9e3dda09e9b2
-  owner: web-composer
-  reason: pop("path", None) removes path key if present, no-op if absent. Blob-backed sources may have blob_ref without path (tested in test_build_context_string_blob_ref_without_path_no_error).
-  safety: Removes a key rather than inventing one. Missing key is a valid state.
   expires: null
 # Group E (cont): _state_response dict.get() for redacted source — defensive unwrap of redaction helper
 - key: web/sessions/routes.py:R2:_get_session_compose_lock_registry:fp=12ed66fe52b45967

@@ -42,6 +42,7 @@ from elspeth.web.composer.tools import (
 # database CHECK was added to close.
 _STUB_SHA256 = "a" * 64
 _STUB_SHA256_ALT = "b" * 64
+EXPECTED_REDACTED_BLOB_SOURCE_PATH = "<redacted-blob-source-path>"
 
 
 def _empty_state() -> CompositionState:
@@ -2218,9 +2219,11 @@ class TestGetPipelineState:
         result = execute_tool("get_pipeline_state", {}, state, catalog)
         assert result.success is True
         data = result.to_dict()["data"]
-        # path should be removed, blob_ref should remain
-        assert "path" not in data["source"]["options"]
+        # path key remains visible so the LLM can tell the source is configured,
+        # but the internal storage value itself is not exposed.
+        assert data["source"]["options"]["path"] == EXPECTED_REDACTED_BLOB_SOURCE_PATH
         assert data["source"]["options"]["blob_ref"] == "abc123"
+        assert "/internal/blobs/abc123.csv" not in str(data)
 
 
 # ---------------------------------------------------------------------------

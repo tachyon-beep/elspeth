@@ -199,8 +199,8 @@ def _state_response(
 ) -> CompositionStateResponse:
     """Convert a CompositionStateRecord to a CompositionStateResponse.
 
-    Unfreezes container fields (MappingProxyType, tuple) into mutable
-    dicts/lists so redact_source_storage_path can mutate them in place.
+    Unfreezes container fields (MappingProxyType, tuple) into plain
+    dicts/lists so redact_source_storage_path can return redacted copies.
 
     When live_validation is provided (from a just-computed validate() call),
     transient warnings and suggestions are included in the response.

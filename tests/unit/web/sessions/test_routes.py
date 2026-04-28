@@ -30,6 +30,7 @@ from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressRegistry
 from elspeth.web.composer.protocol import ComposerPluginCrashError, ComposerResult
+from elspeth.web.composer.redaction import REDACTED_BLOB_SOURCE_PATH
 from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.config import WebSettings
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
@@ -1884,9 +1885,10 @@ class TestRecomposeConvergencePartialState:
         detail = recompose_resp.json()["detail"]
         assert detail["error_type"] == "convergence"
 
-        # HTTP response: path must be redacted, blob_ref must be present
+        # HTTP response: path key remains contract-visible, but the internal
+        # storage value must be redacted.
         response_source_opts = detail["partial_state"]["source"]["options"]
-        assert "path" not in response_source_opts
+        assert response_source_opts["path"] == REDACTED_BLOB_SOURCE_PATH
         assert response_source_opts["blob_ref"] == "abc123"
 
         # DB copy: path must be preserved alongside blob_ref
