@@ -201,7 +201,7 @@ def create_blobs_router() -> APIRouter:
                 filename=body.filename,
                 content=content_bytes,
                 mime_type=body.mime_type,
-                created_by="assistant",
+                created_by="user",
                 source_description="created inline",
             )
         except BlobQuotaExceededError as exc:

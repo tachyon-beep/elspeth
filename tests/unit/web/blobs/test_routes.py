@@ -578,6 +578,24 @@ class TestInlineBlobRequest:
         assert body["filename"] == "data.json"
         assert body["mime_type"] == "application/json"
 
+    def test_inline_happy_path_records_authenticated_user_authorship(self, tmp_path) -> None:
+        """Inline REST uploads are user-authored; assistant blobs come from composer tools."""
+        app, _, _ = _make_app(tmp_path, user_id="regular-user")
+        client = TestClient(app)
+        session_id = _create_session(client)
+
+        resp = client.post(
+            f"/api/sessions/{session_id}/blobs/inline",
+            json={
+                "filename": "data.json",
+                "content": '{"a": 1}',
+                "mime_type": "application/json",
+            },
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["created_by"] == "user"
+
     def test_inline_rejects_legacy_content_type_field(self, tmp_path) -> None:
         """The old `content_type` key must not silently downgrade to text/plain."""
         app, _, _ = _make_app(tmp_path)
