@@ -19,6 +19,7 @@ import yaml
 
 from elspeth.contracts.schema_contract import SchemaContract
 from elspeth.contracts.secrets import SecretInventoryItem
+from elspeth.core.secrets import SecretResolutionError, resolve_secret_refs
 from elspeth.core.security.secret_loader import EnvSecretLoader
 from elspeth.plugins.transforms.batch_stats import BatchStats
 from elspeth.testing import make_field, make_row
@@ -386,11 +387,11 @@ def test_scenario_2_batch_stats_group_by_is_homogeneity_assertion_not_rollup_ope
     assert "Heterogeneous 'customer_tier' values in batch" in str(exc_info.value)
 
 
-def test_secret_ref_tool_can_report_openrouter_key_unavailable_while_runtime_env_loader_can_resolve_it(
+def test_known_secret_env_marker_cannot_bypass_unavailable_web_secret_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Characterizes elspeth-cd5d811121 without any live provider call."""
+    """Protects elspeth-cd5d811121 without any live provider call."""
     secret_name = "OPENROUTER_API_KEY"
     secret_value = "test-openrouter-key"
     monkeypatch.setenv(secret_name, secret_value)
@@ -426,6 +427,16 @@ def test_secret_ref_tool_can_report_openrouter_key_unavailable_while_runtime_env
 
     assert result.success is True
     assert result.to_dict()["data"] == {"name": secret_name, "available": False}
+
+    with pytest.raises(SecretResolutionError) as exc_info:
+        resolve_secret_refs(
+            {"api_key": f"${{{secret_name}}}"},
+            resolver,
+            EVAL_USER_ID,
+            env_ref_names=frozenset({secret_name}),
+        )
+
+    assert exc_info.value.missing == [secret_name]
 
 
 def test_scenario_3_get_pipeline_state_hides_patched_blob_path_that_yaml_preserves(tmp_path: Path) -> None:

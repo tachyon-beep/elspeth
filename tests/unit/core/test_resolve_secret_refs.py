@@ -55,6 +55,56 @@ def test_replaces_secret_ref_in_list() -> None:
     assert resolved_names == {"TOKEN_A", "TOKEN_B"}
 
 
+def test_replaces_exact_env_marker_when_name_is_declared_secret_ref() -> None:
+    resolver = FakeResolver({"OPENROUTER_API_KEY": "sk-or-test"})
+    config = {
+        "api_key": "${OPENROUTER_API_KEY}",
+        "label": "prefix-${OPENROUTER_API_KEY}",
+    }
+
+    result, resolutions = resolve_secret_refs(
+        config,
+        resolver,
+        "user1",
+        env_ref_names=frozenset({"OPENROUTER_API_KEY"}),
+    )
+
+    assert result == {
+        "api_key": "sk-or-test",
+        "label": "prefix-${OPENROUTER_API_KEY}",
+    }
+    assert len(resolutions) == 1
+    assert resolutions[0].name == "OPENROUTER_API_KEY"
+
+
+def test_exact_env_marker_without_declared_secret_name_is_left_for_config_loader() -> None:
+    resolver = FakeResolver({"OPENROUTER_API_KEY": "sk-or-test"})
+    config = {"api_key": "${OPENROUTER_API_KEY}"}
+
+    result, resolutions = resolve_secret_refs(config, resolver, "user1")
+
+    assert result == {"api_key": "${OPENROUTER_API_KEY}"}
+    assert resolutions == []
+
+
+def test_missing_exact_env_marker_secret_is_reported_with_other_missing_refs() -> None:
+    resolver = FakeResolver({})
+    config = {
+        "api_key": "${OPENROUTER_API_KEY}",
+        "token": {"secret_ref": "TOKEN"},
+    }
+
+    with pytest.raises(SecretResolutionError) as exc_info:
+        resolve_secret_refs(
+            config,
+            resolver,
+            "user1",
+            env_ref_names=frozenset({"OPENROUTER_API_KEY"}),
+        )
+
+    assert exc_info.value.missing == ["OPENROUTER_API_KEY", "TOKEN"]
+
+
 def test_raises_on_missing_secret() -> None:
     resolver = FakeResolver({})
     config = {"key": {"secret_ref": "MISSING_SECRET"}}

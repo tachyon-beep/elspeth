@@ -26,7 +26,7 @@ from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
 from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
-from elspeth.core.secrets import resolve_secret_refs
+from elspeth.core.secrets import resolve_secret_refs, secret_env_ref_name
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
@@ -96,7 +96,7 @@ def _skipped_checks(from_check: str) -> list[ValidationCheck]:
     return result
 
 
-def _collect_secret_refs(obj: Any) -> list[str]:
+def _collect_secret_refs(obj: Any, env_ref_names: set[str] | None = None) -> list[str]:
     """Walk a nested dict/list/Mapping structure and collect all secret_ref names."""
     refs: list[str] = []
     if isinstance(obj, Mapping):
@@ -106,10 +106,14 @@ def _collect_secret_refs(obj: Any) -> list[str]:
                 refs.append(ref)
                 return refs
         for v in obj.values():
-            refs.extend(_collect_secret_refs(v))
+            refs.extend(_collect_secret_refs(v, env_ref_names))
     elif isinstance(obj, (list, tuple)):
         for item in obj:
-            refs.extend(_collect_secret_refs(item))
+            refs.extend(_collect_secret_refs(item, env_ref_names))
+    else:
+        ref = secret_env_ref_name(obj, env_ref_names or frozenset())
+        if ref is not None:
+            refs.append(ref)
     return refs
 
 
@@ -231,14 +235,16 @@ def validate_pipeline(
 
     # Step 1b: Secret ref validation — check all refs are resolvable
     all_refs: list[str] = []
+    env_ref_names: set[str] = set()
     if secret_service is not None and user_id is not None:
+        env_ref_names = {item.name for item in secret_service.list_refs(user_id)}
         # Walk source options, node configs, and output options for secret refs
         if state.source is not None:
-            all_refs.extend(_collect_secret_refs(state.source.options))
+            all_refs.extend(_collect_secret_refs(state.source.options, env_ref_names))
         for node in state.nodes or ():
-            all_refs.extend(_collect_secret_refs(node.options))
+            all_refs.extend(_collect_secret_refs(node.options, env_ref_names))
         for output in state.outputs or ():
-            all_refs.extend(_collect_secret_refs(output.options))
+            all_refs.extend(_collect_secret_refs(output.options, env_ref_names))
 
         missing_refs = [ref for ref in all_refs if not secret_service.has_ref(user_id, ref)]
         if missing_refs:
@@ -342,6 +348,7 @@ def validate_pipeline(
                 config_dict,
                 secret_service,
                 user_id,
+                env_ref_names=env_ref_names,
             )
             settings_yaml = yaml.dump(resolved_dict, default_flow_style=False)
 

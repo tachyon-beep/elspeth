@@ -401,12 +401,12 @@ allow_hits:
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
   safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=f1fdde66b8f39ea7
+- key: web/execution/validation.py:R5:validate_pipeline:fp=ee990126daae4233
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=9d14ece6dfdfe58d
+- key: web/execution/validation.py:R5:validate_pipeline:fp=9bfa44f5e1d76ae4
   owner: web-execution
   reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
   safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
@@ -514,7 +514,7 @@ allow_hits:
   reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=397e48380a0453ff
+- key: web/execution/validation.py:R5:validate_pipeline:fp=74bc2d9a49a4be13
   owner: web-execution
   reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
@@ -608,7 +608,7 @@ allow_hits:
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=e29ffb764b58334c
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=fc70273528bee98c
   owner: web-execution
   reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
   safety: Unknown scope raises ValueError immediately; no silent default

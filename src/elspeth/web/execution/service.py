@@ -662,7 +662,13 @@ class ExecutionServiceImpl:
                     raise TypeError(
                         f"generate_yaml() produced non-dict YAML (got {type(config_dict).__name__}) — this is a bug in the YAML generator"
                     )
-                resolved_dict, resolutions = resolve_secret_refs(config_dict, self._secret_service, user_id)
+                env_ref_names = {item.name for item in self._secret_service.list_refs(user_id)}
+                resolved_dict, resolutions = resolve_secret_refs(
+                    config_dict,
+                    self._secret_service,
+                    user_id,
+                    env_ref_names=env_ref_names,
+                )
                 resolved_yaml = _yaml.dump(resolved_dict, default_flow_style=False)
 
                 # Map ResolvedSecret.scope (web domain) to

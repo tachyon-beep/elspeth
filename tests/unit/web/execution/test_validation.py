@@ -17,7 +17,7 @@ import pytest
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from elspeth.contracts.secrets import ResolvedSecret
+from elspeth.contracts.secrets import ResolvedSecret, SecretInventoryItem
 from elspeth.core.dag.models import GraphValidationError
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
@@ -859,11 +859,12 @@ class FakeSecretService:
 
     _VALID_FINGERPRINT = "a" * 64
 
-    def __init__(self, available_refs: set[str]) -> None:
+    def __init__(self, available_refs: set[str], inventory_refs: set[str] | None = None) -> None:
         self._available = available_refs
+        self._inventory = available_refs | (inventory_refs or set())
 
-    def list_refs(self, user_id: str) -> list[Any]:
-        return []
+    def list_refs(self, user_id: str) -> list[SecretInventoryItem]:
+        return [SecretInventoryItem(name=name, scope="user", available=name in self._available) for name in sorted(self._inventory)]
 
     def has_ref(self, user_id: str, name: str) -> bool:
         return name in self._available
@@ -1047,6 +1048,32 @@ class TestValidatePipelineSecretRefs:
         assert "REF_B" in secret_check.detail
         assert "REF_A" not in secret_check.detail  # REF_A resolved fine
 
+    def test_raw_env_marker_for_inventory_secret_uses_secret_ref_preflight(self) -> None:
+        """Known web secret names must not bypass preflight via ${VAR} syntax."""
+        state = _make_state(
+            source_options={"api_key": "${OPENROUTER_API_KEY}"},
+        )
+        settings = _make_settings()
+        mock_yaml_gen = MagicMock()
+        secret_svc = FakeSecretService(
+            available_refs=set(),
+            inventory_refs={"OPENROUTER_API_KEY"},
+        )
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        assert result.is_valid is False
+        secret_check = next(c for c in result.checks if c.name == "secret_refs")
+        assert secret_check.passed is False
+        assert "OPENROUTER_API_KEY" in secret_check.detail
+        assert any("OPENROUTER_API_KEY" in e.message for e in result.errors)
+
 
 class TestReservedNameSecretRefPreflight:
     """Regression: pipeline validation must report reserved-name refs as
@@ -1169,6 +1196,49 @@ class TestSecretRefResolutionBeforeSettingsLoad:
         parsed = yaml.safe_load(resolved_yaml)
         assert parsed["source"]["options"]["api_key"] == "fake"
         # Settings load check passed
+        assert _check(result, "settings_load").passed is True
+
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    def test_raw_env_marker_for_inventory_secret_resolves_before_settings_load(
+        self,
+        mock_graph_cls: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load_string: MagicMock,
+    ) -> None:
+        """Exact ${NAME} markers for known secrets use resolver, not blind env expansion."""
+        state = _make_state(
+            source_options={"api_key": "${OPENROUTER_API_KEY}"},
+        )
+        settings = _make_settings()
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = (
+            "source:\n  plugin: csv\n  on_success: transform_in\n"
+            "  on_validation_failure: discard\n  options:\n"
+            "    api_key: ${OPENROUTER_API_KEY}\n"
+        )
+        secret_svc = FakeSecretService(available_refs={"OPENROUTER_API_KEY"})
+
+        mock_settings = MagicMock()
+        mock_load_string.return_value = mock_settings
+        mock_bundle = MagicMock()
+        mock_instantiate.return_value = mock_bundle
+        mock_graph = MagicMock()
+        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+
+        result = validate_pipeline(
+            state,
+            settings,
+            mock_yaml_gen,
+            secret_service=secret_svc,
+            user_id="user-1",
+        )
+
+        mock_load_string.assert_called_once()
+        resolved_yaml = mock_load_string.call_args.args[0]
+        parsed = yaml.safe_load(resolved_yaml)
+        assert parsed["source"]["options"]["api_key"] == "fake"
         assert _check(result, "settings_load").passed is True
 
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
