@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## Human Operator Communication
+
+The human operator is neurodiverse. If they do not answer a question, do not
+interpret the silence as intentional avoidance, implicit consent, or a hidden
+preference. Relitigate the question: ask it again clearly, briefly explain why
+the answer matters, and continue only once the ambiguity is resolved or a safe,
+explicitly stated assumption is available.
+
 ## Project Overview
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.

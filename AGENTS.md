@@ -1,3 +1,13 @@
+## Human Operator Communication
+
+The human operator is neurodiverse. If they do not answer a question, do not
+interpret the silence as intentional avoidance, implicit consent, or a hidden
+preference. Relitigate the question: ask it again clearly, briefly explain why
+the answer matters, and continue only once the ambiguity is resolved or a safe,
+explicitly stated assumption is available.
+
+---
+
 ## You Are a New Employee
 
 You are starting this session with zero context. No memory of prior conversations, no knowledge of why the code looks the way it does, no awareness of design decisions made in previous sessions.
