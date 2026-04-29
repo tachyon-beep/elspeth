@@ -1,4 +1,12 @@
 per_file_rules:
+- pattern: contracts/declaration_contracts.py
+  rules:
+  - FG2
+  reason: isinstance(self.row_data, Mapping) is a type-validation guard that raises
+    TypeError on wrong type (offensive programming), then calls deep_freeze() on the
+    validated value — not a conditional freeze bypass
+  expires: null
+  max_hits: 1
 - pattern: contracts/diversion.py
   rules:
   - FG2

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -554,3 +555,55 @@ class TestValidationToDictSemanticContracts:
 
         assert "semantic_contracts" in payload
         assert payload["semantic_contracts"] == []
+
+
+@pytest.mark.asyncio
+async def test_mcp_preview_runtime_preflight_joins_shared_session_inflight() -> None:
+    from elspeth.composer_mcp.server import _mcp_preview_runtime_preflight
+    from elspeth.web.execution.runtime_preflight import RuntimePreflightCoordinator
+    from elspeth.web.execution.schemas import ValidationResult
+
+    coordinator = RuntimePreflightCoordinator()
+    state = _valid_state_with_no_edge_contracts()
+    calls = 0
+    started = asyncio.Event()
+    release = asyncio.Event()
+    expected = ValidationResult(is_valid=True, checks=[], errors=[])
+
+    async def run_preflight(candidate: CompositionState) -> ValidationResult:
+        nonlocal calls
+        assert candidate is state
+        calls += 1
+        started.set()
+        await release.wait()
+        return expected
+
+    first_task = asyncio.create_task(
+        _mcp_preview_runtime_preflight(
+            state,
+            coordinator=coordinator,
+            session_scope="session:shared-web-session",
+            settings_hash="settings-hash",
+            timeout_seconds=1.0,
+            run_preflight=run_preflight,
+        )
+    )
+    await started.wait()
+    second_task = asyncio.create_task(
+        _mcp_preview_runtime_preflight(
+            state,
+            coordinator=coordinator,
+            session_scope="session:shared-web-session",
+            settings_hash="settings-hash",
+            timeout_seconds=1.0,
+            run_preflight=run_preflight,
+        )
+    )
+
+    await asyncio.sleep(0)
+    release.set()
+    first, second = await asyncio.gather(first_task, second_task)
+
+    assert first is expected
+    assert second is expected
+    assert calls == 1

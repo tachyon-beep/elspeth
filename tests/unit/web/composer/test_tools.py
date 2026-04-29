@@ -18,6 +18,7 @@ from elspeth.web.catalog.schemas import (
 from elspeth.web.composer.state import (
     CompositionState,
     NodeSpec,
+    OutputSpec,
     PipelineMetadata,
     SourceSpec,
     ValidationEntry,
@@ -33,6 +34,7 @@ from elspeth.web.composer.tools import (
     get_expression_grammar,
     get_tool_definitions,
 )
+from elspeth.web.execution.schemas import ValidationCheck, ValidationError, ValidationResult
 
 # Stub SHA-256 hex digest for test fixtures.  Must satisfy the
 # ``ck_blobs_ready_hash`` invariant — exactly 64 lowercase hex
@@ -1967,13 +1969,21 @@ class TestToolRegistry:
         assert overlap == set(), f"Registry overlap: {overlap}"
 
     def test_cacheable_discovery_excludes_stateful_tools(self) -> None:
-        """diff_pipeline and get_pipeline_state depend on mutable state, so they are not cacheable."""
+        """diff_pipeline, get_pipeline_state, and preview_pipeline are not cacheable.
+
+        - diff_pipeline and get_pipeline_state depend on mutable state.
+        - preview_pipeline incorporates runtime_preflight output that is externally
+          injected and may change between compose turns, so caching it would serve
+          stale validation results after a state mutation.
+        """
         from elspeth.web.composer.tools import (
             _CACHEABLE_DISCOVERY_TOOLS,
             _DISCOVERY_TOOLS,
         )
 
-        assert frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline", "get_pipeline_state"} == _CACHEABLE_DISCOVERY_TOOLS
+        assert (
+            frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline", "get_pipeline_state", "preview_pipeline"} == _CACHEABLE_DISCOVERY_TOOLS
+        )
 
     def test_cacheable_is_subset_of_discovery(self) -> None:
         from elspeth.web.composer.tools import (
@@ -5372,6 +5382,101 @@ class TestPreviewPipeline:
         assert result.success is True
         assert result.data["source"]["plugin"] == "csv"
         assert result.data["source"]["has_schema_config"] is True
+
+    def test_preview_pipeline_surfaces_runtime_preflight_failure(self) -> None:
+        state = (
+            _empty_state()
+            .with_source(
+                SourceSpec(
+                    plugin="csv",
+                    on_success="main",
+                    options={"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    on_validation_failure="discard",
+                )
+            )
+            .with_output(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                    on_write_failure="discard",
+                )
+            )
+        )
+        catalog = _mock_catalog()
+        runtime_preflight = MagicMock(
+            return_value=ValidationResult(
+                is_valid=False,
+                checks=[
+                    ValidationCheck(
+                        name="settings_load",
+                        passed=False,
+                        detail="Forbidden name: 'end_of_source'",
+                    )
+                ],
+                errors=[
+                    ValidationError(
+                        component_id="agg1",
+                        component_type="aggregation",
+                        message="Forbidden name: 'end_of_source'",
+                        suggestion="Omit trigger for end-of-source-only aggregation.",
+                    )
+                ],
+            )
+        )
+
+        result = execute_tool(
+            "preview_pipeline",
+            {},
+            state,
+            catalog,
+            data_dir="/data",
+            runtime_preflight=runtime_preflight,
+        )
+
+        assert result.success is True
+        assert result.runtime_preflight is not None
+        assert result.data["authoring_validation"]["is_valid"] is True
+        assert result.data["runtime_preflight"]["is_valid"] is False
+        assert result.data["is_valid"] is False
+        assert result.data["runtime_preflight"]["errors"][0]["message"] == "Forbidden name: 'end_of_source'"
+        runtime_preflight.assert_called_once_with(state)
+
+    def test_preview_pipeline_without_runtime_preflight_preserves_authoring_validation(self) -> None:
+        state = (
+            _empty_state()
+            .with_source(
+                SourceSpec(
+                    plugin="csv",
+                    on_success="main",
+                    options={"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    on_validation_failure="discard",
+                )
+            )
+            .with_output(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                    on_write_failure="discard",
+                )
+            )
+        )
+
+        result = execute_tool(
+            "preview_pipeline",
+            {},
+            state,
+            _mock_catalog(),
+            data_dir="/data",
+            runtime_preflight=None,
+        )
+
+        assert result.success is True
+        assert result.runtime_preflight is None
+        assert result.data["authoring_validation"]["is_valid"] is True
+        assert result.data["runtime_preflight"] is None
+        assert result.data["is_valid"] is True
 
 
 class TestPrevalidatePluginOptions:

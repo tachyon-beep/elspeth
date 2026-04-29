@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -23,6 +24,7 @@ from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
     ComposerResult,
+    ComposerRuntimePreflightError,
     ComposerServiceError,
     ToolArgumentError,
 )
@@ -35,6 +37,8 @@ from elspeth.web.composer.state import (
 from elspeth.web.composer.tools import ToolResult
 from elspeth.web.composer.tools import execute_tool as _execute_tool
 from elspeth.web.config import WebSettings
+from elspeth.web.execution.preflight import runtime_preflight_settings_hash
+from elspeth.web.execution.schemas import ValidationResult
 
 
 @dataclass
@@ -2850,3 +2854,83 @@ class TestComposerErrorConstructionInvariants:
 
         assert exc.partial_state is mutated
         assert exc.budget_exhausted == "timeout"
+
+
+class TestComposerRuntimePreflightCacheAndTimeout:
+    @pytest.mark.asyncio
+    async def test_runtime_preflight_cache_reuses_same_state_version_and_settings_hash(self) -> None:
+        service = ComposerServiceImpl(catalog=_mock_catalog(), settings=_make_settings())
+        state = _empty_state()
+        cache = service._new_runtime_preflight_cache()
+        preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch.object(service, "_runtime_preflight", return_value=preflight) as mock_preflight:
+            first = await service._cached_runtime_preflight(
+                state,
+                user_id="user-1",
+                cache=cache,
+                initial_version=state.version,
+                session_scope="session:test",
+            )
+            second = await service._cached_runtime_preflight(
+                state,
+                user_id="user-1",
+                cache=cache,
+                initial_version=state.version,
+                session_scope="session:test",
+            )
+
+        assert first is preflight
+        assert second is preflight
+        mock_preflight.assert_called_once_with(state, "user-1")
+
+    @pytest.mark.asyncio
+    async def test_runtime_preflight_timeout_is_cached_for_compose_call(self) -> None:
+        settings = _make_settings(composer_runtime_preflight_timeout_seconds=0.01)
+        service = ComposerServiceImpl(catalog=_mock_catalog(), settings=settings)
+        state = _empty_state()
+        cache = service._new_runtime_preflight_cache()
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_preflight(candidate: CompositionState, user_id: str | None) -> ValidationResult:
+            started.set()
+            release.wait(timeout=30)
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        try:
+            with patch.object(service, "_runtime_preflight", side_effect=slow_preflight) as mock_preflight:
+                with pytest.raises(ComposerRuntimePreflightError) as first:
+                    await service._cached_runtime_preflight(
+                        state,
+                        user_id="user-1",
+                        cache=cache,
+                        initial_version=state.version - 1,
+                        session_scope="session:test",
+                    )
+                assert first.value.exc_class == "TimeoutError"
+                assert started.is_set()
+
+                with pytest.raises(ComposerRuntimePreflightError) as second:
+                    await service._cached_runtime_preflight(
+                        state,
+                        user_id="user-1",
+                        cache=cache,
+                        initial_version=state.version - 1,
+                        session_scope="session:test",
+                    )
+
+                assert second.value.exc_class == "TimeoutError"
+                mock_preflight.assert_called_once()
+        finally:
+            release.set()
+
+    def test_runtime_preflight_settings_hash_is_non_secret(self) -> None:
+        class FakeSettings:
+            data_dir = Path("/tmp/elspeth-data")
+            landscape_passphrase = "SECRET_CANARY_SHOULD_NOT_APPEAR"
+
+        digest = runtime_preflight_settings_hash(FakeSettings())
+
+        assert "SECRET_CANARY" not in digest
+        assert len(digest) == 64

@@ -5,7 +5,7 @@ allow_hits:
     dict
   safety: Returns None on miss, handled by 404 response
   expires: null
-- key: web/config.py:R5:WebSettings:_reject_blank_path_strings:fp=0062e954aa23db17
+- key: web/config.py:R5:WebSettings:_reject_blank_path_strings:fp=77eb34d5d32d10e3
   owner: architecture
   reason: Pydantic before-validator at Tier 3 config boundary — isinstance(v, str)
     distinguishes raw YAML string input (which may be all-whitespace) from already-coerced
@@ -281,13 +281,13 @@ allow_hits:
     (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
-- key: web/app.py:R5:_settings_from_env:fp=76a688746d4557c8
+- key: web/app.py:R5:_settings_from_env:fp=ca2c85bed12ffe28
   owner: web-app
   reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies
     for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
-- key: web/app.py:R6:_settings_from_env:fp=8747c11bfe362b54
+- key: web/app.py:R6:_settings_from_env:fp=c99426453445d3e1
   owner: web-app
   reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain
     string (the common case)
@@ -433,19 +433,19 @@ allow_hits:
   safety: The pipeline remains invalid; no trigger config is fabricated and unexpected
     exception types propagate
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=2b5ccd34354c1629
+- key: web/composer/tools.py:R6:_execute_list_models:fp=f296965af7a28e73
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=2feb51a9d81c7c8d
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=713a9c25b6196148
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets
     engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during
     full pipeline instantiation
   expires: null
-- key: web/composer/tools.py:R6:_execute_update_blob:fp=4b6da695102513a4
+- key: web/composer/tools.py:R6:_execute_update_blob:fp=a2210b4cf6260bbf
   owner: web-composer
   reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk
     faults during post-replace divergence rollback expected; programmer bugs still
@@ -455,7 +455,7 @@ allow_hits:
     failures bypass the rollback branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback
     and test_quota_breach_returns_failure_without_touching_storage).
   expires: null
-- key: web/composer/tools.py:R6:_execute_delete_blob:fp=3ba309fc86c585cf
+- key: web/composer/tools.py:R6:_execute_delete_blob:fp=e8e153ddca69849c
   owner: web-composer
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation
     disk faults must not bury the primary DB exception
@@ -634,7 +634,7 @@ allow_hits:
     — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
-- key: web/app.py:R1:create_app:fp=4694104ab591b164
+- key: web/app.py:R1:create_app:fp=8d07b8380b030844
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional WEB_CONCURRENCY env var
   safety: Defaults to "1" when absent
@@ -784,7 +784,7 @@ allow_hits:
   safety: Only suppresses signal exceptions; all other exceptions logged as last-resort
     diagnostic
   expires: null
-- key: web/app.py:R1:create_app:fp=ddde20baab9b3056
+- key: web/app.py:R1:create_app:fp=afce9c1b36c2a3b4
   owner: web-app
   reason: Tier 3 — os.environ.get() for optional ELSPETH_ENV
   safety: Returns None when absent; only used for test guard
@@ -858,18 +858,18 @@ allow_hits:
   reason: TOCTOU guard — run may be deleted between verify_run_ownership and get_status
   safety: Only not-found errors close with 4004; returns immediately
   expires: null
-- key: web/app.py:R1:lifespan:fp=4b5b779c596323c4
+- key: web/app.py:R1:lifespan:fp=b1ff2d1a73a16036
   owner: web-app
   reason: False positive — httpx.AsyncClient.get() is an HTTP GET request, not dict.get()
   safety: HTTP errors caught by raise_for_status(); failure now raises SystemExit
   expires: null
-- key: web/app.py:R7:lifespan:fp=9d0da83a5fd41364
+- key: web/app.py:R7:lifespan:fp=23086cf145cf02ce
   owner: web-execution
   reason: contextlib.suppress(CancelledError) is the expected shutdown path for the
     periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=d6d6a213946684f7
+- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=dc920ae6b53c2f59
   owner: bugfix
   reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays,
     nulls, or scalars; the composer must reject non-object arguments before cache
@@ -877,7 +877,34 @@ allow_hits:
   safety: Emits a tool error back to the LLM, does not call execute_tool, marks mutation
     intent for budget accounting, and preserves current state
   expires: null
-- key: web/app.py:R6:_periodic_orphan_cleanup:fp=2d133ac438c01532
+- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=d71228907c8b48fd
+  owner: web-composer
+  reason: isinstance(cached, ValidationResult) narrows the union RuntimePreflightEntry
+    = ValidationResult | RuntimePreflightFailure — not defensive access, structural
+    type dispatch on a typed sum type
+  safety: Union covers all cases; no third value possible; isinstance correct
+  expires: null
+- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=9c682ce1d5eade50
+  owner: web-composer
+  reason: isinstance(cached, RuntimePreflightFailure) narrows RuntimePreflightEntry
+    union for the failure re-raise path
+  safety: Paired with ValidationResult check above; exhaustive union dispatch
+  expires: null
+- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=2b18054436f6381e
+  owner: web-composer
+  reason: isinstance(entry, RuntimePreflightFailure) narrows freshly-resolved coordinator
+    entry for failure re-raise; mirrors cached check above
+  safety: entry is RuntimePreflightEntry (ValidationResult | RuntimePreflightFailure);
+    all cases handled
+  expires: null
+- key: web/composer/service.py:R1:ComposerServiceImpl:_cached_runtime_preflight:fp=6592c1e47316db38
+  owner: web-composer
+  reason: cache.get(key) checks per-compose runtime preflight cache for an existing
+    result before running the coordinator; key is RuntimePreflightKey, not external
+    data
+  safety: Returns None on miss; handled by coordinator.run() path below
+  expires: null
+- key: web/app.py:R6:_periodic_orphan_cleanup:fp=25fec73ee847c85b
   owner: web-execution
   reason: Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs
     recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention,
@@ -1243,7 +1270,7 @@ allow_hits:
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
   expires: null
-- key: web/app.py:R2:create_app:_request_id:fp=bebaa13976b28147
+- key: web/app.py:R2:create_app:_request_id:fp=baeeb84f69bad3cb
   owner: web-app
   reason: 'Trust-boundary fallback. The exception handlers registered in
 
@@ -1366,6 +1393,37 @@ allow_hits:
   safety: The future is shielded so the worker keeps running; completed result or
     exception is returned on the next poll, and cancellation shuts down the one-call
     executor without swallowing the worker outcome.
+  expires: null
+- key: web/execution/runtime_preflight.py:R1:RuntimePreflightCoordinator:run:fp=2a8571a12863dbd7
+  owner: web-execution
+  reason: _inflight.get(key) checks whether a task for this key is already in-flight;
+    key is RuntimePreflightKey (an internal typed value), not external data. Returns
+    None on miss, which triggers task creation below.
+  safety: None check is explicit; no silent bypass
+  expires: null
+- key: web/execution/runtime_preflight.py:R1:RuntimePreflightCoordinator:run:fp=b29ed7239ee25689
+  owner: web-execution
+  reason: _inflight.get(key) checks whether a completed task still references this key
+    before removing it — guards against a concurrent removal between the done() check
+    and the lock re-acquisition; key is an internal typed value
+  safety: Identity check (is task); incorrect match is impossible; no external data
+  expires: null
+- key: web/execution/runtime_preflight.py:R9:RuntimePreflightCoordinator:run:fp=37e057e83714c3f9
+  owner: web-execution
+  reason: _inflight.pop(key, None) removes a completed task from the in-flight dict;
+    the None default handles concurrent removal between the identity check and the
+    pop — this is a concurrency-safe cleanup pattern, not defensive programming
+  safety: Only fires when task.done(); pop is idempotent; None default prevents KeyError
+    on concurrent cleanup
+  expires: null
+- key: web/execution/runtime_preflight.py:R4:RuntimePreflightCoordinator:_capture:fp=cbdc5bec7bc401ee
+  owner: web-execution
+  reason: except Exception captures any worker failure (plugin construction errors,
+    TimeoutError, etc.) and wraps it in RuntimePreflightFailure so the coordinator
+    always returns RuntimePreflightEntry — both success and failure paths — without
+    propagating to all waiters
+  safety: Exception is stored on RuntimePreflightFailure.original_exc and re-raised
+    at the caller site with full chain preservation; no silent swallowing
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py

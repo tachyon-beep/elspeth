@@ -82,6 +82,7 @@ RULES = {
 _SUBCLASS_TO_SUPERCLASSES: dict[str, frozenset[str]] = {
     "ComposerPluginCrashError": frozenset({"ComposerServiceError"}),
     "ComposerConvergenceError": frozenset({"ComposerServiceError"}),
+    "ComposerRuntimePreflightError": frozenset({"ComposerServiceError"}),
 }
 
 # Canonical file this gate protects — fail-closed if it is missing under

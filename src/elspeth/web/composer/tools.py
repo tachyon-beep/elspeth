@@ -44,6 +44,7 @@ from elspeth.web.composer.state import (
     _source_options_have_schema,
     _validate_gate_expression,
 )
+from elspeth.web.execution.schemas import ValidationResult
 from elspeth.web.paths import allowed_sink_directories, allowed_source_directories, resolve_data_path
 from elspeth.web.sessions.models import blob_run_links_table, blobs_table, composition_states_table, runs_table
 
@@ -144,6 +145,7 @@ class ToolResult:
     affected_nodes: tuple[str, ...]
     data: Any = None
     prior_validation: ValidationSummary | None = None
+    runtime_preflight: ValidationResult | None = None
 
     def __post_init__(self) -> None:
         freeze_fields(self, "affected_nodes")
@@ -178,6 +180,9 @@ class ToolResult:
         }
         if self.data is not None:
             result["data"] = deep_thaw(self.data)
+
+        if self.runtime_preflight is not None:
+            result["runtime_preflight"] = self.runtime_preflight.model_dump()
 
         if self.prior_validation is not None:
             result["validation_delta"] = _compute_validation_delta(
@@ -993,6 +998,8 @@ ToolHandler = Callable[
     [dict[str, Any], CompositionState, CatalogService, str | None],
     ToolResult,
 ]
+
+RuntimePreflight = Callable[[CompositionState], ValidationResult]
 
 
 # Discovery tool handlers (normalized signatures)
@@ -3533,11 +3540,24 @@ def _execute_get_pipeline_state(
     return _discovery_result(state, data)
 
 
+def _authoring_validation_payload(validation: ValidationSummary) -> dict[str, Any]:
+    return {
+        "is_valid": validation.is_valid,
+        "errors": [e.to_dict() for e in validation.errors],
+        "warnings": [e.to_dict() for e in validation.warnings],
+        "suggestions": [e.to_dict() for e in validation.suggestions],
+        "edge_contracts": [ec.to_dict() for ec in validation.edge_contracts],
+        "semantic_contracts": _semantic_contracts_payload(validation.semantic_contracts),
+    }
+
+
 def _execute_preview_pipeline(
     args: dict[str, Any],
     state: CompositionState,
     catalog: CatalogService,
     data_dir: str | None = None,
+    *,
+    runtime_preflight: RuntimePreflight | None = None,
 ) -> ToolResult:
     """Preview pipeline configuration — dry-run validation with source summary.
 
@@ -3546,16 +3566,18 @@ def _execute_preview_pipeline(
     returning sample rows) is a future enhancement.
     """
     validation = state.validate()
+    authoring_payload = _authoring_validation_payload(validation)
+    runtime_result = runtime_preflight(state) if runtime_preflight is not None else None
 
     summary: dict[str, Any] = {
-        "is_valid": validation.is_valid,
-        "errors": [e.to_dict() for e in validation.errors],
-        "warnings": [e.to_dict() for e in validation.warnings],
-        "suggestions": [e.to_dict() for e in validation.suggestions],
-        "edge_contracts": [ec.to_dict() for ec in validation.edge_contracts],
-        "semantic_contracts": _semantic_contracts_payload(
-            validation.semantic_contracts,
-        ),
+        "is_valid": validation.is_valid if runtime_result is None else validation.is_valid and runtime_result.is_valid,
+        "errors": authoring_payload["errors"],
+        "warnings": authoring_payload["warnings"],
+        "suggestions": authoring_payload["suggestions"],
+        "edge_contracts": authoring_payload["edge_contracts"],
+        "semantic_contracts": authoring_payload["semantic_contracts"],
+        "authoring_validation": authoring_payload,
+        "runtime_preflight": runtime_result.model_dump() if runtime_result is not None else None,
         "source": None,
         "node_count": len(state.nodes),
         "output_count": len(state.outputs),
@@ -3576,6 +3598,7 @@ def _execute_preview_pipeline(
         validation=validation,
         affected_nodes=(),
         data=summary,
+        runtime_preflight=runtime_result,
     )
 
 
@@ -3630,7 +3653,13 @@ _DISCOVERY_TOOLS: dict[str, ToolHandler] = {
 # All discovery tools are cacheable. If a non-cacheable discovery tool is
 # re-added in future (e.g. get_current_state which returns live mutable
 # state), add it to _DISCOVERY_TOOLS but NOT to this frozenset.
-_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys()) - {"diff_pipeline", "get_pipeline_state"}
+# preview_pipeline is excluded because its result incorporates runtime_preflight
+# output that is externally injected and may change between compose turns.
+_CACHEABLE_DISCOVERY_TOOLS: frozenset[str] = frozenset(_DISCOVERY_TOOLS.keys()) - {
+    "diff_pipeline",
+    "get_pipeline_state",
+    "preview_pipeline",
+}
 
 _MUTATION_TOOLS: dict[str, ToolHandler] = {
     "set_source": _execute_set_source,
@@ -3734,6 +3763,7 @@ def execute_tool(
     user_id: str | None = None,
     baseline: CompositionState | None = None,
     prior_validation: ValidationSummary | None = None,
+    runtime_preflight: RuntimePreflight | None = None,
 ) -> ToolResult:
     """Execute a composition tool by name.
 
@@ -3756,7 +3786,21 @@ def execute_tool(
             state.validate() for the pre-mutation delta. Callers should
             thread the previous ToolResult.validation forward — the state
             is immutable, so validation is deterministic.
+        runtime_preflight: Optional callback for runtime-equivalent preflight.
+            Only applied to preview_pipeline. Pre-computed in the async
+            compose loop and injected here as a cheap synchronous callback
+            so execute_tool() stays synchronous.
     """
+    # preview_pipeline has an extended signature with runtime_preflight kwarg
+    if tool_name == "preview_pipeline":
+        return _execute_preview_pipeline(
+            arguments,
+            state,
+            catalog,
+            data_dir,
+            runtime_preflight=runtime_preflight,
+        )
+
     # diff_pipeline has an extended signature with baseline kwarg
     if tool_name == "diff_pipeline":
         return _execute_diff_pipeline(

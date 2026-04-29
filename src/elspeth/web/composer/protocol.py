@@ -210,6 +210,34 @@ class ComposerPluginCrashError(ComposerServiceError):
         return cls(original_exc, partial_state=partial)
 
 
+class ComposerRuntimePreflightError(ComposerServiceError):
+    """Unexpected internal failure while running composer runtime preflight."""
+
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"original_exc", "partial_state", "exc_class"})
+
+    def __init__(self, *, original_exc: Exception, partial_state: CompositionState | None) -> None:
+        super().__init__("Composer runtime preflight failed internally.")
+        self.original_exc = original_exc
+        self.partial_state = partial_state
+        self.exc_class = type(original_exc).__name__
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in type(self)._FROZEN_ATTRS and name in self.__dict__:
+            raise AttributeError(f"{type(self).__name__}.{name} is frozen after construction")
+        super().__setattr__(name, value)
+
+    @classmethod
+    def capture(
+        cls,
+        exc: Exception,
+        *,
+        state: CompositionState,
+        initial_version: int,
+    ) -> ComposerRuntimePreflightError:
+        partial = state if state.version > initial_version else None
+        return cls(original_exc=exc, partial_state=partial)
+
+
 class ToolArgumentError(Exception):
     """Raised by a tool handler when LLM-supplied arguments are unusable.
 
@@ -345,6 +373,9 @@ class ComposerSettings(Protocol):
 
     @property
     def composer_timeout_seconds(self) -> float: ...
+
+    @property
+    def composer_runtime_preflight_timeout_seconds(self) -> float: ...
 
     @property
     def data_dir(self) -> Any: ...

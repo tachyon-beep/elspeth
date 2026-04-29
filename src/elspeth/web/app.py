@@ -38,6 +38,7 @@ from elspeth.web.config import _LOCAL_HOSTS, WebSettings
 from elspeth.web.dependencies import create_catalog_service
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.routes import create_execution_router
+from elspeth.web.execution.runtime_preflight import RuntimePreflightCoordinator
 from elspeth.web.execution.service import ExecutionServiceImpl
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 from elspeth.web.middleware.request_id import RequestIdMiddleware
@@ -404,11 +405,14 @@ def create_app(settings: WebSettings | None = None) -> FastAPI:
     app.state.scoped_secret_resolver = ScopedSecretResolver(app.state.secret_service, settings.auth_provider)
 
     # --- Composer service (singleton, not per-request) ---
+    runtime_preflight_coordinator = RuntimePreflightCoordinator()
+    app.state.runtime_preflight_coordinator = runtime_preflight_coordinator
     app.state.composer_service = ComposerServiceImpl(
         catalog=app.state.catalog_service,
         settings=settings,
         session_engine=session_engine,
         secret_service=app.state.scoped_secret_resolver,
+        runtime_preflight_coordinator=runtime_preflight_coordinator,
     )
     app.state.composer_availability = app.state.composer_service.get_availability()
     app.state.composer_progress_registry = ComposerProgressRegistry()

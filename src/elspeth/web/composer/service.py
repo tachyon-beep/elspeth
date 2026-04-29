@@ -20,7 +20,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, NoReturn, cast
 
 import structlog
 from sqlalchemy import Engine, update
@@ -28,24 +28,36 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.catalog.protocol import CatalogService
+from elspeth.web.composer import yaml_generator
 from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressSink
 from elspeth.web.composer.prompts import build_messages, build_run_diagnostics_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
     ComposerResult,
+    ComposerRuntimePreflightError,
     ComposerServiceError,
     ComposerSettings,
     ToolArgumentError,
 )
 from elspeth.web.composer.state import CompositionState, ValidationSummary
 from elspeth.web.composer.tools import (
+    RuntimePreflight,
     ToolResult,
     execute_tool,
     get_tool_definitions,
     is_cacheable_discovery_tool,
     is_discovery_tool,
 )
+from elspeth.web.execution.preflight import runtime_preflight_settings_hash
+from elspeth.web.execution.runtime_preflight import (
+    RuntimePreflightCoordinator,
+    RuntimePreflightEntry,
+    RuntimePreflightFailure,
+    RuntimePreflightKey,
+)
+from elspeth.web.execution.schemas import ValidationResult
+from elspeth.web.execution.validation import validate_pipeline
 from elspeth.web.sessions.models import sessions_table
 
 slog = structlog.get_logger()
@@ -178,6 +190,9 @@ class _CachedDiscoveryPayload:
     data: Any
 
 
+_RuntimePreflightCache = dict[RuntimePreflightKey, RuntimePreflightEntry]
+
+
 class ComposerServiceImpl:
     """LLM-driven pipeline composer with dual-counter budget and discovery caching.
 
@@ -204,6 +219,7 @@ class ComposerServiceImpl:
         settings: ComposerSettings,
         session_engine: Engine | None = None,
         secret_service: Any | None = None,
+        runtime_preflight_coordinator: RuntimePreflightCoordinator | None = None,
     ) -> None:
         self._catalog = catalog
         self._model = settings.composer_model
@@ -213,11 +229,79 @@ class ComposerServiceImpl:
         self._data_dir: str = str(settings.data_dir)
         self._session_engine = session_engine
         self._secret_service = secret_service
+        self._settings = settings
+        self._runtime_preflight_timeout_seconds = settings.composer_runtime_preflight_timeout_seconds
+        self._runtime_preflight_coordinator = runtime_preflight_coordinator or RuntimePreflightCoordinator()
         self._availability = self._compute_availability()
 
     def get_availability(self) -> ComposerAvailability:
         """Return the boot-time composer availability snapshot."""
         return self._availability
+
+    def _runtime_preflight(self, state: CompositionState, user_id: str | None) -> ValidationResult:
+        return validate_pipeline(
+            state,
+            self._settings,
+            yaml_generator,
+            secret_service=self._secret_service,
+            user_id=user_id,
+        )
+
+    def _new_runtime_preflight_cache(self) -> _RuntimePreflightCache:
+        return {}
+
+    def _raise_cached_runtime_preflight_failure(
+        self,
+        failure: RuntimePreflightFailure,
+        *,
+        state: CompositionState,
+        initial_version: int,
+    ) -> NoReturn:
+        raise ComposerRuntimePreflightError.capture(
+            failure.original_exc,
+            state=state,
+            initial_version=initial_version,
+        ) from failure.original_exc
+
+    async def _cached_runtime_preflight(
+        self,
+        state: CompositionState,
+        *,
+        user_id: str | None,
+        cache: _RuntimePreflightCache,
+        initial_version: int,
+        session_scope: str,
+    ) -> ValidationResult:
+        key = RuntimePreflightKey(
+            session_scope=session_scope,
+            state_version=state.version,
+            settings_hash=runtime_preflight_settings_hash(self._settings),
+        )
+        cached = cache.get(key)
+        if isinstance(cached, ValidationResult):
+            return cached
+        if isinstance(cached, RuntimePreflightFailure):
+            self._raise_cached_runtime_preflight_failure(
+                cached,
+                state=state,
+                initial_version=initial_version,
+            )
+
+        async def worker() -> ValidationResult:
+            return await asyncio.wait_for(
+                run_sync_in_worker(self._runtime_preflight, state, user_id),
+                timeout=self._runtime_preflight_timeout_seconds,
+            )
+
+        entry = await self._runtime_preflight_coordinator.run(key, worker)
+        cache[key] = entry
+        if isinstance(entry, RuntimePreflightFailure):
+            self._raise_cached_runtime_preflight_failure(
+                entry,
+                state=state,
+                initial_version=initial_version,
+            )
+        return entry
 
     async def explain_run_diagnostics(self, snapshot: Mapping[str, object]) -> str:
         """Return a plain-language explanation of a bounded run snapshot.
@@ -423,6 +507,14 @@ class ComposerServiceImpl:
         # is deterministic for a given state object.
         last_validation: ValidationSummary | None = None
 
+        # Runtime preflight cache: scoped to this compose() call. Keyed by
+        # (session_scope, state_version, settings_hash). A timeout or failure
+        # is cached for the lifetime of this compose call so subsequent
+        # preview_pipeline calls don't re-fire an already-failed worker.
+        runtime_preflight_cache = self._new_runtime_preflight_cache()
+        last_runtime_preflight: ValidationResult | None = None
+        session_scope = f"session:{session_id}" if session_id is not None else "session:unsaved"
+
         while True:
             await _emit_progress(progress, _model_call_progress_event(message))
             response = await self._call_llm_before_deadline(
@@ -581,6 +673,31 @@ class ComposerServiceImpl:
                     continue
 
                 await _emit_progress(progress, _tool_started_progress_event(tool_name))
+
+                # Precompute runtime preflight for preview_pipeline outside
+                # the general side-effectful tool worker. This keeps
+                # execute_tool() synchronous and bounds the async I/O cost
+                # before it enters the worker thread pool.
+                runtime_preflight_callback: RuntimePreflight | None = None
+                if tool_name == "preview_pipeline":
+                    preview_preflight = await self._cached_runtime_preflight(
+                        state,
+                        user_id=user_id,
+                        cache=runtime_preflight_cache,
+                        initial_version=initial_version,
+                        session_scope=session_scope,
+                    )
+
+                    def _make_preflight_callback(
+                        _result: ValidationResult = preview_preflight,
+                    ) -> RuntimePreflight:
+                        def _callback(_state: CompositionState) -> ValidationResult:
+                            return _result
+
+                        return _callback
+
+                    runtime_preflight_callback = _make_preflight_callback()
+
                 # All tool calls are offloaded to a worker to avoid blocking
                 # the event loop.
                 # Blob and secret tools perform synchronous filesystem
@@ -623,6 +740,7 @@ class ComposerServiceImpl:
                         secret_service=self._secret_service,
                         user_id=user_id,
                         prior_validation=last_validation,
+                        runtime_preflight=runtime_preflight_callback,
                     )
                 except ToolArgumentError as exc:
                     if not is_discovery_tool(tool_name):
@@ -741,6 +859,7 @@ class ComposerServiceImpl:
 
                 state = result.updated_state
                 last_validation = result.validation
+                last_runtime_preflight = result.runtime_preflight or last_runtime_preflight
                 result_json = _serialize_tool_result(result)
                 await _emit_progress(progress, _tool_completed_progress_event(tool_name, result.success))
 
