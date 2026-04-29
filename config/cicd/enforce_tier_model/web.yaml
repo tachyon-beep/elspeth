@@ -869,7 +869,7 @@ allow_hits:
     periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=a4d969dbc487ee19
+- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=3c9758fe5ee2a857
   owner: bugfix
   reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays,
     nulls, or scalars; the composer must reject non-object arguments before cache

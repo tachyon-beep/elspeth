@@ -331,6 +331,77 @@ class ComposerServiceImpl:
         _RUNTIME_PREFLIGHT_COUNTER.add(1, {"outcome": "success"})
         return entry
 
+    @staticmethod
+    def _runtime_preflight_failure_message(result: ValidationResult) -> str:
+        """Compose a synthetic user-visible message for a failed runtime preflight.
+
+        Prefers the first ValidationError's message and suggestion, falls back
+        to the first failed check's detail, then to a bare fallback if the
+        ValidationResult carries neither.  The message is echoed verbatim to
+        the chat history as the assistant reply, so it must not carry any
+        secret or path fragments — only human-readable validation copy.
+        """
+        if result.errors:
+            first = result.errors[0]
+            suggestion = f" Suggested fix: {first.suggestion}" if first.suggestion else ""
+            return f"I cannot mark this pipeline complete yet because runtime preflight failed: {first.message}.{suggestion}"
+        failed_checks = [check for check in result.checks if not check.passed]
+        if failed_checks:
+            return f"I cannot mark this pipeline complete yet because runtime preflight failed: {failed_checks[0].detail}."
+        return "I cannot mark this pipeline complete yet because runtime preflight failed."
+
+    async def _finalize_no_tool_response(
+        self,
+        *,
+        content: str,
+        state: CompositionState,
+        initial_version: int,
+        user_id: str | None,
+        last_runtime_preflight: ValidationResult | None,
+        runtime_preflight_cache: _RuntimePreflightCache,
+        session_scope: str,
+    ) -> ComposerResult:
+        """Apply the deterministic final-gate check and build a ComposerResult.
+
+        Gate logic (no regex on natural-language text):
+        - If ``state.version > initial_version`` (state changed this turn),
+          run ``_cached_runtime_preflight`` for the current state.
+        - Otherwise, reuse ``last_runtime_preflight`` from the most recent
+          ``preview_pipeline`` call (may be ``None``).
+
+        If the preflight result is invalid, replace the assistant message with
+        a synthetic failure notice and preserve the original LLM text in
+        ``raw_assistant_content``.
+
+        Unexpected preflight exceptions (anything other than a
+        ``RuntimePreflightFailure`` caught inside ``_cached_runtime_preflight``)
+        are already converted to ``ComposerRuntimePreflightError`` with
+        partial-state preservation by the coordinator's exception handling
+        path — they are not caught here.
+        """
+        runtime_result = last_runtime_preflight
+        if state.version > initial_version:
+            runtime_result = await self._cached_runtime_preflight(
+                state,
+                user_id=user_id,
+                cache=runtime_preflight_cache,
+                initial_version=initial_version,
+                session_scope=session_scope,
+            )
+
+        if runtime_result is None:
+            return ComposerResult(message=content, state=state)
+
+        if not runtime_result.is_valid:
+            return ComposerResult(
+                message=self._runtime_preflight_failure_message(runtime_result),
+                state=state,
+                runtime_preflight=runtime_result,
+                raw_assistant_content=content,
+            )
+
+        return ComposerResult(message=content, state=state, runtime_preflight=runtime_result)
+
     async def explain_run_diagnostics(self, snapshot: Mapping[str, object]) -> str:
         """Return a plain-language explanation of a bounded run snapshot.
 
@@ -554,7 +625,7 @@ class ComposerServiceImpl:
             )
             assistant_message = response.choices[0].message
 
-            # If no tool calls, the LLM is done — return text response
+            # If no tool calls, the LLM is done — apply the final gate and return
             if not assistant_message.tool_calls:
                 await _emit_progress(
                     progress,
@@ -565,9 +636,14 @@ class ComposerServiceImpl:
                         likely_next="ELSPETH will save any accepted pipeline update.",
                     ),
                 )
-                return ComposerResult(
-                    message=assistant_message.content or "",
+                return await self._finalize_no_tool_response(
+                    content=assistant_message.content or "",
                     state=state,
+                    initial_version=initial_version,
+                    user_id=user_id,
+                    last_runtime_preflight=last_runtime_preflight,
+                    runtime_preflight_cache=runtime_preflight_cache,
+                    session_scope=session_scope,
                 )
 
             await _emit_progress(
@@ -943,9 +1019,14 @@ class ComposerServiceImpl:
                                 likely_next="ELSPETH will save any accepted pipeline update.",
                             ),
                         )
-                        return ComposerResult(
-                            message=assistant_message.content or "",
+                        return await self._finalize_no_tool_response(
+                            content=assistant_message.content or "",
                             state=state,
+                            initial_version=initial_version,
+                            user_id=user_id,
+                            last_runtime_preflight=last_runtime_preflight,
+                            runtime_preflight_cache=runtime_preflight_cache,
+                            session_scope=session_scope,
                         )
                     raise ComposerConvergenceError.capture(
                         max_turns=composition_turns_used + discovery_turns_used,

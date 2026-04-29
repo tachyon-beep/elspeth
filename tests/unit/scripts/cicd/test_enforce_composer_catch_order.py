@@ -299,6 +299,23 @@ class TestComposerCatchOrderEnforcer:
         assert result.returncode != 0
         assert "line" in (result.stdout + result.stderr).lower()
 
+    def test_runtime_preflight_error_inverted_order_fails(self, tmp_path: Path) -> None:
+        """ComposerRuntimePreflightError must be caught before ComposerServiceError."""
+        _make_routes_tree(
+            tmp_path,
+            "def f():\n"
+            "    try:\n"
+            "        pass\n"
+            "    except ComposerServiceError as exc:\n"
+            "        pass\n"
+            "    except ComposerRuntimePreflightError as crash:\n"
+            "        pass\n",
+        )
+        result = _run(["check", "--root", str(tmp_path)])
+        assert result.returncode != 0
+        assert "CCO1" in result.stdout
+        assert "ComposerRuntimePreflightError" in result.stdout
+
     def test_allowlist_entry_non_integer_line_fails(self, tmp_path: Path) -> None:
         _make_routes_tree(
             tmp_path,

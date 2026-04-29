@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Literal, Protocol
 
 from elspeth.web.composer.progress import ComposerProgressSink
 from elspeth.web.composer.state import CompositionState
+from elspeth.web.execution.schemas import ValidationResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,12 +20,23 @@ class ComposerResult:
     """Result of a compose() call.
 
     Attributes:
-        message: The assistant's text response.
+        message: The assistant's text response. When runtime preflight
+            fails, this is replaced with a synthetic failure message;
+            the original LLM text is preserved in ``raw_assistant_content``.
         state: The (possibly updated) CompositionState.
+        runtime_preflight: The ValidationResult from the final-gate
+            runtime preflight run, or ``None`` if no preflight was
+            triggered (e.g. the state was unchanged and no preview
+            preflight was available to reuse).
+        raw_assistant_content: The original LLM text when ``message``
+            has been replaced with a synthetic preflight-failure message.
+            ``None`` when ``message`` is the verbatim LLM response.
     """
 
     message: str
     state: CompositionState
+    runtime_preflight: ValidationResult | None = None
+    raw_assistant_content: str | None = None
 
 
 class ComposerServiceError(Exception):
