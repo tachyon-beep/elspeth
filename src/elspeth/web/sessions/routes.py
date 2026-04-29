@@ -1600,9 +1600,12 @@ def create_session_router() -> APIRouter:
     ) -> dict[str, str]:
         """Get YAML representation of the current composition state (M1).
 
-        Reconstructs a CompositionState from the persisted record and
-        re-validates it before generating deterministic YAML via
-        generate_yaml().
+        Runs runtime preflight on the exact CompositionState reconstructed
+        from the persisted record, then generates deterministic YAML via
+        generate_yaml() against that same snapshot. The two operations see
+        the same Python object — there is no re-fetch between preflight
+        and serialization, so a state that passes the gate is byte-
+        identical to the state that gets serialized.
         """
         session = await _verify_session_ownership(session_id, user, request)
         service: SessionServiceProtocol = request.app.state.session_service
@@ -1610,11 +1613,31 @@ def create_session_router() -> APIRouter:
         if state_record is None:
             raise HTTPException(status_code=404, detail="No composition state exists")
         state = _state_from_record(state_record)
-        runtime_validation = await _runtime_preflight_for_state(
-            state,
-            settings=request.app.state.settings,
-            secret_service=request.app.state.scoped_secret_resolver,
-            user_id=str(user.user_id),
+        try:
+            runtime_validation = await _runtime_preflight_for_state(
+                state,
+                settings=request.app.state.settings,
+                secret_service=request.app.state.scoped_secret_resolver,
+                user_id=str(user.user_id),
+            )
+        except Exception as exc:
+            # Preflight raised before producing a ValidationResult — timeout,
+            # plugin instantiation crash, etc. Mirror the exception path the
+            # other preflight call sites use: emit "exception" telemetry with
+            # a bounded class-name attribute, then surface a 409 to the
+            # operator without leaking the raw exception text.
+            _record_composer_runtime_preflight_telemetry(
+                "exception",
+                source="yaml_export",
+                exception_class=type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail="Runtime preflight could not complete; YAML export aborted.",
+            ) from exc
+        _record_composer_runtime_preflight_telemetry(
+            "passed" if runtime_validation.is_valid else "failed",
+            source="yaml_export",
         )
         if not runtime_validation.is_valid:
             detail = "Current composition state failed runtime preflight. Fix validation errors before exporting YAML."

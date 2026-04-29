@@ -2457,7 +2457,104 @@ class TestYamlEndpoint:
         assert captured_states[0].source is not None
 
     @pytest.mark.asyncio
-    async def test_get_state_yaml_does_not_export_resolved_secret_values(self, tmp_path) -> None:
+    async def test_get_state_yaml_emits_yaml_export_telemetry_on_passed_preflight(self, tmp_path, monkeypatch) -> None:
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        async def pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 200
+        assert any(attrs.get("source") == "yaml_export" and attrs.get("result") == "passed" for _, attrs in emitted)
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_emits_yaml_export_telemetry_on_failed_preflight(self, tmp_path, monkeypatch) -> None:
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        failure = ValidationResult(
+            is_valid=False,
+            checks=[],
+            errors=[ValidationError(component_id=None, component_type=None, message="bad runtime", suggestion=None)],
+        )
+
+        async def fail_preflight(state, *, settings, secret_service, user_id):
+            return failure
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=fail_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 409
+        assert any(attrs.get("source") == "yaml_export" and attrs.get("result") == "failed" for _, attrs in emitted)
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_handles_preflight_exception_with_telemetry_and_409(self, tmp_path, monkeypatch) -> None:
+        """Preflight exceptions must surface as 409 with bounded telemetry, not 500 with raw exception text."""
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        secret_canary = "this-text-must-not-appear-in-the-response-body"
+
+        async def boom(state, *, settings, secret_service, user_id):
+            raise TimeoutError(secret_canary)
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 409
+        # The raw exception text must not leak into the response body.
+        assert secret_canary not in resp.text
+        assert "Runtime preflight could not complete" in resp.json()["detail"]
+        # Telemetry recorded the exception class as a bounded attribute.
+        assert any(
+            attrs.get("source") == "yaml_export" and attrs.get("result") == "exception" and attrs.get("exception_class") == "TimeoutError"
+            for _, attrs in emitted
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_preserves_secret_ref_markers_in_output(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
         client = TestClient(app)
         resolved_secret = "__RESOLVED_SECRET_CANARY_DO_NOT_EXPORT__"
