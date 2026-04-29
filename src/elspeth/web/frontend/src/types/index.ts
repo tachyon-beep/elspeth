@@ -185,7 +185,8 @@ export type ComposerProgressPhase =
   | "validating"
   | "saving"
   | "complete"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 /**
  * Stable machine-readable reason code for composer progress events.
@@ -205,6 +206,9 @@ export type ComposerProgressReason =
   | "plugin_crash"
   | "runtime_preflight_failed"
   | "service_setup_failed"
+  // Required when phase === "cancelled" — distinguishes a client disconnect
+  // from a future operator-initiated cancel without parsing the headline.
+  | "client_cancelled"
   | "composer_idle"
   | "composer_complete";
 

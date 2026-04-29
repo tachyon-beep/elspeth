@@ -2958,6 +2958,7 @@ class TestComposerProgressRoutes:
         await registry.publish(
             session_id=str(service.session.id),
             request_id="message-1",
+            user_id=service.session.user_id,
             event=ComposerProgressEvent(
                 phase="using_tools",
                 headline="The model requested plugin schemas.",
@@ -3027,6 +3028,292 @@ class TestComposerProgressRoutes:
         assert composer.progress_sink_seen is True
         assert progress["request_id"] == str(user_msg.id)
         assert progress["phase"] == "complete"
+
+
+class TestComposerInFlightEndpoint:
+    """The /_active endpoint is the cross-session view added with elspeth-29e8bd8a1f.
+
+    Per-session /composer-progress polling already worked, but answered "what's
+    happening with session X?". Operators needed "what's running on this server
+    right now?" — without that view, an in-flight composer request was invisible
+    in the journal until the response completed (uvicorn access log timing).
+    """
+
+    @pytest.mark.asyncio
+    async def test_returns_only_authenticated_users_in_flight_sessions(self, tmp_path) -> None:
+        app, service = _make_progress_route_app(tmp_path)
+        registry = app.state.composer_progress_registry
+
+        # alice has one in-flight and one completed session.
+        await registry.publish(
+            session_id=str(service.session.id),
+            request_id="msg-1",
+            user_id="alice",
+            event=ComposerProgressEvent(
+                phase="calling_model",
+                headline="The model is composing.",
+                evidence=("Prompt was built.",),
+            ),
+        )
+        await registry.publish(
+            session_id="alice-completed-session",
+            request_id="msg-completed",
+            user_id="alice",
+            event=ComposerProgressEvent(
+                phase="complete",
+                headline="The composer response is ready.",
+                evidence=("Saved.",),
+                reason="composer_complete",
+            ),
+        )
+        # bob has one in-flight session — must not appear in alice's view.
+        await registry.publish(
+            session_id="bob-active-session",
+            request_id="msg-bob",
+            user_id="bob",
+            event=ComposerProgressEvent(
+                phase="using_tools",
+                headline="Bob's request.",
+                evidence=("Active.",),
+            ),
+        )
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/api/sessions/_active")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert {snap["session_id"] for snap in body} == {str(service.session.id)}
+        # phase must be a non-terminal value; counters depend on this invariant.
+        assert all(snap["phase"] in {"starting", "calling_model", "using_tools", "validating", "saving"} for snap in body)
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_list_when_no_sessions_in_flight(self, tmp_path) -> None:
+        """Empty list, not 404 — it's a successful query with zero results."""
+        app, _ = _make_progress_route_app(tmp_path)
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/api/sessions/_active")
+
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_route_path_does_not_collide_with_session_id_route(self, tmp_path) -> None:
+        """_active must beat the /{session_id} pattern. Otherwise FastAPI tries
+        to parse 'underscore_active' as a UUID and returns 422 before the
+        operator ever sees the snapshot list.
+        """
+        app, _ = _make_progress_route_app(tmp_path)
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/api/sessions/_active")
+
+        # If the route order were wrong, this would be 422 (UUID parse error).
+        assert resp.status_code != 422
+
+
+class TestComposerCancellationLifecycle:
+    """elspeth-29e8bd8a1f acceptance criteria: client cancellations are
+    distinguished from server timeouts, both in the progress snapshot
+    (phase=cancelled, reason=client_cancelled) and in the terminal
+    counter (status=cancelled vs status=timed_out).
+    """
+
+    @pytest.mark.asyncio
+    async def test_send_message_publishes_cancelled_snapshot_on_cancellation(self, tmp_path) -> None:
+        """When compose() is cancelled mid-flight (real disconnect or asyncio
+        cancel), the route MUST publish a phase=cancelled / reason=client_cancelled
+        snapshot before re-raising. This proves the except-CancelledError +
+        asyncio.shield contract.
+
+        The fake composer raises CancelledError directly. A live ASGI
+        http.disconnect propagates as a CancelledError on the route task
+        — the route handler cannot tell the two apart, so this test
+        exercises the contract that matters.
+        """
+        app, service = _make_progress_route_app(tmp_path)
+
+        class _CancellingComposer:
+            async def compose(self, *args, **kwargs) -> None:
+                del args, kwargs
+                raise asyncio.CancelledError()
+
+        app.state.composer_service = _CancellingComposer()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with pytest.raises(asyncio.CancelledError):
+                await client.post(
+                    f"/api/sessions/{service.session.id}/messages",
+                    json={"content": "Will be cancelled"},
+                )
+
+        registry = app.state.composer_progress_registry
+        snapshot = await registry.get_latest(str(service.session.id))
+        assert snapshot.phase == "cancelled"
+        assert snapshot.reason == "client_cancelled"
+        # list_active must NOT include cancelled phases — otherwise the
+        # /_active operator view would persistently show stale cancellations.
+        active = await registry.list_active(user_id=service.session.user_id)
+        assert active == ()
+
+    @pytest.mark.asyncio
+    async def test_send_message_increments_terminal_counter_with_cancelled_status(self, tmp_path, monkeypatch) -> None:
+        """The terminal counter must record status=cancelled separately from
+        status=timed_out so a Grafana board can distinguish "the client gave
+        up" from "the server gave up".
+        """
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[int, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((value, dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_REQUEST_TERMINAL_COUNTER", FakeCounter())
+
+        app, service = _make_progress_route_app(tmp_path)
+
+        class _CancellingComposer:
+            async def compose(self, *args, **kwargs) -> None:
+                del args, kwargs
+                raise asyncio.CancelledError()
+
+        app.state.composer_service = _CancellingComposer()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with pytest.raises(asyncio.CancelledError):
+                await client.post(
+                    f"/api/sessions/{service.session.id}/messages",
+                    json={"content": "Will be cancelled"},
+                )
+
+        terminal_events = [(v, attrs) for v, attrs in emitted if attrs.get("endpoint") == "send_message"]
+        assert len(terminal_events) == 1, f"expected 1 terminal event, got {terminal_events}"
+        value, attrs = terminal_events[0]
+        assert value == 1
+        assert attrs == {"endpoint": "send_message", "status": "cancelled"}
+
+    @pytest.mark.asyncio
+    async def test_send_message_increments_terminal_counter_with_completed_status(self, tmp_path, monkeypatch) -> None:
+        """Successful path: status=completed. Pinned so a future refactor that
+        forgets to set terminal_status before return falls back to the
+        pessimistic default of 'failed' — and this test catches it.
+        """
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[int, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((value, dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_REQUEST_TERMINAL_COUNTER", FakeCounter())
+
+        app, service = _make_progress_route_app(tmp_path)
+        app.state.composer_service = _ProgressAwareComposer()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/sessions/{service.session.id}/messages",
+                json={"content": "Hello"},
+            )
+
+        assert resp.status_code == 200
+        terminal_events = [(v, attrs) for v, attrs in emitted if attrs.get("endpoint") == "send_message"]
+        assert terminal_events == [(1, {"endpoint": "send_message", "status": "completed"})]
+
+    @pytest.mark.asyncio
+    async def test_recompose_publishes_cancelled_snapshot_on_cancellation(self, tmp_path) -> None:
+        """Drift guard: recompose mirrors send_message structurally, so the
+        cancellation contract MUST remain identical. A 4-line parallel test
+        is cheap insurance against future refactors that fix one path and
+        forget the other.
+        """
+        app, service = _make_progress_route_app(tmp_path)
+        await service.add_message(service.session.id, "user", "Will be cancelled on retry")
+
+        class _CancellingComposer:
+            async def compose(self, *args, **kwargs) -> None:
+                del args, kwargs
+                raise asyncio.CancelledError()
+
+        app.state.composer_service = _CancellingComposer()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with pytest.raises(asyncio.CancelledError):
+                await client.post(f"/api/sessions/{service.session.id}/recompose")
+
+        registry = app.state.composer_progress_registry
+        snapshot = await registry.get_latest(str(service.session.id))
+        assert snapshot.phase == "cancelled"
+        assert snapshot.reason == "client_cancelled"
+
+    @pytest.mark.asyncio
+    async def test_recompose_increments_terminal_counter_with_cancelled_status(self, tmp_path, monkeypatch) -> None:
+        """Counter parity with send_message — the endpoint attribute on the
+        terminal counter must be 'recompose' (not 'send_message'), so a
+        Grafana board can split the two routes' cancellation rates.
+        """
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[int, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((value, dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_REQUEST_TERMINAL_COUNTER", FakeCounter())
+
+        app, service = _make_progress_route_app(tmp_path)
+        await service.add_message(service.session.id, "user", "Will be cancelled on retry")
+
+        class _CancellingComposer:
+            async def compose(self, *args, **kwargs) -> None:
+                del args, kwargs
+                raise asyncio.CancelledError()
+
+        app.state.composer_service = _CancellingComposer()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            with pytest.raises(asyncio.CancelledError):
+                await client.post(f"/api/sessions/{service.session.id}/recompose")
+
+        terminal_events = [(v, attrs) for v, attrs in emitted if attrs.get("endpoint") == "recompose"]
+        assert terminal_events == [(1, {"endpoint": "recompose", "status": "cancelled"})]
+
+    @pytest.mark.asyncio
+    async def test_inflight_gauge_increments_then_decrements_across_request(self, tmp_path, monkeypatch) -> None:
+        """The UpDownCounter must net to zero across one successful request.
+        If the finally clause is removed or the increment is mis-placed,
+        the gauge drifts and a Grafana 'currently in flight' panel lies.
+        """
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[int, dict[str, str]]] = []
+
+        class FakeUpDownCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((value, dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_REQUESTS_INFLIGHT", FakeUpDownCounter())
+
+        app, service = _make_progress_route_app(tmp_path)
+        app.state.composer_service = _ProgressAwareComposer()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                f"/api/sessions/{service.session.id}/messages",
+                json={"content": "Hello"},
+            )
+
+        assert resp.status_code == 200
+        send_events = [(v, attrs) for v, attrs in emitted if attrs.get("endpoint") == "send_message"]
+        assert send_events == [
+            (1, {"endpoint": "send_message"}),
+            (-1, {"endpoint": "send_message"}),
+        ], "in-flight gauge must net to zero across one request"
 
 
 class TestPaginationRoutes:

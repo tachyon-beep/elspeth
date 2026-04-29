@@ -27,7 +27,22 @@ type ComposerProgressPhase = Literal[
     "saving",
     "complete",
     "failed",
+    "cancelled",
 ]
+
+# Phases that indicate the composer is actively working on a request. The
+# in-flight enumeration endpoint filters on this set so an operator polling
+# /_active sees the live composer requests for their own sessions even if
+# the SPA tab that posted them is no longer connected.
+NON_TERMINAL_PROGRESS_PHASES: frozenset[ComposerProgressPhase] = frozenset(
+    {
+        "starting",
+        "calling_model",
+        "using_tools",
+        "validating",
+        "saving",
+    }
+)
 
 # Stable machine-readable reason codes for composer progress events.
 #
@@ -58,6 +73,12 @@ type ComposerProgressReason = Literal[
     "runtime_preflight_failed",
     # Generic ComposerServiceError — prompt prep / availability / catch-all.
     "service_setup_failed",
+    # Client closed the HTTP connection or operator cancelled the request
+    # before the composer returned. Distinct from convergence_wall_clock_timeout
+    # (server budget exceeded) so dashboards and audit can tell apart "the
+    # client gave up" from "the server gave up". Required when phase ==
+    # "cancelled" by the same model_validator that requires it on "failed".
+    "client_cancelled",
     # Non-failure sentinels — every snapshot carries a code so observability
     # and the SPA never have to special-case None.
     "composer_idle",
@@ -105,20 +126,24 @@ class ComposerProgressEvent(_StrictProgressModel):
         return tuple(bounded)
 
     @model_validator(mode="after")
-    def _require_reason_when_failed(self) -> Self:
+    def _require_reason_when_terminal_non_success(self) -> Self:
         # Mechanically forbids the drift the original bug exhibited: a
         # phase="failed" event was emitted with text-only differentiation
         # at three distinct sites and three sub-causes collapsed into one
         # generic message because nothing in the contract required a
         # discriminator. With this validator, a new failure site cannot
         # be added without choosing a code from ComposerProgressReason.
+        # The same rule applies to phase == "cancelled" (added with the
+        # in-flight observability work) — operator dashboards branch on
+        # reason to distinguish client_cancelled from a future operator-
+        # initiated cancel without parsing the headline.
         # Other phases keep reason optional — they're status pings, not
         # routing decisions.
-        if self.phase == "failed" and self.reason is None:
+        if self.phase in ("failed", "cancelled") and self.reason is None:
             raise ValueError(
-                "ComposerProgressEvent.reason is required when phase == 'failed' "
-                "so the frontend, audit logs, and HTTP response body can branch "
-                "on a stable taxonomy instead of free-text headline parsing."
+                "ComposerProgressEvent.reason is required when phase is 'failed' or "
+                "'cancelled' so the frontend, audit logs, and HTTP response body can "
+                "branch on a stable taxonomy instead of free-text headline parsing."
             )
         return self
 
@@ -137,10 +162,19 @@ class ComposerProgressRegistry:
     The registry intentionally stores one bounded snapshot per session, not an
     append-only log. The immutable session/chat tables remain the source of
     truth for persisted conversation history.
+
+    The registry also maintains a parallel session_id -> user_id index used
+    only by ``list_active`` to scope cross-session enumeration to the
+    authenticated user. user_id is intentionally NOT a field on
+    ComposerProgressSnapshot — the per-session GET endpoint already
+    authenticates the caller against session ownership, so leaking the
+    user_id back through the snapshot body would be redundant and would
+    couple the public progress contract to auth identity.
     """
 
     def __init__(self) -> None:
         self._snapshots: dict[str, ComposerProgressSnapshot] = {}
+        self._user_index: dict[str, str] = {}
         self._lock = threading.Lock()
 
     async def publish(
@@ -148,9 +182,16 @@ class ComposerProgressRegistry:
         *,
         session_id: str,
         request_id: str | None,
+        user_id: str,
         event: ComposerProgressEvent,
     ) -> ComposerProgressSnapshot:
-        """Store and return the latest progress snapshot for a session."""
+        """Store and return the latest progress snapshot for a session.
+
+        ``user_id`` is recorded in the registry's internal user index so
+        :meth:`list_active` can scope cross-session enumeration to one
+        authenticated principal. It is NOT written into the snapshot body
+        returned to the SPA.
+        """
         with self._lock:
             updated_at = self._next_timestamp(session_id)
             snapshot = ComposerProgressSnapshot(
@@ -164,6 +205,7 @@ class ComposerProgressRegistry:
                 updated_at=updated_at,
             )
             self._snapshots[session_id] = snapshot
+            self._user_index[session_id] = user_id
             return snapshot
 
     async def get_latest(self, session_id: str) -> ComposerProgressSnapshot:
@@ -173,11 +215,47 @@ class ComposerProgressRegistry:
                 return self._snapshots[session_id]
             return _idle_snapshot(session_id)
 
+    async def list_active(self, *, user_id: str) -> tuple[ComposerProgressSnapshot, ...]:
+        """Return non-terminal snapshots for one user's sessions.
+
+        "Non-terminal" means the composer is still working (starting,
+        calling_model, using_tools, validating, saving). Snapshots whose
+        phase is idle/complete/failed/cancelled are excluded — those
+        sessions are no longer in flight.
+
+        Filtered by ``user_id`` against the internal user index so a
+        caller cannot enumerate other users' sessions even if they hold
+        the same registry reference. The ordering is by updated_at
+        (oldest first) so an operator's view shows the most-stuck
+        request at the top, which is the typical triage starting point.
+
+        Indexes _user_index directly (not via ``.get``) — publish() and
+        clear() maintain the invariant that every session_id in
+        _snapshots also has an entry in _user_index. A KeyError here
+        would be a registry bug, not user input, and crashing surfaces
+        it instead of silently returning empty results.
+        """
+        with self._lock:
+            owned = (
+                snap
+                for sid, snap in self._snapshots.items()
+                if self._user_index[sid] == user_id and snap.phase in NON_TERMINAL_PROGRESS_PHASES
+            )
+            return tuple(sorted(owned, key=lambda snap: snap.updated_at))
+
     async def clear(self, session_id: str) -> None:
-        """Remove a session snapshot."""
+        """Remove a session snapshot and its user-index entry.
+
+        Idempotent — clear() is called from session archival regardless of
+        whether the registry ever held a snapshot for that session, so the
+        ``in`` guard is the offensive-programming-compliant way to express
+        "remove if present" without using ``dict.pop(default)``.
+        """
         with self._lock:
             if session_id in self._snapshots:
-                self._snapshots.pop(session_id)
+                del self._snapshots[session_id]
+            if session_id in self._user_index:
+                del self._user_index[session_id]
 
     def _next_timestamp(self, session_id: str) -> datetime:
         now = datetime.now(UTC)
@@ -240,6 +318,27 @@ def convergence_progress_event(
         evidence=("The mutation-turn budget was exhausted before a final answer.",),
         likely_next=("Split the request into smaller turns, or ask an operator to raise the mutation-turn budget."),
         reason="convergence_composition_budget",
+    )
+
+
+def client_cancelled_progress_event() -> ComposerProgressEvent:
+    """Build the progress event for a client-disconnect cancellation.
+
+    Centralised here for the same reason ``convergence_progress_event`` is —
+    the failure-mode taxonomy is a property of the progress contract. Both
+    composer entry points (send_message and recompose) emit this exact text
+    on ``asyncio.CancelledError`` so an operator inspecting the snapshot
+    cannot tell which route was cancelled from the headline alone (the
+    request_id on the snapshot disambiguates if needed). Recovery copy is
+    written for the user, not the operator: the user sees this through
+    /composer-progress polling if they ever reconnect to the session.
+    """
+    return ComposerProgressEvent(
+        phase="cancelled",
+        headline="The request was cancelled before the composer finished.",
+        evidence=("The client closed the connection before a response was returned.",),
+        likely_next="Resubmit the message when ready, or try a smaller request.",
+        reason="client_cancelled",
     )
 
 
