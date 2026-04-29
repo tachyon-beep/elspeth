@@ -1610,12 +1610,17 @@ def create_session_router() -> APIRouter:
         if state_record is None:
             raise HTTPException(status_code=404, detail="No composition state exists")
         state = _state_from_record(state_record)
-        validation = state.validate()
-        if not validation.is_valid:
-            raise HTTPException(
-                status_code=409,
-                detail="Current composition state is invalid. Fix validation errors before exporting YAML.",
-            )
+        runtime_validation = await _runtime_preflight_for_state(
+            state,
+            settings=request.app.state.settings,
+            secret_service=request.app.state.scoped_secret_resolver,
+            user_id=str(user.user_id),
+        )
+        if not runtime_validation.is_valid:
+            detail = "Current composition state failed runtime preflight. Fix validation errors before exporting YAML."
+            if runtime_validation.errors:
+                detail = f"{detail} First error: {runtime_validation.errors[0].message}"
+            raise HTTPException(status_code=409, detail=detail)
         yaml_str = generate_yaml(state)
         return {"yaml": yaml_str}
 

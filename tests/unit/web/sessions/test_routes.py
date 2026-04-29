@@ -2245,7 +2245,11 @@ class TestYamlEndpoint:
             ),
         )
 
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        async def _pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=_pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
         assert resp.status_code == 200
         body = resp.json()
         assert "yaml" in body
@@ -2308,7 +2312,11 @@ class TestYamlEndpoint:
             ),
         )
 
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        async def _pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=_pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
         assert resp.status_code == 200
         assert "field_mapper" in resp.json()["yaml"]
         assert "body" in resp.json()["yaml"]
@@ -2375,64 +2383,15 @@ class TestYamlEndpoint:
             ),
         )
 
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        async def _pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=_pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
 
         assert resp.status_code == 200
         doc = yaml.safe_load(resp.json()["yaml"])
         assert doc["coalesce"][0]["on_success"] == "main"
-
-    @pytest.mark.asyncio
-    async def test_yaml_returns_409_when_current_state_is_invalid(self, tmp_path) -> None:
-        app, service = _make_app(tmp_path)
-        client = TestClient(app)
-
-        session = await service.create_session("alice", "Pipeline", "local")
-        await service.save_composition_state(
-            session.id,
-            CompositionStateData(
-                source={
-                    "plugin": "csv",
-                    "on_success": "t1",
-                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
-                    "on_validation_failure": "quarantine",
-                },
-                nodes=[
-                    {
-                        "id": "t1",
-                        "node_type": "transform",
-                        "plugin": "value_transform",
-                        "input": "t1",
-                        "on_success": "main",
-                        "on_error": "discard",
-                        "options": {
-                            "required_input_fields": ["text"],
-                            "operations": [{"target": "out", "expression": "row['text']"}],
-                            "schema": {"mode": "observed"},
-                        },
-                        "condition": None,
-                        "routes": None,
-                        "fork_to": None,
-                        "branches": None,
-                        "policy": None,
-                        "merge": None,
-                    },
-                ],
-                outputs=[
-                    {
-                        "name": "main",
-                        "plugin": "csv",
-                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
-                        "on_write_failure": "discard",
-                    }
-                ],
-                metadata_={"name": "Invalid Contract Pipeline", "description": ""},
-                is_valid=True,
-            ),
-        )
-
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
-        assert resp.status_code == 409
-        assert "invalid" in resp.json()["detail"].lower()
 
     def test_yaml_returns_404_when_no_state(self, tmp_path) -> None:
         """No composition state yet -> 404."""
@@ -2444,6 +2403,112 @@ class TestYamlEndpoint:
 
         yaml_resp = client.get(f"/api/sessions/{session_id}/state/yaml")
         assert yaml_resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_validates_exact_state_snapshot(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "main",
+                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    "on_validation_failure": "quarantine",
+                },
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Snapshot", "description": ""},
+                is_valid=True,
+            ),
+        )
+
+        captured_states: list[CompositionState] = []
+
+        async def fake_runtime_preflight(state, *, settings, secret_service, user_id):
+            captured_states.append(state)
+            return ValidationResult(
+                is_valid=False,
+                checks=[],
+                errors=[
+                    ValidationError(
+                        component_id="source",
+                        component_type="source",
+                        message="runtime preflight failed for captured state",
+                        suggestion=None,
+                    )
+                ],
+            )
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=fake_runtime_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 409
+        assert "runtime preflight failed for captured state" in resp.json()["detail"]
+        assert len(captured_states) == 1
+        assert captured_states[0].source is not None
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_does_not_export_resolved_secret_values(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        resolved_secret = "__RESOLVED_SECRET_CANARY_DO_NOT_EXPORT__"
+
+        class FakeResolvedSecretService:
+            resolved_value = resolved_secret
+
+        app.state.scoped_secret_resolver = FakeResolvedSecretService()
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "main",
+                    "options": {
+                        "path": "/data/blobs/input.csv",
+                        "schema": {"mode": "observed"},
+                        "api_key": {"secret_ref": "OPENAI_API_KEY"},
+                    },
+                    "on_validation_failure": "quarantine",
+                },
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Secret export", "description": ""},
+                is_valid=True,
+            ),
+        )
+
+        async def fake_runtime_preflight(state, *, settings, secret_service, user_id):
+            assert secret_service is app.state.scoped_secret_resolver
+            assert secret_service.resolved_value == resolved_secret
+            # The runtime preflight path may resolve the secret in memory; export
+            # must still serialize the original state snapshot with the secret_ref marker.
+            assert state.to_dict()["source"]["options"]["api_key"] == {"secret_ref": "OPENAI_API_KEY"}
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=fake_runtime_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 200
+        exported_yaml = resp.json()["yaml"]
+        assert resolved_secret not in exported_yaml
+        parsed = yaml.safe_load(exported_yaml)
+        assert parsed["source"]["options"]["api_key"] == {"secret_ref": "OPENAI_API_KEY"}
 
 
 class TestRunAlreadyActiveError:
