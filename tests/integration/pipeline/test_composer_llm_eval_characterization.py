@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -600,3 +600,62 @@ async def test_long_running_compose_failures_expose_distinct_progress_guidance(
     composition_event = await _failed_progress_for_composition_budget(tmp_path, monkeypatch)
 
     assert _progress_copy(timeout_event) != _progress_copy(composition_event)
+
+
+def test_runtime_preflight_preview_blocks_scenario_2_invalid_trigger(tmp_path: Path) -> None:
+    """Scenario 2: preview must show runtime failure, not authoring-only validity."""
+    data_dir, source_path, output_path = _scenario_2_files(tmp_path)
+    state = _aggregation_state(
+        source_path,
+        output_path,
+        trigger={"condition": "end_of_source"},
+        aggregation_options={"schema": {"mode": "observed"}, "value_field": "amount"},
+    )
+    settings = _web_settings(data_dir)
+
+    def runtime_preflight(candidate: CompositionState) -> ValidationResult:
+        return validate_pipeline(candidate, settings, composer_yaml_generator)
+
+    preview = execute_tool(
+        "preview_pipeline",
+        {},
+        state,
+        _mock_catalog(),
+        data_dir=str(data_dir),
+        runtime_preflight=runtime_preflight,
+    )
+
+    assert preview.success is True
+    assert preview.data["is_valid"] is False
+    assert preview.data["runtime_preflight"]["is_valid"] is False
+    assert "end_of_source" in json.dumps(preview.to_dict()["data"]["runtime_preflight"])
+
+
+@pytest.mark.asyncio
+async def test_final_completion_claim_is_replaced_by_runtime_preflight_failure(tmp_path: Path) -> None:
+    """The composer must not repeat an LLM complete/valid claim after dry-run failure."""
+    data_dir, source_path, output_path = _scenario_2_files(tmp_path)
+    settings = _web_settings(data_dir)
+    composer = ComposerServiceImpl(catalog=_mock_catalog(), settings=settings)
+    state = _aggregation_state(
+        source_path,
+        output_path,
+        trigger={"condition": "end_of_source"},
+        aggregation_options={"schema": {"mode": "observed"}, "value_field": "amount"},
+    )
+    changed_state = replace(state, version=state.version + 1)
+
+    result = await composer._finalize_no_tool_response(
+        content="The pipeline is complete and valid.",
+        state=changed_state,
+        initial_version=state.version,
+        user_id=EVAL_USER_ID,
+        last_runtime_preflight=None,
+        runtime_preflight_cache=composer._new_runtime_preflight_cache(),
+        session_scope="session:eval",
+    )
+
+    assert result.message != "The pipeline is complete and valid."
+    assert result.raw_assistant_content == "The pipeline is complete and valid."
+    assert result.runtime_preflight is not None
+    assert result.runtime_preflight.is_valid is False
