@@ -192,3 +192,7 @@ deploy/
 
 # Temporary
 .codex
+
+# Build-artefact PDFs from tools/pdf/ (regeneratable; exceed
+# the pre-commit large-file threshold).
+docs/assets/*.pdf

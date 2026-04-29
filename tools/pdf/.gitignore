@@ -1,0 +1,11 @@
+# Generated PDF intermediate (rebuilt by build-arch-pack.sh)
+elspeth-arch-pack.typ
+
+# Mermaid render scratch directory (cleaned by the EXIT trap on success;
+# may persist on partial failures and is regenerated each build).
+.mermaid-tmp/
+
+# The compiled PDF lives at docs/assets/elspeth-arch-pack.pdf — that
+# path is gitignored at the repo root (see /.gitignore) because the
+# project's pre-commit large-file hook (1000 KB threshold) would
+# reject it.  Rebuild on demand with: ./build-arch-pack.sh --pdf
