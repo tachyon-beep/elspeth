@@ -3309,8 +3309,7 @@ async def test_state_data_from_composer_state_propagates_to_dict_errors() -> Non
             runtime_preflight=None,
             preflight_exception_policy="persist_invalid",
             initial_version=None,
-            log_prefix="compose",
-            session_id=uuid.uuid4(),
+            telemetry_source="compose",
         )
 
 

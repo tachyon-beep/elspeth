@@ -1090,7 +1090,7 @@ allow_hits:
     result without adding a separate boolean parameter.
   safety: Exhaustive dispatch with ValueError for invalid combinations; no silent default
   expires: null
-- key: web/sessions/routes.py:R6:_state_data_from_composer_state:fp=ac91a9accd2f67c8
+- key: web/sessions/routes.py:R6:_state_data_from_composer_state:fp=85ec5329d3f4e7a3
   owner: web-sessions
   reason: state.validate() may fail on structurally damaged partial-state from
     LLM convergence/crash — catch (ValueError, TypeError, KeyError) mirrors the
@@ -1099,7 +1099,7 @@ allow_hits:
   safety: Falls back to ValidationSummary(is_valid=False) with a generic error
     entry; does not swallow the damage, just allows persistence to proceed
   expires: null
-- key: web/sessions/routes.py:R5:_state_data_from_composer_state:fp=bbfce00ebfec151d
+- key: web/sessions/routes.py:R5:_state_data_from_composer_state:fp=7c09738ada01bfc5
   owner: web-sessions
   reason: isinstance(runtime, ValidationResult) dispatches the _RuntimePreflightOutcome
     union type to emit telemetry — sentinel and ValidationResult must be distinguished

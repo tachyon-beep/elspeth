@@ -250,8 +250,6 @@ _ComposerPreflightTelemetryResult = Literal["passed", "failed", "exception"]
 _ComposerPreflightTelemetrySource = Literal[
     "compose",
     "recompose",
-    "compose_runtime_preflight",
-    "recompose_runtime_preflight",
     "convergence",
     "plugin_crash",
     "yaml_export",
@@ -403,19 +401,14 @@ async def _state_data_from_composer_state(
     runtime_preflight: _RuntimePreflightOutcome,
     preflight_exception_policy: _PreflightExceptionPolicy,
     initial_version: int | None,
-    log_prefix: str,
-    session_id: UUID,
+    telemetry_source: _ComposerPreflightTelemetrySource,
 ) -> tuple[CompositionStateData, ValidationSummary]:
-    # Session id remains available through persisted session state; keep
-    # telemetry attributes bounded and do not tag metrics with per-session IDs.
-    del session_id
-
     try:
         authoring = state.validate()
     except (ValueError, TypeError, KeyError) as val_err:
         _record_composer_authoring_validation_telemetry(
             "exception",
-            source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+            source=telemetry_source,
             exception_class=type(val_err).__name__,
         )
         authoring = ValidationSummary(
@@ -425,7 +418,7 @@ async def _state_data_from_composer_state(
     else:
         _record_composer_authoring_validation_telemetry(
             "passed" if authoring.is_valid else "failed",
-            source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+            source=telemetry_source,
         )
 
     runtime = runtime_preflight
@@ -446,14 +439,14 @@ async def _state_data_from_composer_state(
                 ) from exc
             _record_composer_runtime_preflight_telemetry(
                 "exception",
-                source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+                source=telemetry_source,
                 exception_class=type(exc).__name__,
             )
             runtime = _RuntimePreflightFailed(type(exc).__name__)
     if isinstance(runtime, ValidationResult):
         _record_composer_runtime_preflight_telemetry(
             "passed" if runtime.is_valid else "failed",
-            source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+            source=telemetry_source,
         )
     persisted_is_valid, persisted_errors = _composer_persisted_validation(
         authoring,
@@ -546,8 +539,7 @@ async def _handle_convergence_error(
                 runtime_preflight=None,
                 preflight_exception_policy="persist_invalid",
                 initial_version=None,
-                log_prefix=log_prefix,
-                session_id=session_id,
+                telemetry_source="convergence",
             )
             await service.save_composition_state(session_id, state_data)
             state_d = exc.partial_state.to_dict()
@@ -634,8 +626,7 @@ async def _handle_plugin_crash(
                 runtime_preflight=None,
                 preflight_exception_policy="persist_invalid",
                 initial_version=None,
-                log_prefix=log_prefix,
-                session_id=session_id,
+                telemetry_source="plugin_crash",
             )
             await service.save_composition_state(session_id, state_data)
         except SQLAlchemyError as save_err:
@@ -1109,8 +1100,7 @@ def create_session_router() -> APIRouter:
                     runtime_preflight=result.runtime_preflight,
                     preflight_exception_policy="raise",
                     initial_version=state.version,
-                    log_prefix="compose",
-                    session_id=session.id,
+                    telemetry_source="compose",
                 )
                 await _publish_progress(
                     progress_registry,
@@ -1411,8 +1401,7 @@ def create_session_router() -> APIRouter:
                     runtime_preflight=result.runtime_preflight,
                     preflight_exception_policy="raise",
                     initial_version=state.version,
-                    log_prefix="recompose",
-                    session_id=session.id,
+                    telemetry_source="recompose",
                 )
                 await _publish_progress(
                     progress_registry,
