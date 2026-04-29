@@ -252,6 +252,7 @@ _ComposerPreflightTelemetrySource = Literal[
     "recompose",
     "convergence",
     "plugin_crash",
+    "runtime_preflight",
     "yaml_export",
 ]
 
@@ -431,17 +432,27 @@ async def _state_data_from_composer_state(
                 user_id=user_id,
             )
         except Exception as exc:
+            # Telemetry MUST fire on both policy branches. Emitting before
+            # the policy split preserves originating-route attribution
+            # (source=compose|recompose|...) on the raise path, which would
+            # otherwise be lost — the recovery handler's re-call relabels its
+            # own emission as source=runtime_preflight, so without this
+            # primary emission the dashboards cannot distinguish failures
+            # by originating route. The dual emission per failure (primary +
+            # recovery) is intentional: each event represents a distinct
+            # observable — primary failure occurred, then recovery handled
+            # it. Operators query them with different source filters.
+            _record_composer_runtime_preflight_telemetry(
+                "exception",
+                source=telemetry_source,
+                exception_class=type(exc).__name__,
+            )
             if preflight_exception_policy == "raise":
                 raise ComposerRuntimePreflightError.capture(
                     exc,
                     state=state,
                     initial_version=initial_version if initial_version is not None else state.version,
                 ) from exc
-            _record_composer_runtime_preflight_telemetry(
-                "exception",
-                source=telemetry_source,
-                exception_class=type(exc).__name__,
-            )
             runtime = _RuntimePreflightFailed(type(exc).__name__)
     if isinstance(runtime, ValidationResult):
         _record_composer_runtime_preflight_telemetry(
@@ -665,6 +676,158 @@ async def _handle_plugin_crash(
         user_id=user_id,
         exc_class=exc.exc_class,
     )
+
+    return response_body
+
+
+async def _handle_runtime_preflight_failure(
+    exc: ComposerRuntimePreflightError,
+    service: SessionServiceProtocol,
+    session_id: UUID,
+    user_id: str,
+    log_prefix: str,
+    settings: Any,
+    secret_service: Any | None,
+) -> dict[str, object]:
+    """Build 500 response body and persist partial state for runtime-preflight failures.
+
+    Symmetric with :func:`_handle_plugin_crash` — same partial-state
+    persistence guard, same response-body shape, same SQLAlchemyError
+    fail-soft contract. The exception class is the only structural
+    difference: ``ComposerRuntimePreflightError`` carries
+    ``original_exc`` instead of the plugin-crash wrapper's ``exc_class``
+    string, but the recovery semantics are identical.
+
+    Two raise sites converge here:
+
+    1. **Cached path** — :func:`elspeth.web.composer.service._raise_cached_runtime_preflight_failure`
+       inside ``composer.compose()`` re-raises a previously-cached
+       runtime-preflight failure when the LLM's final state matches a
+       cached failure key. Caught at the route's top-level compose-time
+       except clause.
+
+    2. **Post-compose path** — :func:`_state_data_from_composer_state`
+       called with ``preflight_exception_policy="raise"`` on the
+       post-compose state-save block. This raise site sits *after* the
+       compose-time try/except, so the caller wraps the post-compose
+       block in its own try/except that delegates here.
+
+    Telemetry attribution
+    ---------------------
+    This helper is the **second** of a paired emission for path-2
+    failures. The pairing:
+
+    * Primary site (path-2 only) — ``_state_data_from_composer_state``
+      lifts its exception telemetry above the policy split, so the raise
+      arm fires
+      ``composer.runtime_preflight.total{result=exception,
+      source=<originating>, exception_class=...}`` (where
+      ``<originating>`` is ``"compose"`` or ``"recompose"``) before
+      propagating the ``ComposerRuntimePreflightError``. This preserves
+      originating-route attribution that would otherwise be lost.
+
+    * Recovery site (both paths) — this helper's re-call to
+      ``_state_data_from_composer_state`` with
+      ``preflight_exception_policy="persist_invalid"`` and
+      ``telemetry_source="runtime_preflight"`` fires a second emission
+      with ``source=runtime_preflight``, automatically via the
+      persist_invalid arm — no separate telemetry call inside this helper.
+
+    Operators querying primary failure rate filter on
+    ``source ∈ {compose, recompose, plugin_crash, convergence,
+    yaml_export}``; querying recovery handler invocations filters on
+    ``source = runtime_preflight``. The two sources represent distinct
+    observable events (failure occurred; recovery ran), not double-counting.
+
+    Path 1 (cached preflight via ``service.py:_raise_cached_runtime_preflight_failure``)
+    only fires the recovery emission, because the cached raise site is in
+    the composer service rather than ``_state_data_from_composer_state``
+    and does not currently emit primary telemetry.
+
+    Caveat: the persist_invalid arm only re-runs the runtime preflight
+    when the partial state is *authoring-valid* (the
+    ``runtime is None and authoring.is_valid`` branch in
+    :func:`_state_data_from_composer_state`). For a partial state captured
+    immediately after a runtime-preflight raise — the dominant case for
+    both raise sites — authoring is valid by construction, so the counter
+    increments. If a future caller passes a partial that fails authoring
+    validation, the runtime-preflight counter will not increment for that
+    invocation; only the authoring-validation counter will. That is the
+    correct attribution: a state that can't be authoring-validated cannot
+    have a meaningful runtime-preflight outcome to attribute.
+
+    Logging policy
+    --------------
+    Unlike :func:`_handle_plugin_crash` and
+    :func:`_handle_convergence_error`, this helper does **not** emit a
+    ``slog.error`` triage event. Per CLAUDE.md telemetry/logging primacy,
+    the OpenTelemetry counter above is the canonical triage surface for
+    runtime-preflight outcomes. The slog calls in the sibling helpers
+    are pre-existing tech debt being migrated under elspeth-940bfe3a0d;
+    new code does not adopt the pattern.
+
+    The persistence-failure ``slog.error`` inside the SQLAlchemyError
+    catch is the audit-system-failure exemption — when DB persistence
+    itself breaks, slog is the appropriate last-resort channel — and is
+    retained here for parity with the sibling helpers' fallback path.
+
+    Args:
+        exc: The runtime-preflight wrapper with ``original_exc`` and
+            optional ``partial_state``.
+        service: Session service for DB persistence of partial state.
+        session_id: Session to persist partial state to.
+        user_id: Authenticated user id (logged on the SQLAlchemyError
+            audit-failure path for triage correlation).
+        log_prefix: Prefix for the SQLAlchemyError audit-failure event
+            name (e.g. ``"compose"`` or ``"recompose"``).
+        settings: App settings (forwarded to
+            :func:`_state_data_from_composer_state`).
+        secret_service: Scoped secret resolver (forwarded to runtime
+            preflight on the recovery re-call).
+
+    Returns:
+        Response body dict for ``HTTPException(status_code=500, ...)``.
+    """
+    response_body: dict[str, object] = {
+        "error_type": "composer_plugin_error",
+        "detail": ("A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error."),
+    }
+
+    if exc.partial_state is not None:
+        # Persistence guard: DB write failure MUST NOT mask the original
+        # runtime-preflight failure (response stays as the 500 below; the
+        # save failure is recorded as a separate audit-system-failure
+        # slog event — that slog event is the persistence-fallback
+        # exemption, NOT a normal-flow log).
+        #
+        # SQLAlchemyError ONLY — narrowed per CLAUDE.md Tier 1 semantics,
+        # symmetric with the sibling _handle_plugin_crash /
+        # _handle_convergence_error helpers. See the comment in
+        # _handle_convergence_error for the full rationale on the
+        # SQLAlchemyError width.
+        try:
+            state_data, _validation = await _state_data_from_composer_state(
+                exc.partial_state,
+                settings=settings,
+                secret_service=secret_service,
+                user_id=user_id,
+                runtime_preflight=None,
+                preflight_exception_policy="persist_invalid",
+                initial_version=None,
+                telemetry_source="runtime_preflight",
+            )
+            await service.save_composition_state(session_id, state_data)
+        except SQLAlchemyError as save_err:
+            # See sibling helpers for redaction rationale (exc_info
+            # omitted; class name only on the response body).
+            slog.error(
+                f"{log_prefix}_runtime_preflight_partial_state_save_failed",
+                session_id=str(session_id),
+                user_id=user_id,
+                exc_class=type(save_err).__name__,
+            )
+            response_body["partial_state_save_failed"] = True
+            response_body["partial_state_save_error"] = type(save_err).__name__
 
     return response_body
 
@@ -1015,6 +1178,15 @@ def create_session_router() -> APIRouter:
                 # Inverting this order routes plugin crashes into the 502
                 # composer_error branch, re-introducing the silent-laundering
                 # behaviour this plan exists to eliminate.
+                #
+                # The same precedence rule applies to the
+                # `except ComposerRuntimePreflightError` clause below:
+                # ComposerRuntimePreflightError also inherits from
+                # ComposerServiceError, and demoting it past the generic
+                # 502 catch would convert a recoverable preflight failure
+                # (with persisted partial_state) into an opaque 502 with
+                # no audit trail. Both narrow catches MUST precede the
+                # generic ComposerServiceError catch.
                 response_body = await _handle_plugin_crash(
                     crash,
                     service,
@@ -1037,29 +1209,37 @@ def create_session_router() -> APIRouter:
                 )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
             except ComposerRuntimePreflightError as rpf_exc:
-                # Runtime preflight failed inside _state_data_from_composer_state
-                # with preflight_exception_policy="raise" — this is a server-side
-                # error in the state-save path, not a user error. Response semantics
-                # mirror _handle_plugin_crash: 500 with structured body, partial
-                # state preserved in rpf_exc.partial_state.
+                # Path 1 (cached preflight): composer.compose() re-raised a
+                # previously-cached runtime-preflight failure via
+                # _raise_cached_runtime_preflight_failure in
+                # web/composer/service.py. The shared
+                # _handle_runtime_preflight_failure helper persists
+                # rpf_exc.partial_state symmetrically with
+                # _handle_plugin_crash so accumulated tool-call mutations
+                # are not silently dropped from the audit trail. The
+                # SAME helper is invoked from the post-compose
+                # state-save catch below for path 2.
                 await _publish_progress(
                     progress_registry,
                     session_id=str(session.id),
                     request_id=str(user_msg.id),
                     event=ComposerProgressEvent(
                         phase="failed",
-                        headline="The composer could not safely validate the pipeline update.",
-                        evidence=("Runtime preflight failed during state persistence.",),
+                        headline="The composer could not safely finish this request.",
+                        evidence=("Runtime preflight failed before the compose loop returned.",),
                         likely_next="Review the visible error message, then retry after the issue is resolved.",
                     ),
                 )
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "error_type": "composer_plugin_error",
-                        "detail": "A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error.",
-                    },
-                ) from rpf_exc.original_exc
+                response_body = await _handle_runtime_preflight_failure(
+                    rpf_exc,
+                    service,
+                    session.id,
+                    str(user.user_id),
+                    "compose",
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
+                )
+                raise HTTPException(status_code=500, detail=response_body) from rpf_exc.original_exc
             except ComposerServiceError as exc:
                 await _publish_progress(
                     progress_registry,
@@ -1077,7 +1257,18 @@ def create_session_router() -> APIRouter:
                     detail={"error_type": "composer_error", "detail": str(exc)},
                 ) from exc
 
-            # 5. Save state if version changed — post-compose provenance
+            # 5. Save state if version changed — post-compose provenance.
+            #
+            # Path 2 (post-compose runtime preflight): the call to
+            # _state_data_from_composer_state below uses
+            # preflight_exception_policy="raise", which raises
+            # ComposerRuntimePreflightError when the post-compose
+            # preflight crashes. That raise site sits OUTSIDE the
+            # compose-time try/except above, so the post-compose block is
+            # wrapped in its own try/except that delegates to the same
+            # shared helper. Without this wrapper, a path-2 raise escapes
+            # as Starlette's bare 500 — partial_state is dropped from
+            # the audit trail and the frontend receives an opaque error.
             state_response: CompositionStateResponse | None = None
             post_compose_state_id: UUID | None = pre_send_state_id
             if result.state.version != state.version:
@@ -1092,16 +1283,43 @@ def create_session_router() -> APIRouter:
                         likely_next="ELSPETH will save the validated pipeline snapshot.",
                     ),
                 )
-                state_data, validation = await _state_data_from_composer_state(
-                    result.state,
-                    settings=settings,
-                    secret_service=request.app.state.scoped_secret_resolver,
-                    user_id=str(user.user_id),
-                    runtime_preflight=result.runtime_preflight,
-                    preflight_exception_policy="raise",
-                    initial_version=state.version,
-                    telemetry_source="compose",
-                )
+                try:
+                    state_data, validation = await _state_data_from_composer_state(
+                        result.state,
+                        settings=settings,
+                        secret_service=request.app.state.scoped_secret_resolver,
+                        user_id=str(user.user_id),
+                        runtime_preflight=result.runtime_preflight,
+                        preflight_exception_policy="raise",
+                        initial_version=state.version,
+                        telemetry_source="compose",
+                    )
+                except ComposerRuntimePreflightError as rpf_exc:
+                    # UX-distinct from path 1 above: the LLM call already
+                    # succeeded, so the failure messaging frames this as
+                    # a validation/persistence-stage failure rather than
+                    # a compose-stage failure.
+                    await _publish_progress(
+                        progress_registry,
+                        session_id=str(session.id),
+                        request_id=str(user_msg.id),
+                        event=ComposerProgressEvent(
+                            phase="failed",
+                            headline="The composer could not safely validate the pipeline update.",
+                            evidence=("Runtime preflight failed during state persistence.",),
+                            likely_next="Review the visible error message, then retry after the issue is resolved.",
+                        ),
+                    )
+                    response_body = await _handle_runtime_preflight_failure(
+                        rpf_exc,
+                        service,
+                        session.id,
+                        str(user.user_id),
+                        "compose",
+                        settings=settings,
+                        secret_service=request.app.state.scoped_secret_resolver,
+                    )
+                    raise HTTPException(status_code=500, detail=response_body) from rpf_exc.original_exc
                 await _publish_progress(
                     progress_registry,
                     session_id=str(session.id),
@@ -1342,25 +1560,32 @@ def create_session_router() -> APIRouter:
                 )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
             except ComposerRuntimePreflightError as rpf_exc:
-                # Mirror of the send_message ComposerRuntimePreflightError catch.
+                # Path 1 (cached preflight) mirror of the send_message catch;
+                # see the send_message handler for the full rationale on
+                # why both raise sites delegate to the shared
+                # _handle_runtime_preflight_failure helper and on the
+                # path-1 vs path-2 distinction.
                 await _publish_progress(
                     progress_registry,
                     session_id=str(session.id),
                     request_id=request_id,
                     event=ComposerProgressEvent(
                         phase="failed",
-                        headline="The composer could not safely validate the pipeline update.",
-                        evidence=("Runtime preflight failed during state persistence.",),
+                        headline="The composer could not safely finish this retry.",
+                        evidence=("Runtime preflight failed before the compose loop returned.",),
                         likely_next="Review the visible error message, then retry after the issue is resolved.",
                     ),
                 )
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "error_type": "composer_plugin_error",
-                        "detail": "A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error.",
-                    },
-                ) from rpf_exc.original_exc
+                response_body = await _handle_runtime_preflight_failure(
+                    rpf_exc,
+                    service,
+                    session.id,
+                    str(user.user_id),
+                    "recompose",
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
+                )
+                raise HTTPException(status_code=500, detail=response_body) from rpf_exc.original_exc
             except ComposerServiceError as exc:
                 await _publish_progress(
                     progress_registry,
@@ -1378,7 +1603,10 @@ def create_session_router() -> APIRouter:
                     detail={"error_type": "composer_error", "detail": str(exc)},
                 ) from exc
 
-            # Save state if version changed
+            # Save state if version changed.
+            # Path 2 (post-compose runtime preflight): mirror of the
+            # send_message post-compose try/except — see the send_message
+            # block for the full rationale on the structural fix.
             state_response: CompositionStateResponse | None = None
             post_compose_state_id: UUID | None = pre_send_state_id
             if result.state.version != state.version:
@@ -1393,16 +1621,39 @@ def create_session_router() -> APIRouter:
                         likely_next="ELSPETH will save the validated pipeline snapshot.",
                     ),
                 )
-                state_data, validation = await _state_data_from_composer_state(
-                    result.state,
-                    settings=settings,
-                    secret_service=request.app.state.scoped_secret_resolver,
-                    user_id=str(user.user_id),
-                    runtime_preflight=result.runtime_preflight,
-                    preflight_exception_policy="raise",
-                    initial_version=state.version,
-                    telemetry_source="recompose",
-                )
+                try:
+                    state_data, validation = await _state_data_from_composer_state(
+                        result.state,
+                        settings=settings,
+                        secret_service=request.app.state.scoped_secret_resolver,
+                        user_id=str(user.user_id),
+                        runtime_preflight=result.runtime_preflight,
+                        preflight_exception_policy="raise",
+                        initial_version=state.version,
+                        telemetry_source="recompose",
+                    )
+                except ComposerRuntimePreflightError as rpf_exc:
+                    await _publish_progress(
+                        progress_registry,
+                        session_id=str(session.id),
+                        request_id=request_id,
+                        event=ComposerProgressEvent(
+                            phase="failed",
+                            headline="The composer could not safely validate the pipeline update.",
+                            evidence=("Runtime preflight failed during state persistence.",),
+                            likely_next="Review the visible error message, then retry after the issue is resolved.",
+                        ),
+                    )
+                    response_body = await _handle_runtime_preflight_failure(
+                        rpf_exc,
+                        service,
+                        session.id,
+                        str(user.user_id),
+                        "recompose",
+                        settings=settings,
+                        secret_service=request.app.state.scoped_secret_resolver,
+                    )
+                    raise HTTPException(status_code=500, detail=response_body) from rpf_exc.original_exc
                 await _publish_progress(
                     progress_registry,
                     session_id=str(session.id),

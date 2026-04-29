@@ -3718,6 +3718,409 @@ def test_compose_plugin_crash_persists_runtime_invalid_partial_state(tmp_path) -
     assert list(persisted.validation_errors) == ["runtime failure from plugin crash"]
 
 
+# ---------------------------------------------------------------------------
+# ComposerRuntimePreflightError handler — C1 regression coverage
+# ---------------------------------------------------------------------------
+#
+# When _state_data_from_composer_state raises ComposerRuntimePreflightError
+# (preflight_exception_policy="raise" path inside _state_data_from_composer_state),
+# the route-level catch handlers (send_message at routes.py:1039 and
+# recompose at routes.py:1344) MUST be symmetric with _handle_plugin_crash:
+# persist rpf_exc.partial_state into composition_states, increment the
+# composer.runtime_preflight.total{result=exception, source=runtime_preflight}
+# counter, and surface the partial_state_save_failed/_save_error fields on
+# the 500 body when DB persistence itself fails.
+#
+# The original stubs raised HTTPException(500) directly without persisting,
+# silently dropping accumulated tool-call mutations from the audit trail —
+# an audit-primacy violation per CLAUDE.md.
+
+
+def _make_authoring_valid_partial(name: str, version: int = 5) -> CompositionState:
+    """Build a partial CompositionState whose authoring validation passes,
+    so the runtime-preflight branch inside _state_data_from_composer_state
+    is reached when the state is re-validated by the recovery handler.
+    """
+    from elspeth.contracts.freeze import deep_freeze
+    from elspeth.web.composer.state import EdgeSpec, OutputSpec, SourceSpec
+
+    return CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            options=deep_freeze({"path": "/x.csv"}),
+            on_success="out",
+            on_validation_failure="quarantine",
+        ),
+        nodes=(),
+        edges=(EdgeSpec(id="e1", from_node="source", to_node="out", edge_type="on_success", label=None),),
+        outputs=(OutputSpec(name="out", plugin="discard", options=deep_freeze({}), on_write_failure="discard"),),
+        metadata=PipelineMetadata(name=name),
+        version=version,
+    )
+
+
+def test_compose_runtime_preflight_persists_partial_state(tmp_path) -> None:
+    """C1: send_message's ComposerRuntimePreflightError catch (routes.py:1039)
+    MUST persist rpf_exc.partial_state with is_valid=False, mirroring
+    _handle_plugin_crash. Without persistence the tool-call mutations
+    accumulated in result.state are silently dropped from the audit trail.
+    """
+    partial = _make_authoring_valid_partial("partial-after-runtime-preflight")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        return_value=ComposerResult(
+            message="The composer mutated state but preflight then failed.",
+            state=partial,
+            runtime_preflight=None,  # forces the route to re-run preflight via _state_data_from_composer_state
+        ),
+    )
+
+    app, service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Test"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    async def boom(state, *, settings, secret_service, user_id):
+        raise RuntimeError("preflight blew up during state persistence")
+
+    with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom):
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["detail"]["error_type"] == "composer_plugin_error"
+
+    loop = asyncio.new_event_loop()
+    try:
+        persisted = loop.run_until_complete(service.get_current_state(session_id))
+    finally:
+        loop.close()
+    assert persisted is not None, (
+        "partial_state from ComposerRuntimePreflightError MUST be persisted to "
+        "composition_states; without this, accumulated tool-call mutations are "
+        "silently dropped from the audit trail."
+    )
+    assert persisted.metadata_ is not None
+    assert persisted.metadata_["name"] == "partial-after-runtime-preflight"
+    assert persisted.is_valid is False
+    # _composer_persisted_validation maps _RuntimePreflightFailed → ["runtime_preflight_failed"]
+    assert list(persisted.validation_errors) == ["runtime_preflight_failed"]
+
+
+def test_recompose_runtime_preflight_persists_partial_state(tmp_path) -> None:
+    """C1: recompose's ComposerRuntimePreflightError catch (routes.py:1344)
+    MUST behave identically to send_message's catch — partial_state persistence
+    is part of the contract, not a per-route concern.
+    """
+    partial = _make_authoring_valid_partial("partial-after-recompose-preflight")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        return_value=ComposerResult(
+            message="Recompose mutated state but preflight then failed.",
+            state=partial,
+            runtime_preflight=None,
+        ),
+    )
+
+    app, service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Recompose runtime preflight"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    # Recompose precondition: last persisted message must be a user turn.
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(service.add_message(session_id, "user", "Build a CSV pipeline"))
+    finally:
+        loop.close()
+
+    async def boom(state, *, settings, secret_service, user_id):
+        raise RuntimeError("preflight blew up on recompose")
+
+    with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom):
+        response = client.post(f"/api/sessions/{session_id}/recompose")
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["detail"]["error_type"] == "composer_plugin_error"
+
+    loop = asyncio.new_event_loop()
+    try:
+        persisted = loop.run_until_complete(service.get_current_state(session_id))
+    finally:
+        loop.close()
+    assert persisted is not None
+    assert persisted.metadata_ is not None
+    assert persisted.metadata_["name"] == "partial-after-recompose-preflight"
+    assert persisted.is_valid is False
+    assert list(persisted.validation_errors) == ["runtime_preflight_failed"]
+
+
+def test_compose_cached_runtime_preflight_persists_partial_state(tmp_path) -> None:
+    """C1 path-1 lock-in: when composer.compose() itself raises
+    ComposerRuntimePreflightError (the cached-preflight path in
+    web/composer/service.py:_raise_cached_runtime_preflight_failure), the
+    catch at routes.py:1039 MUST persist partial_state via the shared
+    handler. Without this lock-in, a future refactor that breaks the helper
+    wiring on path-1 (compose-time) would slip through coverage that only
+    exercises path-2 (post-compose state-save).
+    """
+    from elspeth.web.composer.protocol import ComposerRuntimePreflightError
+
+    partial = _make_authoring_valid_partial("partial-from-cached-preflight")
+    original = RuntimeError("cached preflight failure from composer.compose")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        side_effect=ComposerRuntimePreflightError(original_exc=original, partial_state=partial),
+    )
+
+    app, service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Cached preflight"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    response = client.post(
+        f"/api/sessions/{session_id}/messages",
+        json={"content": "Build me a pipeline"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["error_type"] == "composer_plugin_error"
+
+    loop = asyncio.new_event_loop()
+    try:
+        persisted = loop.run_until_complete(service.get_current_state(session_id))
+    finally:
+        loop.close()
+    assert persisted is not None, (
+        "partial_state from cached-preflight ComposerRuntimePreflightError "
+        "(raised inside composer.compose()) MUST be persisted by the "
+        "routes.py:1039 catch handler."
+    )
+    assert persisted.metadata_ is not None
+    assert persisted.metadata_["name"] == "partial-from-cached-preflight"
+    assert persisted.is_valid is False
+
+
+def test_runtime_preflight_handler_records_exception_telemetry(tmp_path, monkeypatch) -> None:
+    """C1: The handler MUST increment composer.runtime_preflight.total with
+    {result=exception, source=runtime_preflight, exception_class=...} so
+    operators can distinguish recovery-path failures from primary-path
+    failures on dashboards. Without telemetry, runtime-preflight crashes
+    are invisible to monitoring.
+    """
+    from elspeth.web.sessions import routes
+
+    emitted: list[tuple[int, dict[str, str]]] = []
+
+    class FakeCounter:
+        def add(self, value: int, attributes: dict[str, str]) -> None:
+            emitted.append((value, dict(attributes)))
+
+    monkeypatch.setattr(routes, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+
+    partial = _make_authoring_valid_partial("telemetry-runtime-preflight")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        return_value=ComposerResult(
+            message="ok",
+            state=partial,
+            runtime_preflight=None,
+        ),
+    )
+
+    app, _service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Telemetry"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    async def boom(state, *, settings, secret_service, user_id):
+        raise RuntimeError("preflight crashed")
+
+    with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom):
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+    assert response.status_code == 500
+
+    # I1 dual-emission contract — path-2 failures must emit telemetry at TWO
+    # distinct attribution points:
+    #
+    #   (a) Primary failure site: _state_data_from_composer_state's raise arm
+    #       fires telemetry with source="compose" before propagating the
+    #       ComposerRuntimePreflightError. This preserves the originating-route
+    #       attribution that would otherwise be lost when the route handler
+    #       relabels the recovery emission as source="runtime_preflight".
+    #
+    #   (b) Recovery site: _handle_runtime_preflight_failure's re-call to
+    #       _state_data_from_composer_state with policy="persist_invalid" and
+    #       telemetry_source="runtime_preflight" emits a second event,
+    #       attributed to the recovery handler.
+    #
+    # Operators distinguish "primary failure rate" (filter source∈{compose,
+    # recompose,plugin_crash,convergence,yaml_export}) from "recovery handler
+    # invocations" (filter source=runtime_preflight) using these two emissions.
+    primary_emissions = [
+        attrs
+        for _, attrs in emitted
+        if attrs.get("source") == "compose"
+        and attrs.get("result") == "exception"
+        and attrs.get("exception_class") == "RuntimeError"
+    ]
+    recovery_emissions = [
+        attrs
+        for _, attrs in emitted
+        if attrs.get("source") == "runtime_preflight"
+        and attrs.get("result") == "exception"
+        and attrs.get("exception_class") == "RuntimeError"
+    ]
+    assert primary_emissions, (
+        "Primary failure attribution missing: _state_data_from_composer_state "
+        "raise arm MUST emit composer.runtime_preflight.total{source=compose, "
+        f"result=exception, exception_class=RuntimeError}}; emitted={emitted}"
+    )
+    assert recovery_emissions, (
+        "Recovery attribution missing: _handle_runtime_preflight_failure MUST "
+        "emit composer.runtime_preflight.total{source=runtime_preflight, "
+        f"result=exception, exception_class=RuntimeError}}; emitted={emitted}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_state_data_raise_arm_emits_telemetry_before_propagating() -> None:
+    """I1 unit-level lock-in: when _state_data_from_composer_state runs with
+    preflight_exception_policy="raise" and the underlying preflight raises,
+    the function MUST emit composer.runtime_preflight.total with the source
+    label passed in (e.g. "compose" or "recompose") BEFORE propagating
+    ComposerRuntimePreflightError. Without this emission, primary failure
+    attribution is lost — the only remaining telemetry comes from the
+    recovery handler's re-call, which uses source="runtime_preflight" and
+    cannot reveal which originating route triggered the failure.
+    """
+    from elspeth.web.composer.protocol import ComposerRuntimePreflightError
+    from elspeth.web.sessions import routes
+
+    emitted: list[tuple[int, dict[str, str]]] = []
+
+    class FakeCounter:
+        def add(self, value: int, attributes: dict[str, str]) -> None:
+            emitted.append((value, dict(attributes)))
+
+    state = _make_authoring_valid_partial("raise-arm-telemetry")
+
+    async def boom(state, *, settings, secret_service, user_id):
+        raise RuntimeError("preflight raised at primary site")
+
+    with (
+        patch.object(routes, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter()),
+        patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom),
+        pytest.raises(ComposerRuntimePreflightError) as excinfo,
+    ):
+        await routes._state_data_from_composer_state(
+            state,
+            settings=object(),
+            secret_service=None,
+            user_id="user-1",
+            runtime_preflight=None,
+            preflight_exception_policy="raise",
+            initial_version=1,
+            telemetry_source="compose",
+        )
+
+    # The exception still propagates with the original cause attached, so
+    # downstream callers can extract partial_state and log __cause__.
+    assert isinstance(excinfo.value.original_exc, RuntimeError)
+
+    # Telemetry MUST have fired with the source the caller passed in
+    # ("compose"), NOT the recovery-handler's "runtime_preflight" label.
+    assert any(
+        attrs.get("source") == "compose"
+        and attrs.get("result") == "exception"
+        and attrs.get("exception_class") == "RuntimeError"
+        for _, attrs in emitted
+    ), (
+        "raise arm MUST emit composer.runtime_preflight.total{source=compose, "
+        f"result=exception, exception_class=RuntimeError}} before propagating; emitted={emitted}"
+    )
+
+
+def test_runtime_preflight_handler_save_failure_sets_partial_state_save_failed_flag(
+    tmp_path,
+) -> None:
+    """C1: When DB persistence of partial_state fails inside the recovery
+    handler, the 500 response MUST carry partial_state_save_failed=True and
+    partial_state_save_error=<class name>, matching the convergence/plugin-crash
+    contract so the frontend can distinguish "state captured" from
+    "state lost". The save failure MUST NOT mask the primary 500 response.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    partial = _make_authoring_valid_partial("save-fail-runtime-preflight")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        return_value=ComposerResult(
+            message="ok",
+            state=partial,
+            runtime_preflight=None,
+        ),
+    )
+
+    app, service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+
+    # Canary strings to verify the response body never echoes SQL/parameter
+    # internals (mirrors the convergence/plugin-crash redaction contract).
+    sql_canary = "__CANARY_SQL_INSERT_composition_states_runtime_preflight__"
+    params_canary = "__CANARY_PARAM_runtime_preflight_payload__"
+    cause_canary = "__CANARY_CAUSE_runtime_preflight_db_url__"
+
+    async def _raise_operational(*_args, **_kwargs):
+        raise OperationalError(
+            f"INSERT INTO composition_states (...) -- {sql_canary}",
+            {"source_options": params_canary},
+            Exception(f"connection closed: {cause_canary}"),
+        )
+
+    service.save_composition_state = _raise_operational  # type: ignore[method-assign]
+
+    client = TestClient(app, raise_server_exceptions=False)
+    resp = client.post("/api/sessions", json={"title": "Save fail"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    async def boom(state, *, settings, secret_service, user_id):
+        raise RuntimeError("preflight crashed before save")
+
+    with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom):
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+    assert response.status_code == 500
+    body_text = response.text
+    # Redaction parity: no SQL / parameter / __cause__ leakage in the body.
+    assert sql_canary not in body_text, "SQL statement leaked into HTTP response body"
+    assert params_canary not in body_text, "parameter tuple leaked into HTTP response body"
+    assert cause_canary not in body_text, "DBAPI __cause__ text leaked into HTTP response body"
+
+    detail = response.json()["detail"]
+    assert detail["error_type"] == "composer_plugin_error"
+    assert detail["partial_state_save_failed"] is True
+    assert detail.get("partial_state_save_error") == "OperationalError"
+
+
 def test_assistant_raw_content_is_persisted_but_not_returned(tmp_path) -> None:
     app, service = _make_app(tmp_path)
     client = TestClient(app)

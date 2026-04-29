@@ -961,46 +961,64 @@ allow_hits:
     policy as the convergence path). Original plugin crash still propagates via the
     outer `raise HTTPException(...) from crash.original_exc`.
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=0062c7e2826fe8eb
+- key: web/sessions/routes.py:R6:_handle_runtime_preflight_failure:fp=1ceae1538486fe8b
+  owner: web-sessions
+  reason: Runtime-preflight partial-state save may fail — catch covers the full SQLAlchemyError
+    family, structurally identical to the sibling _handle_plugin_crash and
+    _handle_convergence_error helpers. A narrow IntegrityError catch would let
+    OperationalError (lock timeout / pool disconnect), ProgrammingError (schema drift),
+    and siblings escape and mask the redacted 500 response that recovers from a
+    ComposerRuntimePreflightError. Narrowed per CLAUDE.md Tier-1 semantics —
+    _state_data_from_composer_state internally handles validate() data-shape errors;
+    TypeError/KeyError from to_dict() or CompositionStateData() is a broken internal
+    invariant and must propagate rather than be laundered into
+    partial_state_save_failed=True. On save failure, sets partial_state_save_failed=True
+    on the 500 response body for frontend recovery UX symmetry with the sibling helpers.
+  safety: Returns 500 with structured error; logs exc_class on the audit-system-failure
+    fallback path only (no traceback, same redaction policy as the sibling helpers).
+    Original runtime-preflight cause still propagates via the outer
+    `raise HTTPException(...) from rpf_exc.original_exc` at the call site.
+  expires: null
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=38a5764d5b48df88
   owner: web-sessions
   reason: isinstance check on deserialized composition state source — Tier 3 boundary.
   safety: Validates structure from persisted state
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=8926c6af59d362e9
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=6e0fdcfc80ad05f3
   owner: web-sessions
   reason: source_dict.get() on Tier 3 composition state — optional source options.
   safety: Returns None on miss, and the blob rewrite path is skipped
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=ef74670d9b4bb9d8
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=f8e45a07ba33279f
   owner: web-sessions
   reason: isinstance(options, dict) validates persisted source.options before mutating
     nested fields during fork blob rewrite
   safety: Non-dict raises AuditIntegrityError immediately; no silent skip or coercion
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=f25c5c9a2488f765
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=eddb7251a0087f29
   owner: web-sessions
   reason: options.get() on Tier 3 state source — blob_ref is optional.
   safety: Returns None on miss, handled by conditional below
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=6da605e87d94d6f7
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=476aadb41c8bbaa5
   owner: web-sessions
   reason: isinstance check on blob_ref — may be str or UUID from persisted state.
   safety: Tier 3 boundary — persisted blob_ref type is not guaranteed
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=b28da40473bf5a63
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=a39d71fc3d8832e0
   owner: web-sessions
   reason: blob_map.get() on copied blob UUID — not every source reference is guaranteed
     to have a copied blob target, so fork rewrite falls back to path/file matching
   safety: None result only triggers the secondary path/file rewrite probe; no fabricated
     blob mapping is introduced
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=9b4ec3145e9ac340
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=81671a748e227666
   owner: web-sessions
   reason: options.get(path_key) on persisted source options — path/file keys are optional
     and used only for fallback blob rewrite
   safety: None result skips that fallback key and continues scanning remaining candidates
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=d2aa0b20fd66c621
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=9bf9f2466fab3bd0
   owner: web-sessions
   reason: isinstance(path_value, str) guards source_blob_path_map lookup against non-string
     persisted path/file values
@@ -1008,7 +1026,7 @@ allow_hits:
     remain unchanged and can still fail later validation instead of being silently
     coerced
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=1f3a475241780719
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=0597e75422734fe8
   owner: web-sessions
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in
     the BlobQuotaExceededError path — DB/IO faults expected during cleanup; programmer
@@ -1017,7 +1035,7 @@ allow_hits:
     that propagates; orphan sessions.id flagged for manual cleanup; user-facing 413
     response remains intact even when cleanup fails
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=9f00fced26fcdf26
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=9ef39a691a003457
   owner: web-sessions
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in
     the generic except Exception path — DB/IO faults expected during cleanup; programmer
