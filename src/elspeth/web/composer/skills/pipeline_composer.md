@@ -54,6 +54,20 @@ Use individual tools (`patch_node_options`, `upsert_node`, `remove_node`, `set_o
 
 **Key rule:** If a partial pipeline exists with empty options or placeholder nodes, **treat it as incomplete scaffolding and rebuild atomically** with `set_pipeline`. Don't try to patch incomplete structures — replace them with a complete, runnable pipeline.
 
+### When to Revert vs Forward-Patch
+
+If the user asks to **undo** a previous change ("go back to the version before X", "revert", "undo my last edit"), **do not** patch forward to reconstruct an earlier shape. Forward-patching loses revert intent in the audit trail and risks reconstructing the wrong state.
+
+**You cannot revert directly — there is no composer tool for revert.** The revert path is `POST /api/sessions/{session_id}/state/revert` with body `{state_id: <UUID>}`. The LLM does not have access to either the state version list or the revert call.
+
+**What to do when the user asks to revert:**
+
+1. Tell the user that revert is a UI/operator action, not a composer tool action.
+2. Point them to the version history affordance in the UI (or the `/state/revert` endpoint with a target `state_id`).
+3. **Do not** attempt to reconstruct the earlier state via `set_pipeline` or `patch_*_options` calls — that produces a new forward version, not a revert, and the audit trail will not record it as one.
+
+Forward-patching is appropriate only when the user describes the *desired final shape* (whether or not it matches an earlier version) rather than asking to undo.
+
 ### Always Discover Before Configuring
 
 Never guess plugin names or option fields. Always call `get_plugin_schema` to get the exact JSON Schema before setting options.
@@ -88,6 +102,25 @@ Key rules:
 - **Forbidden:** `row.get('field', default)` — defaults fabricate data the source never provided
 - **Forbidden:** `int()`, `str()`, `float()`, `bool()` — not needed, source schema guarantees types
 - **Boolean routes** must use `"true"` / `"false"` as keys
+
+### Aggregation Trigger Contract
+
+`aggregation` and batch-aware transforms (`batch_stats`) accept an optional `trigger` block. The contract is asymmetric — read carefully before authoring:
+
+| Shape | Meaning | Example |
+|-------|---------|---------|
+| Omit `trigger` entirely, or `trigger: {}` | **End-of-source-only.** Buffer all rows, flush once when the source exhausts. This is the default; it is implicit. | `{plugin: batch_stats, options: {...}}` |
+| `trigger.count: N` | Flush every N rows (and once more at end-of-source). | `trigger: {count: 100}` |
+| `trigger.timeout_seconds: S` | Flush after S seconds of no new rows (and once more at end-of-source). | `trigger: {timeout_seconds: 30}` |
+| `trigger.condition: "<expr>"` | Boolean expression over `row['batch_count']` and `row['batch_age_seconds']`. **Nothing else is in scope.** | `trigger: {condition: "row['batch_count'] >= 50"}` |
+
+**Forbidden / will be rejected pre-runtime:**
+
+- `trigger.condition: "end_of_source"` — `end_of_source` is not an expression keyword. The runtime `condition` slot is a boolean expression evaluated per row, not a trigger-type discriminator. The composer rejects this before settings load.
+- `trigger.type: "end_of_source"` — there is no `type` field. End-of-source is implicit; do not synthesize a discriminator.
+- `trigger: {}` with extra keys — any extra key is a schema violation.
+
+**Rule of thumb:** if the user's intent is "process rows in one batch when the input ends," **omit the `trigger` block entirely**. Do not invent a placeholder trigger to "be explicit" — it will be wrong.
 
 ### Validation
 
@@ -548,6 +581,23 @@ set_source_from_blob({
 
 Without the required options, validation will fail with a `PluginConfigError`. The `options` parameter merges with blob-derived options (path is set automatically from the blob).
 
+### Blob source path redaction
+
+When a source has a `blob_ref`, the runtime owns the actual storage path and the composer never sees it. `get_pipeline_state` and the LLM-facing source view show the literal sentinel string:
+
+```
+options.path: "<redacted-blob-source-path>"
+```
+
+**This is normal and intentional.** The `path` key is preserved (with the sentinel value) so consumers can tell "blob-backed source with redacted path" from "broken source with no path." The persisted YAML has the real path; only the LLM-visible projection is redacted.
+
+**Do not:**
+- Try to "repair" the sentinel by patching `path` to a guessed value.
+- Remove `path` from a blob-backed source — `path` is required when `blob_ref` is present, and the runtime restores it from the blob record.
+- Treat the sentinel as a validation error.
+
+If a blob-backed source genuinely fails validation, the cause is somewhere other than the sentinel — check `blob_ref` resolves, the schema is set, and any plugin-required options (e.g., `column` for `text`) are present.
+
 ### Schema modes
 
 See "Schema Configuration" above for full mode reference, field format, and the schema-vs-output distinction.
@@ -726,6 +776,22 @@ When users describe output in business language, map to the appropriate sink. **
 ---
 
 ## Secret and Provider Mapping
+
+### Secret Reference Wiring Contract
+
+There are **two ways a secret value can appear in YAML**, and only one of them is a wired secret reference:
+
+| Form | What it is | Audit/resolver behaviour |
+|------|------------|-------------------------|
+| `{secret_ref: "OPENROUTER_API_KEY"}` (mapping marker) | A **wired secret reference**, produced only by the `wire_secret_ref` tool. | Resolved at execution time via `WebSecretResolver` with full audit/fingerprint trail. |
+| `"${OPENROUTER_API_KEY}"` (literal string) | A **raw env interpolation**. Not a wired reference. | Expanded directly from `os.environ` at settings load. Bypasses the secret resolver and the API/composer secret-availability contract. |
+
+**Rules:**
+
+1. **Always use the `wire_secret_ref` tool** to attach a secret to a plugin option. Never emit a literal `${VAR}` string and call it wired.
+2. **Discovery order:** call `list_secret_refs` first to see what's actually configured, then `validate_secret_ref` for the chosen name, then `wire_secret_ref` to attach it. The composer's secret-availability view and the runtime resolver agree only when the marker form is used.
+3. If you see a `${VAR}` literal in existing YAML, treat it as an unmigrated artifact: replace it via `wire_secret_ref` rather than carrying it forward.
+4. The `validate_secret_ref` tool answers "is this name resolvable in the current environment?" — if it says unavailable, the marker form will fail at execution, and the `${VAR}` form will silently pick up `os.environ` and produce an audit gap. Either way, surface the unavailability to the user; do not pick the bypass path.
 
 ### LLM Providers
 
