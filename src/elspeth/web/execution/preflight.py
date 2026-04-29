@@ -12,6 +12,8 @@ import yaml
 
 from elspeth.cli_helpers import PluginBundle, instantiate_plugins_from_config
 from elspeth.core.dag.graph import ExecutionGraph
+from elspeth.web.execution.protocol import ValidationSettings
+from elspeth.web.paths import resolve_data_path
 
 RUNTIME_CHECK_PLUGIN_INSTANTIATION = "plugin_instantiation"
 RUNTIME_CHECK_GRAPH_STRUCTURE = "graph_structure"
@@ -42,9 +44,14 @@ class RuntimeGraphBundle:
 
 
 def resolve_runtime_yaml_paths(pipeline_yaml: str, data_dir: str) -> str:
-    """Rewrite relative source/sink paths in pipeline YAML to absolute paths."""
-    from elspeth.web.paths import resolve_data_path
+    """Rewrite relative source/sink paths in pipeline YAML to absolute paths.
 
+    Plugins call PathConfig.resolved_path() with no base_dir, so relative
+    paths resolve against CWD. The validation path-allowlist check approves
+    paths relative to data_dir. This function closes that gap by making
+    every source/sink path absolute before the YAML reaches the plugin
+    layer, so what is allowlisted is what is actually loaded.
+    """
     if not isinstance(pipeline_yaml, str):
         raise TypeError(f"YamlGenerator.generate_yaml() must return str; got {type(pipeline_yaml).__name__}")
 
@@ -83,7 +90,7 @@ def resolve_runtime_yaml_paths(pipeline_yaml: str, data_dir: str) -> str:
     return yaml.dump(config, default_flow_style=False)
 
 
-def runtime_preflight_settings_hash(settings: Any) -> str:
+def runtime_preflight_settings_hash(settings: ValidationSettings) -> str:
     """Return a non-secret hash of settings that affect runtime preflight.
 
     Current ValidationSettings exposes only data_dir. If new settings affect

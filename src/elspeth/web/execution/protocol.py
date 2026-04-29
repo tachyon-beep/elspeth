@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from pathlib import Path
+from typing import Protocol, runtime_checkable
 from uuid import UUID
 
 from elspeth.web.auth.models import UserIdentity
@@ -11,10 +12,14 @@ from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
 
 
 class ValidationSettings(Protocol):
-    """Settings needed by direct runtime preflight validation."""
+    """Settings needed by direct runtime preflight validation.
+
+    Structurally satisfied by WebSettings (data_dir is a Path) and any test
+    stub that exposes a Path-typed data_dir attribute.
+    """
 
     @property
-    def data_dir(self) -> Any: ...
+    def data_dir(self) -> Path: ...
 
 
 class StateAccessError(Exception):

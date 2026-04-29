@@ -954,57 +954,57 @@ allow_hits:
   reason: Security boundary — isinstance check allowlists exception types safe to expose to clients
   safety: All others reduced to generic message; no sensitive info leaked
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=87ab9d634cc25350
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=7f72acae2e41bb1d
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (source must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=81ae92d12102189b
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=5e0c3dc17498063e
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (source.options must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
-- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=09cfffb64b197c4a
+- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=d0e7e2507b117f2d
   owner: web-execution
   reason: YAML navigation — source.options keys (path/file) may be absent
   safety: Absent keys skipped; no fabrication
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=f79a797a530aff96
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=27b0eea4a848386d
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (sinks must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
-- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=2a6a568344726642
+- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=5f1f81fee41e3e1a
   owner: web-execution
   reason: YAML navigation — sink options keys (path/file) may be absent
   safety: Absent keys skipped; no fabrication
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=a72149375b7bc2ca
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=126f6792a20126fc
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (sink config must be dict)
   safety: Raises TypeError with diagnostic message naming the sink
   expires: null
-- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=052fcae7f9601149
+- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=c876a96667c425f7
   owner: web-execution
   reason: YAML navigation — sink options keys (path/file) may be absent
   safety: Absent keys skipped; no fabrication
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=e7c8d724c4b32961
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=94ce4eef74759672
   owner: web-execution
   reason: Offensive programming — isinstance assertion on YAML generator output (sink options must be dict)
   safety: Raises TypeError with diagnostic message naming the sink
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=56d8521786707687
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=a04e52dbfb1f9b7f
   owner: web-execution
   reason: Tier 3 — isinstance check on YAML top-level after safe_load (may be non-dict)
   safety: Raises TypeError with diagnostic; no silent default
   expires: null
-- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=6ffaf9ef28c7163f
+- key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=42996be95a89dd56
   owner: web-execution
   reason: YAML navigation — source key may be absent in generated YAML
   safety: Returns None; source path rewriting skipped
   expires: null
-- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=e5ab096f37d291ed
+- key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=0f19a6c6477e904b
   owner: web-execution
   reason: Tier 3 — isinstance check on pipeline_yaml argument type
   safety: Raises TypeError with diagnostic; no silent default
