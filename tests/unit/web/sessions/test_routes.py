@@ -3975,9 +3975,7 @@ def test_runtime_preflight_handler_records_exception_telemetry(tmp_path, monkeyp
     primary_emissions = [
         attrs
         for _, attrs in emitted
-        if attrs.get("source") == "compose"
-        and attrs.get("result") == "exception"
-        and attrs.get("exception_class") == "RuntimeError"
+        if attrs.get("source") == "compose" and attrs.get("result") == "exception" and attrs.get("exception_class") == "RuntimeError"
     ]
     recovery_emissions = [
         attrs
@@ -4046,9 +4044,7 @@ async def test_state_data_raise_arm_emits_telemetry_before_propagating() -> None
     # Telemetry MUST have fired with the source the caller passed in
     # ("compose"), NOT the recovery-handler's "runtime_preflight" label.
     assert any(
-        attrs.get("source") == "compose"
-        and attrs.get("result") == "exception"
-        and attrs.get("exception_class") == "RuntimeError"
+        attrs.get("source") == "compose" and attrs.get("result") == "exception" and attrs.get("exception_class") == "RuntimeError"
         for _, attrs in emitted
     ), (
         "raise arm MUST emit composer.runtime_preflight.total{source=compose, "
