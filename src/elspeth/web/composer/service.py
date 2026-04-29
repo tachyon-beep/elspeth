@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import Any, NoReturn, cast
 
 import structlog
+from opentelemetry import metrics
 from sqlalchemy import Engine, update
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -66,6 +67,26 @@ _ARRAY_ITEM_SEGMENT = "[]"
 _LLM_API_MAX_ATTEMPTS = 3
 _LLM_API_RETRY_BASE_DELAY_SECONDS = 1.0
 type RequiredPath = tuple[str, ...]
+
+# Bounded set of exception class names emitted as `exception_class` attribute on
+# the runtime-preflight counter. Anything not in this set is bucketed as "other"
+# to prevent unbounded cardinality from plugin class names leaking into metric labels.
+_KNOWN_PREFLIGHT_EXCEPTION_CLASSES: frozenset[str] = frozenset(
+    {
+        "TimeoutError",
+        "PluginNotFoundError",
+        "PluginConfigError",
+        "GraphValidationError",
+        "ValidationError",  # pydantic.ValidationError
+    }
+)
+
+# Module-level OTel counter for runtime preflight outcomes.
+# Attributes: outcome (success | failure), exception_class (bounded closed-list | other)
+_RUNTIME_PREFLIGHT_COUNTER = metrics.get_meter(__name__).create_counter(
+    "composer.runtime_preflight.total",
+    description="Total runtime-equivalent preflight invocations in the composer service",
+)
 
 
 async def _litellm_acompletion(**kwargs: Any) -> Any:
@@ -296,11 +317,18 @@ class ComposerServiceImpl:
         entry = await self._runtime_preflight_coordinator.run(key, worker)
         cache[key] = entry
         if isinstance(entry, RuntimePreflightFailure):
+            exc_name = type(entry.original_exc).__name__
+            exc_class = exc_name if exc_name in _KNOWN_PREFLIGHT_EXCEPTION_CLASSES else "other"
+            _RUNTIME_PREFLIGHT_COUNTER.add(
+                1,
+                {"outcome": "failure", "exception_class": exc_class},
+            )
             self._raise_cached_runtime_preflight_failure(
                 entry,
                 state=state,
                 initial_version=initial_version,
             )
+        _RUNTIME_PREFLIGHT_COUNTER.add(1, {"outcome": "success", "exception_class": ""})
         return entry
 
     async def explain_run_diagnostics(self, snapshot: Mapping[str, object]) -> str:

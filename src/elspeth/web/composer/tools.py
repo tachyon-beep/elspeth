@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 from uuid import uuid4
 
+from opentelemetry import metrics
 from pydantic import ValidationError as PydanticValidationError
 from sqlalchemy import Engine, delete, func, select, update
 
@@ -47,6 +48,13 @@ from elspeth.web.composer.state import (
 from elspeth.web.execution.schemas import ValidationResult
 from elspeth.web.paths import allowed_sink_directories, allowed_source_directories, resolve_data_path
 from elspeth.web.sessions.models import blob_run_links_table, blobs_table, composition_states_table, runs_table
+
+# Module-level OTel counter for authoring validation outcomes in preview_pipeline.
+# Attributes: outcome (valid | invalid)
+_AUTHORING_VALIDATION_COUNTER = metrics.get_meter(__name__).create_counter(
+    "composer.authoring_validation.total",
+    description="Total authoring (Stage 1) validation outcomes from preview_pipeline",
+)
 
 
 class _SemanticEdgeContractPayload(TypedDict):
@@ -3566,6 +3574,10 @@ def _execute_preview_pipeline(
     returning sample rows) is a future enhancement.
     """
     validation = state.validate()
+    _AUTHORING_VALIDATION_COUNTER.add(
+        1,
+        {"outcome": "valid" if validation.is_valid else "invalid"},
+    )
     authoring_payload = _authoring_validation_payload(validation)
     runtime_result = runtime_preflight(state) if runtime_preflight is not None else None
 

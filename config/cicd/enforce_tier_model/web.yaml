@@ -433,19 +433,19 @@ allow_hits:
   safety: The pipeline remains invalid; no trigger config is fabricated and unexpected
     exception types propagate
   expires: null
-- key: web/composer/tools.py:R6:_execute_list_models:fp=f296965af7a28e73
+- key: web/composer/tools.py:R6:_execute_list_models:fp=57d6d75b420e0998
   owner: web-composer
   reason: list_models gracefully handles missing litellm — returns empty model list
   safety: ImportError/AttributeError returns empty list; no data fabrication
   expires: null
-- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=713a9c25b6196148
+- key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=719a709512ce8cc8
   owner: web-composer
   reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets
     engine validation catch it later
   safety: Returns None (no pre-validation result); plugin name still validated during
     full pipeline instantiation
   expires: null
-- key: web/composer/tools.py:R6:_execute_update_blob:fp=a2210b4cf6260bbf
+- key: web/composer/tools.py:R6:_execute_update_blob:fp=e8ae25de04aa8f72
   owner: web-composer
   reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk
     faults during post-replace divergence rollback expected; programmer bugs still
@@ -455,7 +455,7 @@ allow_hits:
     failures bypass the rollback branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback
     and test_quota_breach_returns_failure_without_touching_storage).
   expires: null
-- key: web/composer/tools.py:R6:_execute_delete_blob:fp=e8e153ddca69849c
+- key: web/composer/tools.py:R6:_execute_delete_blob:fp=23d5ccb1ef62eb54
   owner: web-composer
   reason: Narrow OSError around tombstone restore after a failed blob delete — compensation
     disk faults must not bury the primary DB exception
@@ -869,7 +869,7 @@ allow_hits:
     periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=dc920ae6b53c2f59
+- key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=a4d969dbc487ee19
   owner: bugfix
   reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays,
     nulls, or scalars; the composer must reject non-object arguments before cache
@@ -877,27 +877,27 @@ allow_hits:
   safety: Emits a tool error back to the LLM, does not call execute_tool, marks mutation
     intent for budget accounting, and preserves current state
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=d71228907c8b48fd
+- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=307551cc0c6eebf3
   owner: web-composer
   reason: isinstance(cached, ValidationResult) narrows the union RuntimePreflightEntry
     = ValidationResult | RuntimePreflightFailure — not defensive access, structural
     type dispatch on a typed sum type
   safety: Union covers all cases; no third value possible; isinstance correct
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=9c682ce1d5eade50
+- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=2c49a9e927389fe8
   owner: web-composer
   reason: isinstance(cached, RuntimePreflightFailure) narrows RuntimePreflightEntry
     union for the failure re-raise path
   safety: Paired with ValidationResult check above; exhaustive union dispatch
   expires: null
-- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=2b18054436f6381e
+- key: web/composer/service.py:R5:ComposerServiceImpl:_cached_runtime_preflight:fp=aedec40406a76bc5
   owner: web-composer
   reason: isinstance(entry, RuntimePreflightFailure) narrows freshly-resolved coordinator
     entry for failure re-raise; mirrors cached check above
   safety: entry is RuntimePreflightEntry (ValidationResult | RuntimePreflightFailure);
     all cases handled
   expires: null
-- key: web/composer/service.py:R1:ComposerServiceImpl:_cached_runtime_preflight:fp=6592c1e47316db38
+- key: web/composer/service.py:R1:ComposerServiceImpl:_cached_runtime_preflight:fp=e5575f1c9f2cfea3
   owner: web-composer
   reason: cache.get(key) checks per-compose runtime preflight cache for an existing
     result before running the coordinator; key is RuntimePreflightKey, not external
