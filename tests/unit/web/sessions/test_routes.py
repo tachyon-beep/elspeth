@@ -2554,6 +2554,68 @@ class TestYamlEndpoint:
         )
 
     @pytest.mark.asyncio
+    async def test_get_state_yaml_propagates_programmer_bugs_uncaught(self, tmp_path, monkeypatch) -> None:
+        """I4a lock-in: the YAML-export catch is narrowed to user-fixable
+        exception classes (TimeoutError, OSError, PluginConfigError,
+        PluginNotFoundError, GraphValidationError). Programmer-bug classes
+        (AttributeError, TypeError, KeyError, RuntimeError, ImportError)
+        MUST propagate uncaught so:
+
+        * Operators see the real traceback via FastAPI's default 500
+          handler, not "Runtime preflight could not complete; YAML export
+          aborted." which falsely implies a user-fixable failure.
+        * No yaml_export telemetry is emitted for programmer bugs — the
+          exception counter is reserved for the user-fixable bucket so
+          dashboards measure the real preflight failure rate, not bugs
+          we introduced ourselves.
+
+        Per CLAUDE.md offensive-programming policy: programmer bugs MUST
+        crash. Conflating them with user-fixable failures destroys the
+        operator's ability to diagnose.
+        """
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        # raise_server_exceptions=False so Starlette returns the 500 body
+        # rather than re-raising the AttributeError into the test runner.
+        client = TestClient(app, raise_server_exceptions=False)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        async def programmer_bug(state, *, settings, secret_service, user_id):
+            # A real bug we'd see if e.g. a refactor accidentally broke
+            # an attribute lookup inside validate_pipeline. AttributeError
+            # is in the canonical "programmer bug" set per CLAUDE.md
+            # offensive-programming policy.
+            raise AttributeError("'NoneType' object has no attribute 'plugin'")
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=programmer_bug):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        # FastAPI's default 500 handler emits the bare 'Internal Server
+        # Error' string body when an unhandled exception escapes a route.
+        assert resp.status_code == 500
+        assert "Runtime preflight could not complete" not in resp.text, (
+            f"Programmer bug must not be relabeled as a user-fixable preflight failure; body was: {resp.text!r}"
+        )
+        # No yaml_export telemetry should fire — the exception bucket is
+        # reserved for user-fixable preflight outcomes.
+        assert not any(attrs.get("source") == "yaml_export" and attrs.get("result") == "exception" for _, attrs in emitted), (
+            "yaml_export exception telemetry fired for a programmer bug — "
+            "the catch should not have intercepted AttributeError. "
+            f"emitted={emitted}"
+        )
+
+    @pytest.mark.asyncio
     async def test_get_state_yaml_preserves_secret_ref_markers_in_output(self, tmp_path) -> None:
         app, service = _make_app(tmp_path)
         client = TestClient(app)

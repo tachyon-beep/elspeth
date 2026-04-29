@@ -20,6 +20,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from elspeth.contracts.errors import AuditIntegrityError
 from elspeth.contracts.freeze import deep_thaw
 from elspeth.contracts.secret_scrub import scrub_text_for_audit
+from elspeth.core.dag.models import GraphValidationError
+from elspeth.plugins.infrastructure.config_base import PluginConfigError
+from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
@@ -1871,12 +1874,38 @@ def create_session_router() -> APIRouter:
                 secret_service=request.app.state.scoped_secret_resolver,
                 user_id=str(user.user_id),
             )
-        except Exception as exc:
-            # Preflight raised before producing a ValidationResult — timeout,
-            # plugin instantiation crash, etc. Mirror the exception path the
-            # other preflight call sites use: emit "exception" telemetry with
-            # a bounded class-name attribute, then surface a 409 to the
-            # operator without leaking the raw exception text.
+        except (
+            TimeoutError,
+            OSError,
+            PluginConfigError,
+            PluginNotFoundError,
+            GraphValidationError,
+        ) as exc:
+            # Narrowed per CLAUDE.md offensive-programming policy. This
+            # tuple covers the user-fixable preflight failure modes:
+            #
+            # * TimeoutError — asyncio.wait_for exceeded
+            #   composer_runtime_preflight_timeout_seconds. Operator
+            #   action: increase timeout or fix the slow plugin.
+            # * OSError — filesystem error during plugin instantiation
+            #   (file not found, permission denied, broken pipe, etc.).
+            #   Operator action: fix the file/permissions.
+            # * PluginConfigError / PluginNotFoundError — the user's
+            #   pipeline references a misconfigured or missing plugin.
+            #   Operator action: fix the pipeline config.
+            # * GraphValidationError — the pipeline graph is structurally
+            #   invalid (validate_pipeline normally absorbs this, but
+            #   it's listed here for defense-in-depth in case a future
+            #   refactor lets it escape).
+            #
+            # Programmer-bug classes (AttributeError, TypeError,
+            # KeyError, RuntimeError, ImportError, etc.) are deliberately
+            # NOT caught — they propagate to FastAPI's default 500
+            # handler so operators see real tracebacks rather than the
+            # misleading "fix your pipeline" 409 message. The
+            # exception-counter is reserved for the user-fixable bucket
+            # so dashboards measure real preflight failure rate, not
+            # bugs we introduced ourselves.
             _record_composer_runtime_preflight_telemetry(
                 "exception",
                 source="yaml_export",
