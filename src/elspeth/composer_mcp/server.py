@@ -494,7 +494,7 @@ def create_server(
     def current_session_scope() -> str:
         if session_scope_provider is not None:
             return session_scope_provider()
-        session_id = session_id_ref[0] or "unsaved"
+        session_id = session_id_ref[0] if session_id_ref[0] is not None else "unsaved"
         return f"composer-mcp:{scratch_dir.resolve()}:{session_id}"
 
     # Mutable state container — list-of-one pattern allows the
@@ -575,10 +575,16 @@ def create_server(
         if "state" in result:
             new_state = CompositionState.from_dict(result["state"])
             state_ref[0] = new_state
-            # Capture baseline when session is created or loaded
+            # Capture baseline when session is created or loaded.
+            # load_session can return success=False on SessionNotFoundError;
+            # in that case, leave session_id_ref unchanged so the scratch
+            # session scope ("unsaved") is used. The success path is contractual
+            # — the tool returns {"data": {"session_id": ...}} on success,
+            # so direct access is correct.
             if name in ("new_session", "load_session"):
                 baseline_ref[0] = new_state
-                session_id_ref[0] = result.get("data", {}).get("session_id")
+                if result["success"]:
+                    session_id_ref[0] = result["data"]["session_id"]
             # B4: Redact storage paths from the response sent to the agent.
             result["state"] = redact_source_storage_path(result["state"])
 

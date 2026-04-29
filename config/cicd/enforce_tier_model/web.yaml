@@ -1401,20 +1401,21 @@ allow_hits:
     None on miss, which triggers task creation below.
   safety: None check is explicit; no silent bypass
   expires: null
-- key: web/execution/runtime_preflight.py:R1:RuntimePreflightCoordinator:run:fp=b29ed7239ee25689
+- key: web/execution/runtime_preflight.py:R1:RuntimePreflightCoordinator:run:_evict:fp=3fdb1527637df68a
   owner: web-execution
-  reason: _inflight.get(key) checks whether a completed task still references this key
-    before removing it — guards against a concurrent removal between the done() check
-    and the lock re-acquisition; key is an internal typed value
-  safety: Identity check (is task); incorrect match is impossible; no external data
+  reason: _inflight.get(key) inside the done callback checks whether the entry still
+    references the just-finished task before evicting it; key is an internal typed
+    value. The identity guard protects against popping a replacement task created by
+    a later run() call after the original was evicted by cancellation.
+  safety: Identity check (is finished); incorrect match is impossible; no external data
   expires: null
-- key: web/execution/runtime_preflight.py:R9:RuntimePreflightCoordinator:run:fp=37e057e83714c3f9
+- key: web/execution/runtime_preflight.py:R9:RuntimePreflightCoordinator:run:_evict:fp=a4269762ca0780b3
   owner: web-execution
-  reason: _inflight.pop(key, None) removes a completed task from the in-flight dict;
-    the None default handles concurrent removal between the identity check and the
-    pop — this is a concurrency-safe cleanup pattern, not defensive programming
-  safety: Only fires when task.done(); pop is idempotent; None default prevents KeyError
-    on concurrent cleanup
+  reason: _inflight.pop(key, None) inside the done callback evicts the just-finished
+    task from the in-flight dict. None default tolerates the case where the entry
+    was already popped by a concurrent eviction or by an awaiter's earlier cleanup.
+  safety: Only fires from add_done_callback after task completion; pop is idempotent;
+    identity guard above ensures we don't pop a replacement task
   expires: null
 - key: web/execution/runtime_preflight.py:R4:RuntimePreflightCoordinator:_capture:fp=cbdc5bec7bc401ee
   owner: web-execution

@@ -49,13 +49,20 @@ class RuntimePreflightCoordinator:
                 task = asyncio.create_task(self._capture(worker))
                 self._inflight[key] = task
 
-        try:
-            return await asyncio.shield(task)
-        finally:
-            if task.done():
-                async with self._lock:
-                    if self._inflight.get(key) is task:
+                # Drop the in-flight entry as soon as the task finishes, even
+                # if all awaiters have been cancelled. Without this callback,
+                # a mid-flight cancellation followed by no future caller (the
+                # common case, because state_version rotates on every state
+                # mutation) would leak the entry for the life of the process.
+                # dict.pop() is GIL-safe and the identity guard prevents
+                # popping a replacement task scheduled by a later run().
+                def _evict(finished: asyncio.Task[RuntimePreflightEntry]) -> None:
+                    if self._inflight.get(key) is finished:
                         self._inflight.pop(key, None)
+
+                task.add_done_callback(_evict)
+
+        return await asyncio.shield(task)
 
     async def _capture(self, worker: RuntimePreflightWorker) -> RuntimePreflightEntry:
         try:
