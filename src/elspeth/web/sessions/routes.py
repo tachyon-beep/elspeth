@@ -507,6 +507,7 @@ async def _handle_convergence_error(
     exc: ComposerConvergenceError,
     service: SessionServiceProtocol,
     session_id: UUID,
+    user_id: str,
     log_prefix: str,
     settings: Any,
     secret_service: Any | None,
@@ -516,16 +517,32 @@ async def _handle_convergence_error(
     Shared by send_message and recompose — only the structlog event prefix
     differs between callers.
 
+    Symmetric with :func:`_handle_plugin_crash` and
+    :func:`_handle_runtime_preflight_failure` — the same recovery shape
+    (``preflight_exception_policy="persist_invalid"``, partial-state
+    persistence, SQLAlchemyError fail-soft) and the same signature
+    placement of ``user_id`` between ``session_id`` and ``log_prefix``.
+
     Args:
-        exc: The convergence error with optional partial_state
-        service: Session service for DB persistence
-        session_id: Session to persist partial state to
-        log_prefix: Prefix for structlog event names (e.g. "convergence" or "recompose_convergence")
-        settings: App settings (forwarded to _state_data_from_composer_state)
-        secret_service: Scoped secret resolver (forwarded to runtime preflight)
+        exc: The convergence error with optional partial_state.
+        service: Session service for DB persistence.
+        session_id: Session to persist partial state to.
+        user_id: Authenticated user id. Forwarded to
+            :func:`_state_data_from_composer_state` so the partial-state
+            runtime preflight can resolve user-scoped secret refs.
+            Without this, validation.py:248 skips the secret-ref
+            resolution block, unresolved ``{secret_ref: ...}`` dicts
+            flow into plugin instantiation, and typical plugin code
+            (``config["api_key"].lower()`` etc.) raises AttributeError —
+            a programmer-bug class that escapes ``validate_pipeline``'s
+            typed catches and reduces the persisted audit row to the
+            uninformative ``["runtime_preflight_failed"]`` sentinel.
+        log_prefix: Prefix for structlog event names (e.g. "convergence" or "recompose_convergence").
+        settings: App settings (forwarded to _state_data_from_composer_state).
+        secret_service: Scoped secret resolver (forwarded to runtime preflight).
 
     Returns:
-        Response body dict for HTTPException(status_code=422)
+        Response body dict for HTTPException(status_code=422).
     """
     response_body: dict[str, object] = {
         "error_type": "convergence",
@@ -549,7 +566,7 @@ async def _handle_convergence_error(
                 exc.partial_state,
                 settings=settings,
                 secret_service=secret_service,
-                user_id=None,  # convergence handler has no user_id — pass None for runtime preflight
+                user_id=user_id,
                 runtime_preflight=None,
                 preflight_exception_policy="persist_invalid",
                 initial_version=None,
@@ -1087,6 +1104,7 @@ def create_session_router() -> APIRouter:
                     exc,
                     service,
                     session.id,
+                    str(user.user_id),
                     "convergence",
                     settings=settings,
                     secret_service=request.app.state.scoped_secret_resolver,
@@ -1475,6 +1493,7 @@ def create_session_router() -> APIRouter:
                     exc,
                     service,
                     session.id,
+                    str(user.user_id),
                     "recompose_convergence",
                     settings=settings,
                     secret_service=request.app.state.scoped_secret_resolver,

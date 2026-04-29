@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -2056,6 +2057,159 @@ class TestRecomposeConvergencePartialState:
         assert detail["partial_state_save_failed"] is True
         # The diagnostic field carries ONLY the exception class name.
         assert detail.get("partial_state_save_error") == "OperationalError"
+
+    def test_send_message_convergence_threads_user_id_to_preflight(self, tmp_path) -> None:
+        """I3 regression: _handle_convergence_error MUST pass the authenticated
+        user_id to _state_data_from_composer_state so the runtime preflight
+        on the partial state can resolve user-scoped secret_refs.
+
+        Failure mode (pre-fix): user_id=None means
+        web/execution/validation.py:248 skips the secret-ref validation/
+        resolution block entirely. Unresolved {secret_ref: ...} dicts
+        flow into plugin instantiation, where typical plugin code like
+        ``config["api_key"].lower()`` raises AttributeError. That
+        AttributeError is not in validate_pipeline's typed catches, so
+        it escapes _state_data_from_composer_state's persist_invalid
+        guard, gets wrapped as _RuntimePreflightFailed("AttributeError"),
+        and the persisted audit row carries the bare
+        ``["runtime_preflight_failed"]`` sentinel — true but
+        uninformative for the operator triaging the failure.
+
+        Fix verifies the structural change: _state_data_from_composer_state
+        is called with user_id="alice" (the authenticated user) instead
+        of user_id=None.
+        """
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="convergence-with-secrets"),
+            version=2,
+        )
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=5,
+                budget_exhausted="composition",
+                partial_state=partial,
+            ),
+        )
+
+        app, _service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Capture the user_id forwarded into _state_data_from_composer_state.
+        # The convergence handler is the only caller routed through this
+        # patch on the convergence path, so any captured invocation comes
+        # from _handle_convergence_error.
+        captured_user_ids: list[Any] = []
+
+        original_fn = None
+
+        async def capture_user_id(state, **kwargs):
+            captured_user_ids.append(kwargs.get("user_id"))
+            assert original_fn is not None
+            return await original_fn(state, **kwargs)
+
+        from elspeth.web.sessions import routes as routes_module
+
+        original_fn = routes_module._state_data_from_composer_state
+        with patch(
+            "elspeth.web.sessions.routes._state_data_from_composer_state",
+            side_effect=capture_user_id,
+        ):
+            resp = client.post("/api/sessions", json={"title": "Convergence + secrets"})
+            session_id = resp.json()["id"]
+            convergence_resp = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": "Build a pipeline with secrets"},
+            )
+
+        assert convergence_resp.status_code == 422
+        assert convergence_resp.json()["detail"]["error_type"] == "convergence"
+        # The convergence handler MUST have invoked _state_data_from_composer_state
+        # with the authenticated user_id, not None. Without this, validation.py:248
+        # skips secret-ref resolution and downstream plugin code crashes on
+        # unresolved {secret_ref: ...} dicts.
+        assert captured_user_ids == ["alice"], (
+            "_handle_convergence_error must thread the authenticated user_id "
+            "to _state_data_from_composer_state so runtime preflight can "
+            f"resolve user-scoped secrets. captured_user_ids={captured_user_ids}"
+        )
+
+    def test_recompose_convergence_threads_user_id_to_preflight(self, tmp_path) -> None:
+        """Recompose mirror of test_send_message_convergence_threads_user_id_to_preflight.
+
+        The convergence handler is shared by both endpoints, so the I3
+        wiring change must take effect on both. Asserting the recompose
+        path independently catches a regression that would re-introduce
+        user_id=None on one of the two call sites only.
+        """
+        import asyncio
+
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        partial = CompositionState(
+            source=None,
+            nodes=(),
+            edges=(),
+            outputs=(),
+            metadata=PipelineMetadata(name="recompose-convergence-with-secrets"),
+            version=2,
+        )
+
+        mock_composer = AsyncMock()
+        mock_composer.compose = AsyncMock(
+            side_effect=ComposerConvergenceError(
+                max_turns=5,
+                budget_exhausted="composition",
+                partial_state=partial,
+            ),
+        )
+
+        app, service = _make_app(tmp_path)
+        app.state.composer_service = mock_composer
+        client = TestClient(app, raise_server_exceptions=False)
+
+        resp = client.post("/api/sessions", json={"title": "Recompose convergence + secrets"})
+        session_id = uuid.UUID(resp.json()["id"])
+
+        # Recompose precondition: last persisted message must be a user turn.
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(service.add_message(session_id, "user", "Build a CSV pipeline"))
+        finally:
+            loop.close()
+
+        captured_user_ids: list[Any] = []
+        original_fn = None
+
+        async def capture_user_id(state, **kwargs):
+            captured_user_ids.append(kwargs.get("user_id"))
+            assert original_fn is not None
+            return await original_fn(state, **kwargs)
+
+        from elspeth.web.sessions import routes as routes_module
+
+        original_fn = routes_module._state_data_from_composer_state
+        with patch(
+            "elspeth.web.sessions.routes._state_data_from_composer_state",
+            side_effect=capture_user_id,
+        ):
+            convergence_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+        assert convergence_resp.status_code == 422
+        assert convergence_resp.json()["detail"]["error_type"] == "convergence"
+        assert captured_user_ids == ["alice"], (
+            "_handle_convergence_error from the recompose path must thread "
+            "the authenticated user_id to _state_data_from_composer_state. "
+            f"captured_user_ids={captured_user_ids}"
+        )
 
 
 class TestStateRoutes:
