@@ -328,7 +328,7 @@ class ComposerServiceImpl:
                 state=state,
                 initial_version=initial_version,
             )
-        _RUNTIME_PREFLIGHT_COUNTER.add(1, {"outcome": "success", "exception_class": ""})
+        _RUNTIME_PREFLIGHT_COUNTER.add(1, {"outcome": "success"})
         return entry
 
     async def explain_run_diagnostics(self, snapshot: Mapping[str, object]) -> str:
