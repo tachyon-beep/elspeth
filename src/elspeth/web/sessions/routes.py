@@ -7,11 +7,14 @@ Session-scoped endpoints verify ownership before any business logic.
 from __future__ import annotations
 
 import asyncio
-from typing import cast
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from opentelemetry import metrics
 from sqlalchemy.exc import SQLAlchemyError
 
 from elspeth.contracts.errors import AuditIntegrityError
@@ -21,6 +24,7 @@ from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.auth.middleware import get_current_user
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.blobs.protocol import BlobQuotaExceededError, BlobServiceProtocol
+from elspeth.web.composer import yaml_generator
 from elspeth.web.composer.progress import (
     ComposerProgressEvent,
     ComposerProgressRegistry,
@@ -30,12 +34,15 @@ from elspeth.web.composer.progress import (
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
+    ComposerRuntimePreflightError,
     ComposerService,
     ComposerServiceError,
 )
 from elspeth.web.composer.redaction import redact_source_storage_path
 from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationEntry, ValidationSummary
 from elspeth.web.composer.yaml_generator import generate_yaml
+from elspeth.web.execution.schemas import ValidationResult
+from elspeth.web.execution.validation import validate_pipeline
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter, get_rate_limiter
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
 from elspeth.web.sessions.protocol import (
@@ -238,6 +245,235 @@ def _state_response(
     )
 
 
+_PreflightExceptionPolicy = Literal["raise", "persist_invalid"]
+_ComposerPreflightTelemetryResult = Literal["passed", "failed", "exception"]
+_ComposerPreflightTelemetrySource = Literal[
+    "compose",
+    "recompose",
+    "compose_runtime_preflight",
+    "recompose_runtime_preflight",
+    "convergence",
+    "plugin_crash",
+    "yaml_export",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimePreflightFailed:
+    """Sentinel for internal preflight failure during composer state persistence."""
+
+    exception_class: str | None = None
+
+
+_RUNTIME_PREFLIGHT_FAILED = _RuntimePreflightFailed()
+_RuntimePreflightOutcome = ValidationResult | _RuntimePreflightFailed | None
+
+_COMPOSER_RUNTIME_PREFLIGHT_COUNTER = metrics.get_meter(__name__).create_counter(
+    "composer.runtime_preflight.total",
+    unit="1",
+    description="Count of composer runtime preflight outcomes by route and result",
+)
+_COMPOSER_AUTHORING_VALIDATION_COUNTER = metrics.get_meter(__name__).create_counter(
+    "composer.authoring_validation.total",
+    unit="1",
+    description="Count of composer authoring-state validation outcomes by route and result",
+)
+
+_INTERCEPTED_ASSISTANT_HISTORY_PREFIX = (
+    "[ELSPETH composer note: Your previous assistant response was intercepted "
+    "by runtime preflight and replaced before it was shown to the user. The "
+    "visible replacement below is authoritative; continue from it and do not "
+    "assume the original completion claim succeeded.]\n\n"
+)
+
+_COMPOSER_EXCEPTION_CLASS_BUCKETS = frozenset(
+    {
+        "AttributeError",
+        "ComposerRuntimePreflightError",
+        "FileNotFoundError",
+        "GraphValidationError",
+        "ImportError",
+        "OSError",
+        "PermissionError",
+        "PluginConfigError",
+        "PluginNotFoundError",
+        "RuntimeError",
+        "TimeoutError",
+        "TypeError",
+        "ValueError",
+    }
+)
+_OTHER_COMPOSER_EXCEPTION_CLASS = "other"
+
+
+def _bounded_composer_exception_class(exception_class: str | None) -> str | None:
+    if exception_class is None:
+        return None
+    if exception_class in _COMPOSER_EXCEPTION_CLASS_BUCKETS:
+        return exception_class
+    return _OTHER_COMPOSER_EXCEPTION_CLASS
+
+
+def _record_composer_runtime_preflight_telemetry(
+    result: _ComposerPreflightTelemetryResult,
+    *,
+    source: _ComposerPreflightTelemetrySource,
+    exception_class: str | None = None,
+) -> None:
+    attrs: dict[str, str] = {"result": result, "source": source}
+    bounded_exception_class = _bounded_composer_exception_class(exception_class)
+    if bounded_exception_class is not None:
+        attrs["exception_class"] = bounded_exception_class
+    _COMPOSER_RUNTIME_PREFLIGHT_COUNTER.add(1, attrs)
+
+
+def _record_composer_authoring_validation_telemetry(
+    result: _ComposerPreflightTelemetryResult,
+    *,
+    source: _ComposerPreflightTelemetrySource,
+    exception_class: str | None = None,
+) -> None:
+    attrs: dict[str, str] = {"result": result, "source": source}
+    bounded_exception_class = _bounded_composer_exception_class(exception_class)
+    if bounded_exception_class is not None:
+        attrs["exception_class"] = bounded_exception_class
+    _COMPOSER_AUTHORING_VALIDATION_COUNTER.add(1, attrs)
+
+
+def _composer_history_content(message: ChatMessageRecord) -> str:
+    """Return the content sent back to the composer LLM for a stored message."""
+    if message.role == "assistant" and message.raw_content is not None:
+        return _INTERCEPTED_ASSISTANT_HISTORY_PREFIX + message.content
+    return message.content
+
+
+def _composer_chat_history(messages: Sequence[ChatMessageRecord]) -> list[dict[str, str]]:
+    """Convert persisted session messages to LLM chat history.
+
+    `raw_content` is attribution/audit data and must not be sent back to the
+    model. When an assistant message has raw_content, its visible content is a
+    synthetic runtime-preflight replacement; annotate that visible content so
+    the next LLM turn understands why its apparent prior answer changed.
+    """
+    return [{"role": message.role, "content": _composer_history_content(message)} for message in messages]
+
+
+def _composer_persisted_validation(
+    authoring: ValidationSummary,
+    runtime_preflight: _RuntimePreflightOutcome,
+) -> tuple[bool, list[str] | None]:
+    """Return persisted validity/errors for a composer-produced state."""
+    if isinstance(runtime_preflight, _RuntimePreflightFailed):
+        return False, ["runtime_preflight_failed"]
+    if runtime_preflight is not None:
+        messages = [error.message for error in runtime_preflight.errors]
+        return runtime_preflight.is_valid, messages or None
+    if authoring.is_valid:
+        raise ValueError("Composer persistence for authoring-valid state requires runtime preflight outcome")
+    messages = [error.message for error in authoring.errors]
+    return authoring.is_valid, messages or None
+
+
+async def _runtime_preflight_for_state(
+    state: CompositionState,
+    *,
+    settings: Any,
+    secret_service: Any | None,
+    user_id: str | None,
+) -> ValidationResult:
+    return await asyncio.wait_for(
+        run_sync_in_worker(
+            validate_pipeline,
+            state,
+            settings,
+            yaml_generator,
+            secret_service=secret_service,
+            user_id=user_id,
+        ),
+        timeout=settings.composer_runtime_preflight_timeout_seconds,
+    )
+
+
+async def _state_data_from_composer_state(
+    state: CompositionState,
+    *,
+    settings: Any,
+    secret_service: Any | None,
+    user_id: str | None,
+    runtime_preflight: _RuntimePreflightOutcome,
+    preflight_exception_policy: _PreflightExceptionPolicy,
+    initial_version: int | None,
+    log_prefix: str,
+    session_id: UUID,
+) -> tuple[CompositionStateData, ValidationSummary]:
+    # Session id remains available through persisted session state; keep
+    # telemetry attributes bounded and do not tag metrics with per-session IDs.
+    del session_id
+
+    try:
+        authoring = state.validate()
+    except (ValueError, TypeError, KeyError) as val_err:
+        _record_composer_authoring_validation_telemetry(
+            "exception",
+            source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+            exception_class=type(val_err).__name__,
+        )
+        authoring = ValidationSummary(
+            is_valid=False,
+            errors=(ValidationEntry("validation", "validation_failed", "high"),),
+        )
+    else:
+        _record_composer_authoring_validation_telemetry(
+            "passed" if authoring.is_valid else "failed",
+            source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+        )
+
+    runtime = runtime_preflight
+    if runtime is None and authoring.is_valid:
+        try:
+            runtime = await _runtime_preflight_for_state(
+                state,
+                settings=settings,
+                secret_service=secret_service,
+                user_id=user_id,
+            )
+        except Exception as exc:
+            if preflight_exception_policy == "raise":
+                raise ComposerRuntimePreflightError.capture(
+                    exc,
+                    state=state,
+                    initial_version=initial_version if initial_version is not None else state.version,
+                ) from exc
+            _record_composer_runtime_preflight_telemetry(
+                "exception",
+                source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+                exception_class=type(exc).__name__,
+            )
+            runtime = _RuntimePreflightFailed(type(exc).__name__)
+    if isinstance(runtime, ValidationResult):
+        _record_composer_runtime_preflight_telemetry(
+            "passed" if runtime.is_valid else "failed",
+            source=cast(_ComposerPreflightTelemetrySource, log_prefix),
+        )
+    persisted_is_valid, persisted_errors = _composer_persisted_validation(
+        authoring,
+        runtime,
+    )
+    state_d = state.to_dict()
+    return (
+        CompositionStateData(
+            source=state_d["source"],
+            nodes=state_d["nodes"],
+            edges=state_d["edges"],
+            outputs=state_d["outputs"],
+            metadata_=state_d["metadata"],
+            is_valid=persisted_is_valid,
+            validation_errors=persisted_errors,
+        ),
+        authoring,
+    )
+
+
 async def _verify_session_ownership(
     session_id: UUID,
     user: UserIdentity,
@@ -265,6 +501,8 @@ async def _handle_convergence_error(
     service: SessionServiceProtocol,
     session_id: UUID,
     log_prefix: str,
+    settings: Any,
+    secret_service: Any | None,
 ) -> dict[str, object]:
     """Build 422 response body and persist partial state for convergence errors.
 
@@ -276,6 +514,8 @@ async def _handle_convergence_error(
         service: Session service for DB persistence
         session_id: Session to persist partial state to
         log_prefix: Prefix for structlog event names (e.g. "convergence" or "recompose_convergence")
+        settings: App settings (forwarded to _state_data_from_composer_state)
+        secret_service: Scoped secret resolver (forwarded to runtime preflight)
 
     Returns:
         Response body dict for HTTPException(status_code=422)
@@ -287,53 +527,30 @@ async def _handle_convergence_error(
         "budget_exhausted": exc.budget_exhausted,
     }
     if exc.partial_state is not None:
-        # Validate guard: partial_state from the LLM loop may be
-        # structurally damaged. Catch data-shape errors so we can
-        # still persist with is_valid=False rather than losing it.
-        try:
-            validation = exc.partial_state.validate()
-        except (ValueError, TypeError, KeyError) as val_err:
-            # Class name only: ``str(val_err)`` can surface fragments of
-            # the partial composition state (user-authored source text,
-            # node options) that the validator was mid-way through
-            # inspecting. Symmetric with the sibling handler
-            # _handle_plugin_crash, hardened in 302dd34d.
-            slog.warning(
-                f"{log_prefix}_validation_failed",
-                session_id=str(session_id),
-                exc_class=type(val_err).__name__,
-            )
-            validation = ValidationSummary(
-                is_valid=False,
-                errors=(ValidationEntry("validation", "validation_failed", "high"),),
-            )
-
         # Persistence guard: DB write failure should not upgrade the
         # response from 422 (convergence error) to 500 (internal).
         #
         # SQLAlchemyError ONLY — narrowed per CLAUDE.md Tier 1 semantics.
-        # ``state_d = exc.partial_state.to_dict()`` and the subsequent
-        # ``CompositionStateData(...)`` construction are OUR code operating
-        # on OUR dataclass (``CompositionState``). A ``TypeError`` /
-        # ``KeyError`` raised here is a broken invariant between our
-        # dataclass and our DTO — a Tier 1 bug — and MUST propagate and
-        # crash the request rather than being laundered into a soft
-        # ``partial_state_save_failed=True``. The earlier ``validate()``
-        # guard is the only place those classes are acceptable: ``validate``
-        # is defined to tolerate structurally damaged partial state, which
-        # is exactly the state we arrive here with.
+        # _state_data_from_composer_state's internal validate() guard catches
+        # (ValueError, TypeError, KeyError) from structurally damaged partial
+        # state — those are acceptable there. A TypeError/KeyError from
+        # state.to_dict() or CompositionStateData(...) is a Tier 1 invariant
+        # bug and must propagate. This catch is the SQLAlchemy persistence
+        # layer only.
         try:
-            state_d = exc.partial_state.to_dict()
-            state_data = CompositionStateData(
-                source=state_d["source"],
-                nodes=state_d["nodes"],
-                edges=state_d["edges"],
-                outputs=state_d["outputs"],
-                metadata_=state_d["metadata"],
-                is_valid=validation.is_valid,
-                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+            state_data, _validation = await _state_data_from_composer_state(
+                exc.partial_state,
+                settings=settings,
+                secret_service=secret_service,
+                user_id=None,  # convergence handler has no user_id — pass None for runtime preflight
+                runtime_preflight=None,
+                preflight_exception_policy="persist_invalid",
+                initial_version=None,
+                log_prefix=log_prefix,
+                session_id=session_id,
             )
             await service.save_composition_state(session_id, state_data)
+            state_d = exc.partial_state.to_dict()
             response_body["partial_state"] = redact_source_storage_path(state_d)
         except SQLAlchemyError as save_err:
             # Full SQLAlchemyError family — ``IntegrityError`` alone would
@@ -368,6 +585,8 @@ async def _handle_plugin_crash(
     session_id: UUID,
     user_id: str,
     log_prefix: str,
+    settings: Any,
+    secret_service: Any | None,
 ) -> dict[str, object]:
     """Build 500 response body and persist partial state for plugin crashes.
 
@@ -383,6 +602,8 @@ async def _handle_plugin_crash(
         user_id: Authenticated user id (logged for triage).
         log_prefix: Prefix for structlog event names
             (e.g. "compose" or "recompose").
+        settings: App settings (forwarded to _state_data_from_composer_state)
+        secret_service: Scoped secret resolver (forwarded to runtime preflight)
 
     Returns:
         Response body dict for ``HTTPException(status_code=500, ...)``.
@@ -393,45 +614,28 @@ async def _handle_plugin_crash(
     }
 
     if exc.partial_state is not None:
-        # Validate guard: partial_state was captured mid-compose — it may
-        # be structurally damaged. Catch data-shape errors so we still
-        # persist with is_valid=False rather than losing the row.
-        try:
-            validation = exc.partial_state.validate()
-        except (ValueError, TypeError, KeyError) as val_err:
-            # No exc_info: val_err may carry references to the same
-            # secret-bearing state the plugin crash was mid-way through
-            # mutating.
-            slog.warning(
-                f"{log_prefix}_plugin_crash_validation_failed",
-                session_id=str(session_id),
-                exc_class=type(val_err).__name__,
-            )
-            validation = ValidationSummary(
-                is_valid=False,
-                errors=(ValidationEntry("validation", "validation_failed", "high"),),
-            )
-
         # Persistence guard: DB write failure MUST NOT mask the original
         # plugin crash (response stays as the 500 below, the save failure
         # is recorded as a separate audit-system-failure slog event).
         #
         # SQLAlchemyError ONLY — narrowed per CLAUDE.md Tier 1 semantics.
-        # ``to_dict()`` / ``CompositionStateData(...)`` are OUR code on OUR
-        # dataclass; ``TypeError`` / ``KeyError`` from this block is a
-        # broken invariant (Tier 1 bug) and must propagate. Symmetric with
-        # ``_handle_convergence_error``; see the comment there for the full
-        # rationale.
+        # _state_data_from_composer_state's validate() guard catches
+        # (ValueError, TypeError, KeyError) from structurally damaged partial
+        # state — those are acceptable there. TypeError/KeyError from
+        # state.to_dict() or CompositionStateData(...) is a Tier 1 invariant
+        # bug and must propagate. Symmetric with _handle_convergence_error;
+        # see the comment there for the full rationale.
         try:
-            state_d = exc.partial_state.to_dict()
-            state_data = CompositionStateData(
-                source=state_d["source"],
-                nodes=state_d["nodes"],
-                edges=state_d["edges"],
-                outputs=state_d["outputs"],
-                metadata_=state_d["metadata"],
-                is_valid=validation.is_valid,
-                validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+            state_data, _validation = await _state_data_from_composer_state(
+                exc.partial_state,
+                settings=settings,
+                secret_service=secret_service,
+                user_id=user_id,
+                runtime_preflight=None,
+                preflight_exception_policy="persist_invalid",
+                initial_version=None,
+                log_prefix=log_prefix,
+                session_id=session_id,
             )
             await service.save_composition_state(session_id, state_data)
         except SQLAlchemyError as save_err:
@@ -694,7 +898,7 @@ def create_session_router() -> APIRouter:
                     f"message {user_msg.id}. Refusing to compose against "
                     "interleaved session history."
                 )
-            chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
+            chat_messages = _composer_chat_history(records[:-1])
 
             # 4. Run the LLM composition loop
             composer: ComposerService = request.app.state.composer_service
@@ -722,7 +926,14 @@ def create_session_router() -> APIRouter:
                         likely_next="Try a smaller request or retry from the visible user message.",
                     ),
                 )
-                response_body = await _handle_convergence_error(exc, service, session.id, "convergence")
+                response_body = await _handle_convergence_error(
+                    exc,
+                    service,
+                    session.id,
+                    "convergence",
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
+                )
                 raise HTTPException(status_code=422, detail=response_body) from exc
             except LiteLLMAuthError as exc:
                 # ``str(exc)`` on LiteLLM exceptions can embed the provider
@@ -819,6 +1030,8 @@ def create_session_router() -> APIRouter:
                     session.id,
                     str(user.user_id),
                     "compose",
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
                 )
                 await _publish_progress(
                     progress_registry,
@@ -832,6 +1045,30 @@ def create_session_router() -> APIRouter:
                     ),
                 )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
+            except ComposerRuntimePreflightError as rpf_exc:
+                # Runtime preflight failed inside _state_data_from_composer_state
+                # with preflight_exception_policy="raise" — this is a server-side
+                # error in the state-save path, not a user error. Response semantics
+                # mirror _handle_plugin_crash: 500 with structured body, partial
+                # state preserved in rpf_exc.partial_state.
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=str(user_msg.id),
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not safely validate the pipeline update.",
+                        evidence=("Runtime preflight failed during state persistence.",),
+                        likely_next="Review the visible error message, then retry after the issue is resolved.",
+                    ),
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error_type": "composer_plugin_error",
+                        "detail": "A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error.",
+                    },
+                ) from rpf_exc.original_exc
             except ComposerServiceError as exc:
                 await _publish_progress(
                     progress_registry,
@@ -864,16 +1101,16 @@ def create_session_router() -> APIRouter:
                         likely_next="ELSPETH will save the validated pipeline snapshot.",
                     ),
                 )
-                state_d = result.state.to_dict()
-                validation = result.state.validate()
-                state_data = CompositionStateData(
-                    source=state_d["source"],
-                    nodes=state_d["nodes"],
-                    edges=state_d["edges"],
-                    outputs=state_d["outputs"],
-                    metadata_=state_d["metadata"],
-                    is_valid=validation.is_valid,
-                    validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+                state_data, validation = await _state_data_from_composer_state(
+                    result.state,
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
+                    user_id=str(user.user_id),
+                    runtime_preflight=result.runtime_preflight,
+                    preflight_exception_policy="raise",
+                    initial_version=state.version,
+                    log_prefix="compose",
+                    session_id=session.id,
                 )
                 await _publish_progress(
                     progress_registry,
@@ -899,6 +1136,7 @@ def create_session_router() -> APIRouter:
                 "assistant",
                 result.message,
                 composition_state_id=post_compose_state_id,
+                raw_content=result.raw_assistant_content,
             )
             await _publish_progress(
                 progress_registry,
@@ -994,7 +1232,7 @@ def create_session_router() -> APIRouter:
             )
             # Exclude the last user message — the composer receives it
             # separately via the message arg and appends it in _build_messages.
-            chat_messages = [{"role": r.role, "content": r.content} for r in records[:-1]]
+            chat_messages = _composer_chat_history(records[:-1])
 
             # Run the LLM composition loop
             composer: ComposerService = request.app.state.composer_service
@@ -1022,7 +1260,14 @@ def create_session_router() -> APIRouter:
                         likely_next="Try a smaller request or edit the visible user message.",
                     ),
                 )
-                response_body = await _handle_convergence_error(exc, service, session.id, "recompose_convergence")
+                response_body = await _handle_convergence_error(
+                    exc,
+                    service,
+                    session.id,
+                    "recompose_convergence",
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
+                )
                 raise HTTPException(status_code=422, detail=response_body) from exc
             except LiteLLMAuthError as exc:
                 # Recompose mirror of the redaction contract in send_message
@@ -1091,6 +1336,8 @@ def create_session_router() -> APIRouter:
                     session.id,
                     str(user.user_id),
                     "recompose",
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
                 )
                 await _publish_progress(
                     progress_registry,
@@ -1104,6 +1351,26 @@ def create_session_router() -> APIRouter:
                     ),
                 )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
+            except ComposerRuntimePreflightError as rpf_exc:
+                # Mirror of the send_message ComposerRuntimePreflightError catch.
+                await _publish_progress(
+                    progress_registry,
+                    session_id=str(session.id),
+                    request_id=request_id,
+                    event=ComposerProgressEvent(
+                        phase="failed",
+                        headline="The composer could not safely validate the pipeline update.",
+                        evidence=("Runtime preflight failed during state persistence.",),
+                        likely_next="Review the visible error message, then retry after the issue is resolved.",
+                    ),
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail={
+                        "error_type": "composer_plugin_error",
+                        "detail": "A composer plugin crashed; see server logs for the traceback. This is not a user-retryable error.",
+                    },
+                ) from rpf_exc.original_exc
             except ComposerServiceError as exc:
                 await _publish_progress(
                     progress_registry,
@@ -1136,16 +1403,16 @@ def create_session_router() -> APIRouter:
                         likely_next="ELSPETH will save the validated pipeline snapshot.",
                     ),
                 )
-                state_d = result.state.to_dict()
-                validation = result.state.validate()
-                state_data = CompositionStateData(
-                    source=state_d["source"],
-                    nodes=state_d["nodes"],
-                    edges=state_d["edges"],
-                    outputs=state_d["outputs"],
-                    metadata_=state_d["metadata"],
-                    is_valid=validation.is_valid,
-                    validation_errors=[e.message for e in validation.errors] if validation.errors else None,
+                state_data, validation = await _state_data_from_composer_state(
+                    result.state,
+                    settings=settings,
+                    secret_service=request.app.state.scoped_secret_resolver,
+                    user_id=str(user.user_id),
+                    runtime_preflight=result.runtime_preflight,
+                    preflight_exception_policy="raise",
+                    initial_version=state.version,
+                    log_prefix="recompose",
+                    session_id=session.id,
                 )
                 await _publish_progress(
                     progress_registry,
@@ -1171,6 +1438,7 @@ def create_session_router() -> APIRouter:
                 "assistant",
                 result.message,
                 composition_state_id=post_compose_state_id,
+                raw_content=result.raw_assistant_content,
             )
             await _publish_progress(
                 progress_registry,
@@ -1508,6 +1776,7 @@ def create_session_router() -> APIRouter:
                         session_id=user_msg.session_id,
                         role=user_msg.role,
                         content=user_msg.content,
+                        raw_content=user_msg.raw_content,
                         tool_calls=user_msg.tool_calls,
                         created_at=user_msg.created_at,
                         composition_state_id=copied_state.id,

@@ -931,98 +931,76 @@ allow_hits:
     by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=2a14911a15088910
-  owner: web-sessions
-  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed
-    to data-shape errors. Hardened to log exc_class (not str) for Tier-1 redaction
-    symmetry with _handle_plugin_crash.
-  safety: Returns 422 with structured error, does not swallow
-  expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=5fe4290756778192
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=d2a98b99a4f3c01c
   owner: web-sessions
   reason: Convergence partial-state save may fail — catch covers the full SQLAlchemyError
     family (IntegrityError, OperationalError for lock timeout or pool disconnect,
     ProgrammingError for schema drift, and siblings). A narrow IntegrityError catch
     would let siblings escape and upgrade the structured 422 into an unstructured
-    500. Narrowed from the earlier (ValueError, TypeError, KeyError, SQLAlchemyError)
-    tuple per CLAUDE.md Tier-1 semantics — to_dict() and CompositionStateData() run
-    on our own dataclass, so TypeError/KeyError from that block is a broken internal
-    invariant and must propagate as a 500 with traceback rather than be laundered
-    into partial_state_save_failed=True. exc_info stays omitted so SQLAlchemy __cause__
-    chains do not leak connection strings into structured server logs.
+    500. Narrowed per CLAUDE.md Tier-1 semantics — _state_data_from_composer_state
+    internally handles validate() data-shape errors; TypeError/KeyError from to_dict()
+    or CompositionStateData() is a broken internal invariant and must propagate rather
+    than be laundered into partial_state_save_failed=True. exc_info omitted so
+    SQLAlchemy __cause__ chains do not leak connection strings into structured server logs.
   safety: 'Returns 422 with structured error, sets partial_state_save_failed=True;
     does not swallow. Both the slog (exc_class=...) and the HTTP response body (partial_state_save_error=ClassName)
     carry the exception class name only — no SQL statement, no bound parameters, no
-    __cause__ text. str(SQLAlchemyError) would expand to ''[SQL: ...][parameters:
-    ...]'' plus __cause__ (DB URLs / credentials on OperationalError); str(ValueError/TypeError/KeyError)
-    over dict access to composition-state fields can surface source options / metadata
-    (potential secret refs). Redaction is uniform across both channels.'
+    __cause__ text.'
   expires: null
-- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=a7fda2fec0b216fd
-  owner: web-sessions
-  reason: Plugin-crash partial-state validation may fail on damaged LLM output — narrowed
-    to data-shape errors (ValueError, TypeError, KeyError). Mirrors the convergence-error
-    validate-guard; required because partial_state is captured mid-mutation and may
-    be structurally inconsistent.
-  safety: Returns 500 with structured error; logs exc_class and falls back to ValidationSummary(is_valid=False).
-    Original plugin crash still propagates — validation-guard failure never masks
-    the primary bug.
-  expires: null
-- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=901a4c73fc045de6
+- key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=47091cec954b523c
   owner: web-sessions
   reason: Plugin-crash partial-state save may fail — catch covers the full SQLAlchemyError
     family. A narrow IntegrityError catch would let OperationalError, ProgrammingError,
     and siblings escape and mask the redacted 500 plugin-crash response. Narrowed
-    from the earlier (ValueError, TypeError, KeyError, SQLAlchemyError) tuple per
-    CLAUDE.md Tier-1 semantics — to_dict() and CompositionStateData() operate on our
-    own dataclass, so TypeError/KeyError from that block is a broken internal invariant
-    and must propagate rather than be laundered into partial_state_save_failed=True.
-    Mirrors the convergence-error persist-guard. On save failure, sets partial_state_save_failed=True
+    per CLAUDE.md Tier-1 semantics — _state_data_from_composer_state internally handles
+    validate() data-shape errors; TypeError/KeyError from to_dict() or CompositionStateData()
+    is a broken internal invariant and must propagate rather than be laundered into
+    partial_state_save_failed=True. On save failure, sets partial_state_save_failed=True
     on the 500 response body for frontend recovery UX symmetry with _handle_convergence_error.
   safety: Returns 500 with structured error; logs exc_class (no traceback, same redaction
     policy as the convergence path). Original plugin crash still propagates via the
     outer `raise HTTPException(...) from crash.original_exc`.
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=f09cf88e38050ef4
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=0062c7e2826fe8eb
   owner: web-sessions
   reason: isinstance check on deserialized composition state source — Tier 3 boundary.
   safety: Validates structure from persisted state
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=dcc32b0b90998d7d
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=8926c6af59d362e9
   owner: web-sessions
   reason: source_dict.get() on Tier 3 composition state — optional source options.
   safety: Returns None on miss, and the blob rewrite path is skipped
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=41b1862f8993731f
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=ef74670d9b4bb9d8
   owner: web-sessions
   reason: isinstance(options, dict) validates persisted source.options before mutating
     nested fields during fork blob rewrite
   safety: Non-dict raises AuditIntegrityError immediately; no silent skip or coercion
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=7fdf71e485823668
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=f25c5c9a2488f765
   owner: web-sessions
   reason: options.get() on Tier 3 state source — blob_ref is optional.
   safety: Returns None on miss, handled by conditional below
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=0d9ab5e7fd9ea2f7
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=6da605e87d94d6f7
   owner: web-sessions
   reason: isinstance check on blob_ref — may be str or UUID from persisted state.
   safety: Tier 3 boundary — persisted blob_ref type is not guaranteed
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=5e66a51d14daa69e
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=b28da40473bf5a63
   owner: web-sessions
   reason: blob_map.get() on copied blob UUID — not every source reference is guaranteed
     to have a copied blob target, so fork rewrite falls back to path/file matching
   safety: None result only triggers the secondary path/file rewrite probe; no fabricated
     blob mapping is introduced
   expires: null
-- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=b7fe9219c0a46be1
+- key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=9b4ec3145e9ac340
   owner: web-sessions
   reason: options.get(path_key) on persisted source options — path/file keys are optional
     and used only for fallback blob rewrite
   safety: None result skips that fallback key and continues scanning remaining candidates
   expires: null
-- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=c039fd2368c108dd
+- key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=d2aa0b20fd66c621
   owner: web-sessions
   reason: isinstance(path_value, str) guards source_blob_path_map lookup against non-string
     persisted path/file values
@@ -1030,7 +1008,7 @@ allow_hits:
     remain unchanged and can still fail later validation instead of being silently
     coerced
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=c504df7a5c728e09
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=1f3a475241780719
   owner: web-sessions
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in
     the BlobQuotaExceededError path — DB/IO faults expected during cleanup; programmer
@@ -1039,7 +1017,7 @@ allow_hits:
     that propagates; orphan sessions.id flagged for manual cleanup; user-facing 413
     response remains intact even when cleanup fails
   expires: null
-- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=98bef8a5290a5098
+- key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=9f00fced26fcdf26
   owner: web-sessions
   reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in
     the generic except Exception path — DB/IO faults expected during cleanup; programmer
@@ -1082,14 +1060,14 @@ allow_hits:
     Not all source shapes include "options".
   safety: Returns input unchanged when "options" absent — no data loss or fabrication
   expires: null
-- key: web/sessions/routes.py:R2:_get_session_compose_lock_registry:fp=12ed66fe52b45967
+- key: web/sessions/routes.py:R2:_get_session_compose_lock_registry:fp=91a3c8b5f62920e3
   owner: web-sessions
   reason: App-scoped compose lock registry is initialized lazily on first session-router
     use rather than being required at startup
   safety: Missing attribute allocates and stores a new _SessionComposeLockRegistry
     on request.app.state; subsequent calls reuse the same object
   expires: null
-- key: web/sessions/routes.py:R2:_litellm_error_detail:fp=d0807e170e4c1409
+- key: web/sessions/routes.py:R2:_litellm_error_detail:fp=fbcf332337073700
   owner: web-sessions
   reason: Optional LiteLLM/provider exception metadata — status_code is not guaranteed
     on every provider error object, and this helper only surfaces it in explicit staging/debug
@@ -1097,12 +1075,36 @@ allow_hits:
   safety: Missing status_code omits provider_status_code from the response; no fabricated
     status is emitted, and the stable redacted detail still uses type(exc).__name__.
   expires: null
-- key: web/sessions/routes.py:R1:_state_response:fp=486d1155103a1d1c
+- key: web/sessions/routes.py:R1:_state_response:fp=6edbab35c2467471
   owner: web-sessions
   reason: Unwrapping redact_source_storage_path() output — helper returns dict with
     "source" key; .get() with fallback to original is defensive against helper contract
     change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
+  expires: null
+- key: web/sessions/routes.py:R5:_composer_persisted_validation:fp=5a7310d9da25225f
+  owner: web-sessions
+  reason: isinstance(runtime_preflight, _RuntimePreflightFailed) dispatches the
+    _RuntimePreflightOutcome union type — sentinel, ValidationResult, and None are
+    the three legal values; isinstance is the only way to distinguish sentinel from
+    result without adding a separate boolean parameter.
+  safety: Exhaustive dispatch with ValueError for invalid combinations; no silent default
+  expires: null
+- key: web/sessions/routes.py:R6:_state_data_from_composer_state:fp=ac91a9accd2f67c8
+  owner: web-sessions
+  reason: state.validate() may fail on structurally damaged partial-state from
+    LLM convergence/crash — catch (ValueError, TypeError, KeyError) mirrors the
+    pre-existing guard in _handle_convergence_error and _handle_plugin_crash to
+    produce a conservative is_valid=False result instead of losing the partial state.
+  safety: Falls back to ValidationSummary(is_valid=False) with a generic error
+    entry; does not swallow the damage, just allows persistence to proceed
+  expires: null
+- key: web/sessions/routes.py:R5:_state_data_from_composer_state:fp=bbfce00ebfec151d
+  owner: web-sessions
+  reason: isinstance(runtime, ValidationResult) dispatches the _RuntimePreflightOutcome
+    union type to emit telemetry — sentinel and ValidationResult must be distinguished
+    to record pass/fail vs exception metrics correctly.
+  safety: Read-only dispatch for telemetry emission; no state mutation
   expires: null
 - key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=4e99de25e7b391f1
   owner: web-validation

@@ -308,6 +308,32 @@ class TestForkSession:
         copied_ids = {m.id for m in messages}
         assert original_msg.id not in copied_ids
 
+    @pytest.mark.asyncio
+    async def test_fork_preserves_assistant_raw_content_for_copied_history(self, service) -> None:
+        """Fork copies raw model provenance for historical assistant messages."""
+        session = await service.create_session("alice", "Original", "local")
+        await service.add_message(session.id, "user", "Build it")
+        await service.add_message(
+            session.id,
+            "assistant",
+            "I cannot mark this pipeline complete yet because runtime preflight failed: bad config.",
+            raw_content="The pipeline is complete and valid.",
+        )
+        fork_msg = await service.add_message(session.id, "user", "Try again")
+
+        _, messages, _ = await service.fork_session(
+            source_session_id=session.id,
+            fork_message_id=fork_msg.id,
+            new_message_content="Try a different way",
+            user_id="alice",
+            auth_provider_type="local",
+        )
+
+        copied_assistant = next(message for message in messages if message.role == "assistant")
+        assert copied_assistant.content.startswith("I cannot mark this pipeline complete")
+        assert copied_assistant.raw_content == "The pipeline is complete and valid."
+        assert all(message.raw_content is None for message in messages if message.role in {"system", "user"})
+
 
 # ── Route-level tests ───────────────────────────────────────────────────
 

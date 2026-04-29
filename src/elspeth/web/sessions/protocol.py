@@ -73,20 +73,25 @@ class SessionRecord:
     forked_from_message_id: UUID | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class ChatMessageRecord:
     """Represents a row from the chat_messages table.
 
     tool_calls uses the stored LiteLLM array format and may contain nested
     mutable lists/dicts -- requires freeze guard when not None.
+
+    raw_content stores the original LLM text when the visible content was
+    replaced by runtime preflight interception. It is persisted for audit
+    provenance and must NOT be returned in ChatMessageResponse.
     """
 
     id: UUID
     session_id: UUID
     role: ChatMessageRole
     content: str
-    tool_calls: Sequence[Mapping[str, Any]] | None
     created_at: datetime
+    raw_content: str | None = None
+    tool_calls: Sequence[Mapping[str, Any]] | None = None
     composition_state_id: UUID | None = None
 
     def __post_init__(self) -> None:
@@ -257,6 +262,7 @@ class SessionServiceProtocol(Protocol):
         content: str,
         tool_calls: Sequence[Mapping[str, Any]] | None = None,
         composition_state_id: UUID | None = None,
+        raw_content: str | None = None,
     ) -> ChatMessageRecord: ...
 
     async def get_messages(
