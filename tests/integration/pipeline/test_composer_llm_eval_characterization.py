@@ -625,10 +625,11 @@ def test_runtime_preflight_preview_blocks_scenario_2_invalid_trigger(tmp_path: P
         runtime_preflight=runtime_preflight,
     )
 
+    preview_data = preview.to_dict()["data"]
     assert preview.success is True
-    assert preview.data["is_valid"] is False
-    assert preview.data["runtime_preflight"]["is_valid"] is False
-    assert "end_of_source" in json.dumps(preview.to_dict()["data"]["runtime_preflight"])
+    assert preview_data["is_valid"] is False
+    assert preview_data["runtime_preflight"]["is_valid"] is False
+    assert "end_of_source" in json.dumps(preview_data["runtime_preflight"])
 
 
 @pytest.mark.asyncio
@@ -656,6 +657,12 @@ async def test_final_completion_claim_is_replaced_by_runtime_preflight_failure(t
     )
 
     assert result.message != "The pipeline is complete and valid."
+    # Positive content check: synthetic preflight-failure message must reference
+    # the actual reason. _runtime_preflight_failure_message echoes the first
+    # ValidationError.message verbatim, which for the end_of_source trigger
+    # case contains "end_of_source". A regression that replaces the message
+    # with a generic fallback would pass the negative check above but fail this.
+    assert "end_of_source" in result.message
     assert result.raw_assistant_content == "The pipeline is complete and valid."
     assert result.runtime_preflight is not None
     assert result.runtime_preflight.is_valid is False
