@@ -10,7 +10,7 @@ import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.core.config import load_settings_from_yaml_string
-from elspeth.plugins.infrastructure.preflight import plugin_preflight_mode_enabled
+from elspeth.plugins.infrastructure.preflight import plugin_preflight_mode, plugin_preflight_mode_enabled
 from elspeth.plugins.sinks.csv_sink import CSVSink
 from elspeth.plugins.sources.csv_source import CSVSource
 from elspeth.web.async_workers import run_sync_in_worker
@@ -270,11 +270,115 @@ async def test_run_sync_in_worker_preserves_preflight_mode_for_plugin_constructo
     assert observed == [("source", True), ("sink", True)]
 
 
-def test_runtime_mode_default_does_not_enable_preflight_context(tmp_path: Path) -> None:
-    """The normal execution path must remain real runtime mode by default."""
+def test_runtime_mode_default_does_not_enable_preflight_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The normal execution path must remain real runtime mode by default.
+
+    I5 strengthening: the previous version of this test only asserted
+    ``bundle.source is not None``, which would pass even if the
+    ContextVar were permanently stuck at True. The monkeypatched
+    constructor probe directly observes ``plugin_preflight_mode_enabled()``
+    at instantiation time and asserts the False default — that is the
+    actual property the test name claims to pin.
+    """
+    observed: list[bool] = []
+    original_source_init = CSVSource.__init__
+
+    def source_init(self: CSVSource, config: dict[str, Any]) -> None:
+        observed.append(plugin_preflight_mode_enabled())
+        original_source_init(self, config)
+
+    monkeypatch.setattr(CSVSource, "__init__", source_init)
+
     pipeline_yaml = _minimal_csv_pipeline_yaml(tmp_path)
     settings = load_settings_from_yaml_string(pipeline_yaml)
 
     bundle = instantiate_plugins_from_config(settings)
 
     assert bundle.source is not None
+    assert observed == [False], (
+        "Default runtime mode (no plugin_preflight_mode wrapper) MUST "
+        "instantiate plugins with plugin_preflight_mode_enabled() == False. "
+        f"Observed: {observed}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_preflight_context_isolated_between_concurrent_tasks() -> None:
+    """I5 lock-in: ContextVar mutations in one asyncio task MUST NOT leak
+    into a sibling task spawned via ``asyncio.create_task``.
+
+    Python's ContextVar semantics give each task a copy of the parent
+    context at task creation, so ``plugin_preflight_mode(True)`` inside
+    Task A cannot be observed by Task B even when both run concurrently.
+    Without this guarantee, two requests in flight at the same moment
+    could see each other's preflight state — a tenant-isolation hazard
+    in a multi-request server. The asyncio.Event barriers are the only
+    way to assert ordering: without them, sequential ``await`` could
+    mask an isolation bug by serialising the observations.
+    """
+    import asyncio
+
+    a_set_mode = asyncio.Event()
+    b_observed_state = asyncio.Event()
+    observed_in_b: list[bool] = []
+    observed_in_a_after_b: list[bool] = []
+
+    async def task_a() -> None:
+        with plugin_preflight_mode(True):
+            assert plugin_preflight_mode_enabled() is True
+            a_set_mode.set()
+            await b_observed_state.wait()
+            # Re-observe inside Task A — the state is still True here
+            # because the context manager has not exited.
+            observed_in_a_after_b.append(plugin_preflight_mode_enabled())
+
+    async def task_b() -> None:
+        await a_set_mode.wait()
+        observed_in_b.append(plugin_preflight_mode_enabled())
+        b_observed_state.set()
+
+    await asyncio.gather(asyncio.create_task(task_a()), asyncio.create_task(task_b()))
+
+    assert observed_in_b == [False], (
+        "Sibling asyncio task observed Task A's preflight_mode=True — "
+        "ContextVar isolation between create_task() siblings is broken. "
+        f"Observed in Task B: {observed_in_b}"
+    )
+    assert observed_in_a_after_b == [True], (
+        "Task A lost its own preflight_mode=True after Task B observed — "
+        "context isolation is leaking the wrong direction. "
+        f"Observed in Task A after B: {observed_in_a_after_b}"
+    )
+    # And the outer context is back to default — neither task's mutation
+    # leaked out.
+    assert plugin_preflight_mode_enabled() is False
+
+
+def test_preflight_context_resets_when_body_raises() -> None:
+    """I5 lock-in: ``plugin_preflight_mode`` uses try/finally + ContextVar.reset(token),
+    so an exception inside the ``with`` block MUST still reset the
+    ContextVar to its prior value.
+
+    Without this guarantee, a plugin constructor that raises during
+    runtime preflight would leave the ContextVar permanently True for
+    the rest of the asyncio task, contaminating downstream plugin
+    instantiations that should run in real-runtime mode.
+    """
+
+    class _ConstructorBoom(Exception):
+        """Synthetic plugin-constructor failure to drive the test."""
+
+    assert plugin_preflight_mode_enabled() is False  # baseline
+
+    with pytest.raises(_ConstructorBoom), plugin_preflight_mode(True):
+        assert plugin_preflight_mode_enabled() is True
+        raise _ConstructorBoom("simulated plugin constructor failure")
+
+    assert plugin_preflight_mode_enabled() is False, (
+        "After an exception escaped plugin_preflight_mode(True), the "
+        "ContextVar did not reset — try/finally with ContextVar.reset(token) "
+        "should have restored the prior value regardless of the exception."
+    )
