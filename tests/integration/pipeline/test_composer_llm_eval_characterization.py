@@ -587,19 +587,26 @@ def _progress_copy(event: ComposerProgressEvent) -> tuple[str, tuple[str, ...], 
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=f"{ISSUE_PROGRESS_CLASSIFICATION}: failed progress must distinguish timeout from turn-budget exhaustion",
-)
 async def test_long_running_compose_failures_expose_distinct_progress_guidance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Protects the report's long-running failure-classification finding."""
+    """Protects the report's long-running failure-classification finding.
+
+    Originally an xfail-strict guard for ``{ISSUE_PROGRESS_CLASSIFICATION}``;
+    flipped to a passing characterization test once the discriminator
+    landed. Now serves as the regression guard against re-collapsing the
+    three convergence sub-causes into a single generic event.
+    """
     timeout_event = await _failed_progress_for_timeout(tmp_path, monkeypatch)
     composition_event = await _failed_progress_for_composition_budget(tmp_path, monkeypatch)
 
     assert _progress_copy(timeout_event) != _progress_copy(composition_event)
+    # Tighter assertion than text inequality: the discriminator field must
+    # carry the per-sub-cause Literal so frontend / response body / LLM
+    # recovery can branch on a stable taxonomy.
+    assert timeout_event.reason == "convergence_wall_clock_timeout"
+    assert composition_event.reason == "convergence_composition_budget"
 
 
 def test_runtime_preflight_preview_blocks_scenario_2_invalid_trigger(tmp_path: Path) -> None:

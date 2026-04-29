@@ -25,6 +25,7 @@ describe("ComposingIndicator", () => {
       headline: "The model requested plugin schemas.",
       evidence: ["Checking available source, transform, and sink tools."],
       likely_next: "ELSPETH will use the schemas to choose a pipeline shape.",
+      reason: null,
       updated_at: "2026-04-26T10:00:00Z",
     };
 

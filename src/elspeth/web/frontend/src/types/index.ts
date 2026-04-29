@@ -188,6 +188,27 @@ export type ComposerProgressPhase =
   | "failed";
 
 /**
+ * Stable machine-readable reason code for composer progress events.
+ *
+ * Mirrors `ComposerProgressReason` in src/elspeth/web/composer/progress.py.
+ * This is the public taxonomy the SPA should branch on (instead of parsing
+ * `headline` text). The Python validator requires this field for any
+ * `phase: "failed"` event, so the SPA can rely on it being present whenever
+ * `phase === "failed"`.
+ */
+export type ComposerProgressReason =
+  | "convergence_composition_budget"
+  | "convergence_discovery_budget"
+  | "convergence_wall_clock_timeout"
+  | "provider_auth_failed"
+  | "provider_unavailable"
+  | "plugin_crash"
+  | "runtime_preflight_failed"
+  | "service_setup_failed"
+  | "composer_idle"
+  | "composer_complete";
+
+/**
  * Latest provider-safe composer progress snapshot for one session.
  *
  * This is a status surface, not a reasoning transcript. Text is produced from
@@ -200,6 +221,7 @@ export interface ComposerProgressSnapshot {
   headline: string;
   evidence: string[];
   likely_next: string | null;
+  reason: ComposerProgressReason | null;
   updated_at: string;
 }
 

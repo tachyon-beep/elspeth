@@ -33,6 +33,7 @@ from elspeth.web.composer.progress import (
     ComposerProgressRegistry,
     ComposerProgressSink,
     ComposerProgressSnapshot,
+    convergence_progress_event,
 )
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
@@ -544,11 +545,28 @@ async def _handle_convergence_error(
     Returns:
         Response body dict for HTTPException(status_code=422).
     """
+    # Build the discriminated progress event ONCE so the 422 body and the
+    # /composer-progress snapshot share a single canonical taxonomy. Without
+    # this parity, the chat-side error UX (driven by detail + recovery_text)
+    # could drift from the polling-side reason — exactly the failure mode
+    # elspeth-5030f7373d called out, but at a different layer.
+    progress = convergence_progress_event(budget_exhausted=exc.budget_exhausted)
     response_body: dict[str, object] = {
         "error_type": "convergence",
         "detail": str(exc),
         "turns_used": exc.max_turns,
         "budget_exhausted": exc.budget_exhausted,
+        # ``reason`` is the public taxonomy the SPA / LLM recovery loop branch
+        # on. Distinct from ``budget_exhausted`` (engine-internal triple) so
+        # the two enums can evolve independently — e.g. a future
+        # ``convergence_provider_quota_timeout`` would land here without
+        # widening ``budget_exhausted``.
+        "reason": progress.reason,
+        # ``recovery_text`` mirrors the progress ``likely_next`` so the chat
+        # error message can name the next practical action without parsing
+        # the headline. Required by the issue's "user-facing recovery text
+        # names the next practical action for each class" criterion.
+        "recovery_text": progress.likely_next,
     }
     if exc.partial_state is not None:
         # Persistence guard: DB write failure should not upgrade the
@@ -1089,16 +1107,15 @@ def create_session_router() -> APIRouter:
                     progress=progress_sink,
                 )
             except ComposerConvergenceError as exc:
+                # Discriminate the three sub-causes (composition / discovery /
+                # wall-clock timeout) using exc.budget_exhausted. Without this
+                # dispatch the three failure modes would collapse into a single
+                # generic event — the original bug filed as elspeth-5030f7373d.
                 await _publish_progress(
                     progress_registry,
                     session_id=str(session.id),
                     request_id=str(user_msg.id),
-                    event=ComposerProgressEvent(
-                        phase="failed",
-                        headline="The composer could not finish this request.",
-                        evidence=("The bounded composer loop stopped before a final answer.",),
-                        likely_next="Try a smaller request or retry from the visible user message.",
-                    ),
+                    event=convergence_progress_event(budget_exhausted=exc.budget_exhausted),
                 )
                 response_body = await _handle_convergence_error(
                     exc,
@@ -1140,6 +1157,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer model is not available.",
                         evidence=("The model provider rejected the composer request.",),
                         likely_next="Check the composer provider configuration before retrying.",
+                        reason="provider_auth_failed",
                     ),
                 )
                 raise HTTPException(
@@ -1170,6 +1188,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer model is temporarily unavailable.",
                         evidence=("The model provider did not complete the request.",),
                         likely_next="Retry when the provider is available.",
+                        reason="provider_unavailable",
                     ),
                 )
                 raise HTTPException(
@@ -1226,6 +1245,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer could not safely finish this request.",
                         evidence=("A pipeline tool failed on the server side.",),
                         likely_next="Review the visible error message, then retry after the issue is resolved.",
+                        reason="plugin_crash",
                     ),
                 )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
@@ -1249,6 +1269,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer could not safely finish this request.",
                         evidence=("Runtime preflight failed before the compose loop returned.",),
                         likely_next="Review the visible error message, then retry after the issue is resolved.",
+                        reason="runtime_preflight_failed",
                     ),
                 )
                 response_body = await _handle_runtime_preflight_failure(
@@ -1271,6 +1292,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer could not finish this request.",
                         evidence=("Prompt preparation or composer service setup failed.",),
                         likely_next="Retry once the composer service is available.",
+                        reason="service_setup_failed",
                     ),
                 )
                 raise HTTPException(
@@ -1329,6 +1351,7 @@ def create_session_router() -> APIRouter:
                             headline="The composer could not safely validate the pipeline update.",
                             evidence=("Runtime preflight failed during state persistence.",),
                             likely_next="Review the visible error message, then retry after the issue is resolved.",
+                            reason="runtime_preflight_failed",
                         ),
                     )
                     response_body = await _handle_runtime_preflight_failure(
@@ -1378,6 +1401,7 @@ def create_session_router() -> APIRouter:
                     else "The composer response is ready.",
                     evidence=("The assistant response has been saved for this session.",),
                     likely_next="Review the response and current pipeline.",
+                    reason="composer_complete",
                 ),
             )
 
@@ -1478,16 +1502,14 @@ def create_session_router() -> APIRouter:
                     progress=progress_sink,
                 )
             except ComposerConvergenceError as exc:
+                # Same three-sub-cause discriminator as the /messages catch
+                # above — recompose mirrors send_message exactly so the two
+                # routes cannot drift on failure UX.
                 await _publish_progress(
                     progress_registry,
                     session_id=str(session.id),
                     request_id=request_id,
-                    event=ComposerProgressEvent(
-                        phase="failed",
-                        headline="The composer could not finish this retry.",
-                        evidence=("The bounded composer loop stopped before a final answer.",),
-                        likely_next="Try a smaller request or edit the visible user message.",
-                    ),
+                    event=convergence_progress_event(budget_exhausted=exc.budget_exhausted),
                 )
                 response_body = await _handle_convergence_error(
                     exc,
@@ -1520,6 +1542,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer model is not available.",
                         evidence=("The model provider rejected the composer request.",),
                         likely_next="Check the composer provider configuration before retrying.",
+                        reason="provider_auth_failed",
                     ),
                 )
                 raise HTTPException(
@@ -1545,6 +1568,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer model is temporarily unavailable.",
                         evidence=("The model provider did not complete the request.",),
                         likely_next="Retry when the provider is available.",
+                        reason="provider_unavailable",
                     ),
                 )
                 raise HTTPException(
@@ -1578,6 +1602,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer could not safely finish this retry.",
                         evidence=("A pipeline tool failed on the server side.",),
                         likely_next="Review the visible error message, then retry after the issue is resolved.",
+                        reason="plugin_crash",
                     ),
                 )
                 raise HTTPException(status_code=500, detail=response_body) from crash.original_exc
@@ -1596,6 +1621,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer could not safely finish this retry.",
                         evidence=("Runtime preflight failed before the compose loop returned.",),
                         likely_next="Review the visible error message, then retry after the issue is resolved.",
+                        reason="runtime_preflight_failed",
                     ),
                 )
                 response_body = await _handle_runtime_preflight_failure(
@@ -1618,6 +1644,7 @@ def create_session_router() -> APIRouter:
                         headline="The composer could not finish this retry.",
                         evidence=("Prompt preparation or composer service setup failed.",),
                         likely_next="Retry once the composer service is available.",
+                        reason="service_setup_failed",
                     ),
                 )
                 raise HTTPException(
@@ -1664,6 +1691,7 @@ def create_session_router() -> APIRouter:
                             headline="The composer could not safely validate the pipeline update.",
                             evidence=("Runtime preflight failed during state persistence.",),
                             likely_next="Review the visible error message, then retry after the issue is resolved.",
+                            reason="runtime_preflight_failed",
                         ),
                     )
                     response_body = await _handle_runtime_preflight_failure(
@@ -1713,6 +1741,7 @@ def create_session_router() -> APIRouter:
                     else "The composer response is ready.",
                     evidence=("The assistant response has been saved for this session.",),
                     likely_next="Review the response and current pipeline.",
+                    reason="composer_complete",
                 ),
             )
 

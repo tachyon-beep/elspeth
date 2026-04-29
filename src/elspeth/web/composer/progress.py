@@ -11,9 +11,9 @@ from __future__ import annotations
 import threading
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 COMPOSER_PROGRESS_MAX_EVIDENCE = 4
 _MAX_PROGRESS_TEXT_CHARS = 180
@@ -27,6 +27,41 @@ type ComposerProgressPhase = Literal[
     "saving",
     "complete",
     "failed",
+]
+
+# Stable machine-readable reason codes for composer progress events.
+#
+# Public taxonomy distinct from ComposerConvergenceError.budget_exhausted —
+# the exception models which budget tripped (a private engine concept), this
+# Literal is the public-facing UX/observability discriminator. They map but
+# they are not the same enum: the convergence error contributes three of
+# these codes; the others come from sibling exception classes or from
+# success/idle sentinels.
+#
+# Required when phase == "failed" (enforced by the model_validator on
+# ComposerProgressEvent below) so a new failure site cannot ship without
+# carrying a stable code. The frontend, structured logs, and the 422
+# response body all branch on this value.
+type ComposerProgressReason = Literal[
+    # Convergence sub-causes — split out from the single
+    # ComposerConvergenceError class via its budget_exhausted discriminator.
+    "convergence_composition_budget",
+    "convergence_discovery_budget",
+    "convergence_wall_clock_timeout",
+    # Provider-side failures — LiteLLM exception families.
+    "provider_auth_failed",
+    "provider_unavailable",
+    # Server-side plugin bug escaping execute_tool.
+    "plugin_crash",
+    # Runtime preflight failure (cached path-1 or post-compose path-2 —
+    # users cannot act on the path distinction, so a single code).
+    "runtime_preflight_failed",
+    # Generic ComposerServiceError — prompt prep / availability / catch-all.
+    "service_setup_failed",
+    # Non-failure sentinels — every snapshot carries a code so observability
+    # and the SPA never have to special-case None.
+    "composer_idle",
+    "composer_complete",
 ]
 type ComposerProgressSink = Callable[["ComposerProgressEvent"], Awaitable[None]]
 
@@ -44,6 +79,7 @@ class ComposerProgressEvent(_StrictProgressModel):
     headline: str
     evidence: tuple[str, ...] = ()
     likely_next: str | None = None
+    reason: ComposerProgressReason | None = None
 
     @field_validator("headline")
     @classmethod
@@ -67,6 +103,24 @@ class ComposerProgressEvent(_StrictProgressModel):
             if len(bounded) == COMPOSER_PROGRESS_MAX_EVIDENCE:
                 break
         return tuple(bounded)
+
+    @model_validator(mode="after")
+    def _require_reason_when_failed(self) -> Self:
+        # Mechanically forbids the drift the original bug exhibited: a
+        # phase="failed" event was emitted with text-only differentiation
+        # at three distinct sites and three sub-causes collapsed into one
+        # generic message because nothing in the contract required a
+        # discriminator. With this validator, a new failure site cannot
+        # be added without choosing a code from ComposerProgressReason.
+        # Other phases keep reason optional — they're status pings, not
+        # routing decisions.
+        if self.phase == "failed" and self.reason is None:
+            raise ValueError(
+                "ComposerProgressEvent.reason is required when phase == 'failed' "
+                "so the frontend, audit logs, and HTTP response body can branch "
+                "on a stable taxonomy instead of free-text headline parsing."
+            )
+        return self
 
 
 class ComposerProgressSnapshot(ComposerProgressEvent):
@@ -106,6 +160,7 @@ class ComposerProgressRegistry:
                 headline=event.headline,
                 evidence=event.evidence,
                 likely_next=event.likely_next,
+                reason=event.reason,
                 updated_at=updated_at,
             )
             self._snapshots[session_id] = snapshot
@@ -133,6 +188,61 @@ class ComposerProgressRegistry:
         return now
 
 
+def convergence_progress_event(
+    *,
+    budget_exhausted: Literal["composition", "discovery", "timeout"],
+) -> ComposerProgressEvent:
+    """Map a convergence budget discriminator to a discriminated progress event.
+
+    Three sub-causes (composition turn budget, discovery turn budget, wall-clock
+    timeout) used to collapse into one generic ``phase: failed`` event because
+    only ``ComposerConvergenceError.budget_exhausted`` carried the discriminator
+    and the emit sites discarded it. This helper is the single dispatch point
+    — both the service-level catch (compose() outer try/except) and the
+    route-handler catches in web/sessions/routes.py route through it so the
+    per-cause headline / evidence / likely_next / reason copy is defined
+    exactly once.
+
+    Lives in this module rather than service.py because:
+
+    - the failure-mode taxonomy is a property of the progress contract, not
+      the service implementation;
+    - taking a string discriminator (not the exception) avoids importing
+      ``ComposerConvergenceError`` from ``composer.protocol``, which already
+      imports ``ComposerProgressSink`` from this module — keeping the helper
+      here would otherwise create a circular import.
+
+    Recovery copy is what the user can act on:
+
+    - composition budget → split the request into smaller turns
+    - discovery budget   → narrow the schema/catalog exploration
+    - wall-clock timeout → retry, or ask an operator to raise the server budget
+    """
+    if budget_exhausted == "timeout":
+        return ComposerProgressEvent(
+            phase="failed",
+            headline="The composer timed out before producing a final answer.",
+            evidence=("The composer wall-clock budget elapsed during this request.",),
+            likely_next=("Retry once the provider responds faster, or ask an operator to raise the composer wall-clock budget."),
+            reason="convergence_wall_clock_timeout",
+        )
+    if budget_exhausted == "discovery":
+        return ComposerProgressEvent(
+            phase="failed",
+            headline="The composer used its discovery turn budget without finishing.",
+            evidence=("The discovery-turn budget was exhausted before a final answer.",),
+            likely_next=("Narrow the schema or catalog exploration, or ask an operator to raise the discovery-turn budget."),
+            reason="convergence_discovery_budget",
+        )
+    return ComposerProgressEvent(
+        phase="failed",
+        headline="The composer used its mutation turn budget without finishing.",
+        evidence=("The mutation-turn budget was exhausted before a final answer.",),
+        likely_next=("Split the request into smaller turns, or ask an operator to raise the mutation-turn budget."),
+        reason="convergence_composition_budget",
+    )
+
+
 def _idle_snapshot(session_id: str) -> ComposerProgressSnapshot:
     return ComposerProgressSnapshot(
         session_id=session_id,
@@ -141,6 +251,7 @@ def _idle_snapshot(session_id: str) -> ComposerProgressSnapshot:
         headline="No active composer work.",
         evidence=(),
         likely_next=None,
+        reason="composer_idle",
         updated_at=datetime.now(UTC),
     )
 

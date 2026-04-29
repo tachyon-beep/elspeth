@@ -30,7 +30,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from elspeth.web.async_workers import run_sync_in_worker
 from elspeth.web.catalog.protocol import CatalogService
 from elspeth.web.composer import yaml_generator
-from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressSink
+from elspeth.web.composer.progress import (
+    ComposerProgressEvent,
+    ComposerProgressSink,
+    convergence_progress_event,
+)
 from elspeth.web.composer.prompts import build_messages, build_run_diagnostics_messages
 from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
@@ -476,15 +480,10 @@ class ComposerServiceImpl:
 
         try:
             return await self._compose_loop(message, messages, state, session_id, user_id, deadline, progress)
-        except ComposerConvergenceError:
+        except ComposerConvergenceError as exc:
             await _emit_progress(
                 progress,
-                ComposerProgressEvent(
-                    phase="failed",
-                    headline="The composer could not finish this request.",
-                    evidence=("The bounded composer loop stopped before a final answer.",),
-                    likely_next="Try a smaller request or retry after reviewing the current pipeline.",
-                ),
+                convergence_progress_event(budget_exhausted=exc.budget_exhausted),
             )
             # Has its own partial_state; route handler persists. Do not intercept.
             raise
@@ -549,10 +548,16 @@ class ComposerServiceImpl:
                     headline="The composer could not safely finish this request.",
                     evidence=("A pipeline tool failed on the server side.",),
                     likely_next="Review the visible error message, then retry after the issue is resolved.",
+                    reason="plugin_crash",
                 ),
             )
             raise
         except (ComposerServiceError, LiteLLMAPIError):
+            # Generic service-level failure (prompt prep, availability check,
+            # or a LiteLLMAPIError surfacing through the inner loop). The
+            # route handlers further narrow LiteLLMAPIError into the
+            # provider_unavailable progress code; here the service emits the
+            # safe catch-all because we may not know which class fired.
             await _emit_progress(
                 progress,
                 ComposerProgressEvent(
@@ -560,6 +565,7 @@ class ComposerServiceImpl:
                     headline="The composer could not finish this request.",
                     evidence=("The model call or prompt preparation failed safely.",),
                     likely_next="Retry once the composer service is available.",
+                    reason="service_setup_failed",
                 ),
             )
             raise
@@ -645,6 +651,7 @@ class ComposerServiceImpl:
                         headline="The composer response is ready.",
                         evidence=("The model did not request any more pipeline tools.",),
                         likely_next="ELSPETH will save any accepted pipeline update.",
+                        reason="composer_complete",
                     ),
                 )
                 return await self._finalize_no_tool_response(
@@ -1028,6 +1035,7 @@ class ComposerServiceImpl:
                                 headline="The composer response is ready.",
                                 evidence=("The model stopped requesting pipeline tools.",),
                                 likely_next="ELSPETH will save any accepted pipeline update.",
+                                reason="composer_complete",
                             ),
                         )
                         return await self._finalize_no_tool_response(

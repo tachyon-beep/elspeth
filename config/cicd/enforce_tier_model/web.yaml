@@ -931,7 +931,7 @@ allow_hits:
     by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
   expires: null
-- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=750d2a20ec88fad0
+- key: web/sessions/routes.py:R6:_handle_convergence_error:fp=01c835793d39d8c4
   owner: web-sessions
   reason: Convergence partial-state save may fail — catch covers the full SQLAlchemyError
     family (IntegrityError, OperationalError for lock timeout or pool disconnect,

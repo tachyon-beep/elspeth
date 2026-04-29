@@ -1314,6 +1314,173 @@ class TestComposeTimeout:
         assert exc_info.value.partial_state.source.plugin == "csv"
 
 
+class TestConvergenceProgressDispatch:
+    """Each ComposerConvergenceError sub-cause must surface a discriminated
+    progress event through the sink — covering the contract that fixes
+    elspeth-5030f7373d.
+
+    The original symptom: wall-clock timeout, mutation-turn budget, and
+    discovery-turn budget all collapsed into one generic ``phase: failed``
+    event with the same headline / evidence / likely_next text. These tests
+    end-to-end through ``compose()`` to confirm the sink receives the
+    discriminated event for each budget value.
+    """
+
+    @pytest.mark.asyncio
+    async def test_composition_budget_emits_distinct_failure_event(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings(composer_max_composition_turns=1)
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        progress_events: list[ComposerProgressEvent] = []
+
+        async def record_progress(event: ComposerProgressEvent) -> None:
+            progress_events.append(event)
+
+        mut1 = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "name": "set_metadata",
+                    "arguments": {"patch": {"name": "x"}},
+                }
+            ],
+        )
+        mut2 = _make_llm_response(
+            tool_calls=[
+                {
+                    "id": "c2",
+                    "name": "set_metadata",
+                    "arguments": {"patch": {"name": "y"}},
+                }
+            ],
+        )
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [mut1, mut2]
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("loop forever", [], state, progress=record_progress)
+        assert exc_info.value.budget_exhausted == "composition"
+
+        failed_events = [e for e in progress_events if e.phase == "failed"]
+        assert len(failed_events) == 1
+        assert failed_events[0].reason == "convergence_composition_budget"
+        assert "mutation turn budget" in failed_events[0].headline.lower()
+
+    @pytest.mark.asyncio
+    async def test_discovery_budget_emits_distinct_failure_event(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings(composer_max_discovery_turns=1)
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        progress_events: list[ComposerProgressEvent] = []
+
+        async def record_progress(event: ComposerProgressEvent) -> None:
+            progress_events.append(event)
+
+        disc1 = _make_llm_response(
+            tool_calls=[{"id": "c1", "name": "list_sources", "arguments": {}}],
+        )
+        disc2 = _make_llm_response(
+            tool_calls=[{"id": "c2", "name": "list_transforms", "arguments": {}}],
+        )
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = [disc1, disc2]
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("discover forever", [], state, progress=record_progress)
+        assert exc_info.value.budget_exhausted == "discovery"
+
+        failed_events = [e for e in progress_events if e.phase == "failed"]
+        assert len(failed_events) == 1
+        assert failed_events[0].reason == "convergence_discovery_budget"
+        assert "discovery turn budget" in failed_events[0].headline.lower()
+
+    @pytest.mark.asyncio
+    async def test_wall_clock_timeout_emits_distinct_failure_event(self) -> None:
+        import asyncio
+
+        catalog = _mock_catalog()
+        settings = _make_settings(composer_timeout_seconds=0.1)
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        progress_events: list[ComposerProgressEvent] = []
+
+        async def record_progress(event: ComposerProgressEvent) -> None:
+            progress_events.append(event)
+
+        async def slow_llm(*args: Any, **kwargs: Any) -> Any:
+            await asyncio.sleep(1.0)
+            return _make_llm_response(content="Too late.")
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.side_effect = slow_llm
+            with pytest.raises(ComposerConvergenceError) as exc_info:
+                await service.compose("slow pipeline", [], state, progress=record_progress)
+        assert exc_info.value.budget_exhausted == "timeout"
+
+        failed_events = [e for e in progress_events if e.phase == "failed"]
+        assert len(failed_events) == 1
+        assert failed_events[0].reason == "convergence_wall_clock_timeout"
+        assert "timed out" in failed_events[0].headline.lower()
+
+    @pytest.mark.asyncio
+    async def test_three_sub_causes_produce_three_distinct_progress_reasons(self) -> None:
+        """Regression guard against UX-text collapse — the three convergence
+        sub-causes must surface three distinct reason codes via the sink."""
+        import asyncio
+        import contextlib
+
+        async def collect_failure_reason(
+            settings: Any,
+            llm_side_effect: Any,
+        ) -> str | None:
+            catalog = _mock_catalog()
+            service = ComposerServiceImpl(catalog=catalog, settings=settings)
+            state = _empty_state()
+            events: list[ComposerProgressEvent] = []
+
+            async def record(event: ComposerProgressEvent) -> None:
+                events.append(event)
+
+            with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+                mock_llm.side_effect = llm_side_effect
+                with contextlib.suppress(ComposerConvergenceError):
+                    await service.compose("x", [], state, progress=record)
+            failed = [e for e in events if e.phase == "failed"]
+            return failed[-1].reason if failed else None
+
+        composition_reason = await collect_failure_reason(
+            _make_settings(composer_max_composition_turns=1),
+            [
+                _make_llm_response(tool_calls=[{"id": "c1", "name": "set_metadata", "arguments": {"patch": {"name": "x"}}}]),
+                _make_llm_response(tool_calls=[{"id": "c2", "name": "set_metadata", "arguments": {"patch": {"name": "y"}}}]),
+            ],
+        )
+        discovery_reason = await collect_failure_reason(
+            _make_settings(composer_max_discovery_turns=1),
+            [
+                _make_llm_response(tool_calls=[{"id": "c1", "name": "list_sources", "arguments": {}}]),
+                _make_llm_response(tool_calls=[{"id": "c2", "name": "list_transforms", "arguments": {}}]),
+            ],
+        )
+
+        async def slow(*args: Any, **kwargs: Any) -> Any:
+            await asyncio.sleep(1.0)
+            return _make_llm_response(content="late")
+
+        timeout_reason = await collect_failure_reason(
+            _make_settings(composer_timeout_seconds=0.1),
+            slow,
+        )
+
+        codes = {composition_reason, discovery_reason, timeout_reason}
+        assert len(codes) == 3, (
+            "Convergence sub-causes collapsed into fewer than three distinct progress reasons "
+            "— elspeth-5030f7373d regression. Got: " + repr(codes)
+        )
+
+
 class TestPartialStatePreservation:
     """Tests for partial state preservation on convergence failure (F2)."""
 

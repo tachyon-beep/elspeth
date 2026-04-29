@@ -1831,6 +1831,62 @@ class TestRecomposeConvergencePartialState:
         assert detail["error_type"] == "convergence"
         assert "partial_state" not in detail
 
+    def test_convergence_response_body_carries_distinct_reason_for_each_budget(self, tmp_path) -> None:
+        """The 422 body must carry a stable ``reason`` and ``recovery_text``
+        per ``budget_exhausted`` value so the chat-side error UX cannot drift
+        from the /composer-progress snapshot. Regression for the second-order
+        risk in elspeth-5030f7373d (response/progress drift)."""
+        from elspeth.web.composer.protocol import ComposerConvergenceError
+
+        budgets_to_codes: dict[str, tuple[str, str]] = {
+            "composition": ("convergence_composition_budget", "smaller turns"),
+            "discovery": ("convergence_discovery_budget", "narrow"),
+            "timeout": ("convergence_wall_clock_timeout", "wall-clock"),
+        }
+
+        for budget, (expected_reason, recovery_keyword) in budgets_to_codes.items():
+            mock_composer = AsyncMock()
+            mock_composer.compose = AsyncMock(
+                side_effect=ComposerConvergenceError(
+                    max_turns=5,
+                    budget_exhausted=budget,  # type: ignore[arg-type]
+                    partial_state=None,
+                ),
+            )
+            app, _service = _make_app(tmp_path / f"convergence_body_{budget}")
+            app.state.composer_service = mock_composer
+            client = TestClient(app, raise_server_exceptions=False)
+
+            resp = client.post("/api/sessions", json={"title": f"convergence-{budget}"})
+            assert resp.status_code in (200, 201), resp.text
+            session_id = resp.json()["id"]
+
+            response = client.post(
+                f"/api/sessions/{session_id}/messages",
+                json={"content": "Build me a pipeline"},
+            )
+
+            assert response.status_code == 422, response.text
+            detail = response.json()["detail"]
+            assert detail["error_type"] == "convergence"
+            assert detail["budget_exhausted"] == budget
+            assert detail["reason"] == expected_reason, (
+                f"422 body reason for budget={budget!r} must be {expected_reason!r}, got {detail.get('reason')!r}"
+            )
+            assert detail["recovery_text"], "422 body must include actionable recovery_text"
+            assert recovery_keyword in detail["recovery_text"].lower(), (
+                f"recovery_text for budget={budget!r} must mention {recovery_keyword!r}; got {detail['recovery_text']!r}"
+            )
+
+            progress_resp = client.get(f"/api/sessions/{session_id}/composer-progress")
+            assert progress_resp.status_code == 200
+            snapshot = progress_resp.json()
+            assert snapshot["phase"] == "failed"
+            assert snapshot["reason"] == expected_reason, (
+                "Progress snapshot reason must match the 422 body reason — drift would "
+                "re-introduce the elspeth-5030f7373d split-brain symptom at a different layer."
+            )
+
     def test_convergence_redacts_blob_path_from_response_but_preserves_in_db(self, tmp_path) -> None:
         """When partial_state has a blob-backed source, the HTTP response must
         redact the internal storage path while the DB copy retains it."""
