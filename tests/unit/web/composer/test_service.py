@@ -3077,6 +3077,37 @@ class TestComposerRuntimePreflightFinalGate:
         mock_preflight.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_unchanged_state_reuses_valid_preview_preflight_without_replacement(self) -> None:
+        """Reuse path with is_valid=True must preserve the LLM message verbatim.
+
+        Complement to test_unchanged_state_reuses_preview_preflight_without_rerun:
+        that test exercises the invalid-cached branch (which replaces the
+        message). This test pins the valid-cached branch (which must keep the
+        LLM message intact and not populate raw_assistant_content).
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        passing_preview_preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch.object(service, "_runtime_preflight") as mock_preflight:
+            result = await service._finalize_no_tool_response(
+                content="The pipeline is complete and valid.",
+                state=state,
+                initial_version=state.version,
+                user_id="user-1",
+                last_runtime_preflight=passing_preview_preflight,
+                runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                session_scope="session:test",
+            )
+
+        assert result.message == "The pipeline is complete and valid."
+        assert result.raw_assistant_content is None
+        assert result.runtime_preflight is passing_preview_preflight
+        mock_preflight.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_passing_preflight_preserves_original_message_verbatim(self) -> None:
         catalog = _mock_catalog()
         settings = _make_settings()

@@ -337,9 +337,20 @@ class ComposerServiceImpl:
 
         Prefers the first ValidationError's message and suggestion, falls back
         to the first failed check's detail, then to a bare fallback if the
-        ValidationResult carries neither.  The message is echoed verbatim to
-        the chat history as the assistant reply, so it must not carry any
-        secret or path fragments — only human-readable validation copy.
+        ValidationResult carries neither.
+
+        Boundary contract: the message is echoed verbatim into chat history
+        and the OpenAI-format chat completion. Secrets are guaranteed absent
+        because validate_pipeline() resolves secret refs before settings load
+        and validation errors are derived from typed plugin configs, never
+        from raw secret values. However, the message MAY carry operator-
+        supplied path fragments (the operator's own configured CSV paths,
+        sink output paths) and exception text that names plugin config field
+        values — both are surfaced verbatim from ValidationError.message and
+        ValidationCheck.detail. In the current single-operator deployment
+        model this is acceptable: the operator already knows their own
+        paths and config. If ELSPETH ever takes a multi-tenant deployment
+        shape, this synthesizer must be sanitized before merge.
         """
         if result.errors:
             first = result.errors[0]
