@@ -28,6 +28,7 @@ from elspeth.web.composer.state import (
     SourceSpec,
 )
 from elspeth.web.composer.yaml_generator import generate_yaml
+from elspeth.web.execution.schemas import ValidationError, ValidationResult
 from elspeth.web.sessions.converters import state_from_record as _state_from_record
 from elspeth.web.sessions.protocol import (
     CompositionStateData,
@@ -305,6 +306,119 @@ class TestVersionChangeDetection:
         )
         assert s2.version == 3
         assert s2.version != initial.version
+
+
+# ---------------------------------------------------------------------------
+# ComposerResult pairing invariant
+# ---------------------------------------------------------------------------
+
+
+class TestComposerResultPairingInvariant:
+    """I6 lock-in: enforce the docstring contract between
+    ``runtime_preflight`` and ``raw_assistant_content`` mechanically.
+
+    The pairing is iff:
+    * ``raw_assistant_content`` is set
+    * ⇔ ``runtime_preflight`` is non-None and ``not is_valid``
+    * ⇔ ``message`` was replaced by the synthetic preflight-failure
+      summary; the original LLM text is parked in ``raw_assistant_content``.
+
+    Without an enforcement check, a caller could construct a
+    ``ComposerResult(raw_assistant_content="...")`` with no preflight
+    failure attached. That object would silently violate the audit-trail
+    contract: the persisted ``raw_content`` would imply a replacement
+    that never happened, mis-attributing a verbatim LLM response as if
+    the runtime gate had intervened.
+    """
+
+    @staticmethod
+    def _passing_validation() -> ValidationResult:
+        return ValidationResult(is_valid=True, checks=[], errors=[])
+
+    @staticmethod
+    def _failing_validation() -> ValidationResult:
+        return ValidationResult(
+            is_valid=False,
+            checks=[],
+            errors=[
+                ValidationError(
+                    component_id=None,
+                    component_type=None,
+                    message="boom",
+                    suggestion=None,
+                ),
+            ],
+        )
+
+    def test_no_preflight_no_raw_content_is_valid(self) -> None:
+        """No preflight ran → message is verbatim, raw_content is None."""
+        ComposerResult(message="hi", state=_make_empty_state())
+
+    def test_passed_preflight_no_raw_content_is_valid(self) -> None:
+        """Preflight passed → message is verbatim, raw_content is None."""
+        ComposerResult(
+            message="hi",
+            state=_make_empty_state(),
+            runtime_preflight=self._passing_validation(),
+        )
+
+    def test_failed_preflight_with_raw_content_is_valid(self) -> None:
+        """Preflight failed → message was replaced, raw_content holds original."""
+        ComposerResult(
+            message="<synthetic preflight-failure summary>",
+            state=_make_empty_state(),
+            runtime_preflight=self._failing_validation(),
+            raw_assistant_content="The pipeline is complete.",
+        )
+
+    def test_raw_content_without_preflight_is_rejected(self) -> None:
+        """raw_assistant_content set but runtime_preflight is None — forbidden.
+
+        The docstring says raw_content holds the original LLM text "when
+        ``message`` has been replaced with a synthetic preflight-failure
+        message". Without a preflight, no replacement happened, so a
+        non-None raw_content represents a contract violation.
+        """
+        with pytest.raises(ValueError, match=r"message replacement contract|preflight"):
+            ComposerResult(
+                message="hi",
+                state=_make_empty_state(),
+                runtime_preflight=None,
+                raw_assistant_content="something",
+            )
+
+    def test_raw_content_with_passed_preflight_is_rejected(self) -> None:
+        """raw_assistant_content set but runtime_preflight passed — forbidden.
+
+        A passing preflight does not replace ``message``, so raw_content
+        being non-None represents a contract violation.
+        """
+        with pytest.raises(ValueError, match=r"message replacement contract|preflight"):
+            ComposerResult(
+                message="hi",
+                state=_make_empty_state(),
+                runtime_preflight=self._passing_validation(),
+                raw_assistant_content="something",
+            )
+
+    def test_failed_preflight_without_raw_content_is_rejected(self) -> None:
+        """runtime_preflight failed but raw_assistant_content is None — forbidden.
+
+        The message field's docstring states "when runtime preflight
+        fails, [message] is replaced with a synthetic failure message;
+        the original LLM text is preserved in ``raw_assistant_content``".
+        A failed preflight without a parked raw_content means either the
+        replacement never happened (the user sees a synthetic message
+        but the real LLM output is gone) or the replacement happened but
+        the original was discarded — either way, a contract violation.
+        """
+        with pytest.raises(ValueError, match=r"raw_assistant_content|message replacement"):
+            ComposerResult(
+                message="<synthetic>",
+                state=_make_empty_state(),
+                runtime_preflight=self._failing_validation(),
+                raw_assistant_content=None,
+            )
 
 
 # ---------------------------------------------------------------------------

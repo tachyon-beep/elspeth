@@ -31,12 +31,50 @@ class ComposerResult:
         raw_assistant_content: The original LLM text when ``message``
             has been replaced with a synthetic preflight-failure message.
             ``None`` when ``message`` is the verbatim LLM response.
+
+    Field-pairing invariant:
+        ``raw_assistant_content`` is non-None **iff** ``runtime_preflight``
+        is non-None and ``not is_valid`` (i.e., a runtime-preflight
+        failure caused the synthetic message replacement). Enforced
+        mechanically by ``__post_init__`` because this object flows
+        into the audit trail — a violating pairing would silently
+        misattribute a verbatim LLM response as if the runtime gate
+        had intervened, or lose the original LLM output when the gate
+        actually did intervene.
     """
 
     message: str
     state: CompositionState
     runtime_preflight: ValidationResult | None = None
     raw_assistant_content: str | None = None
+
+    def __post_init__(self) -> None:
+        # Bidirectional iff enforcement of the field-pairing invariant
+        # documented above. Both directions matter:
+        #
+        # 1. raw_assistant_content set with no preflight failure →
+        #    audit trail would imply a synthetic replacement happened
+        #    when message is actually the verbatim LLM output.
+        # 2. preflight failed with no raw_assistant_content →
+        #    audit trail would carry the synthetic message but the
+        #    original LLM text is irrecoverably lost.
+        preflight_failed = self.runtime_preflight is not None and not self.runtime_preflight.is_valid
+        if self.raw_assistant_content is not None and not preflight_failed:
+            raise ValueError(
+                "ComposerResult message replacement contract violated: "
+                "raw_assistant_content is set but runtime_preflight is "
+                "either None or passed — raw_assistant_content is reserved "
+                "for the case where runtime_preflight failed and message "
+                "was replaced with a synthetic failure summary."
+            )
+        if preflight_failed and self.raw_assistant_content is None:
+            raise ValueError(
+                "ComposerResult message replacement contract violated: "
+                "runtime_preflight failed but raw_assistant_content is None — "
+                "the failed preflight should have replaced message with a "
+                "synthetic summary and parked the original LLM text in "
+                "raw_assistant_content for audit-trail recovery."
+            )
 
 
 class ComposerServiceError(Exception):

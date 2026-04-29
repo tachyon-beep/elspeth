@@ -3580,6 +3580,11 @@ def test_recompose_success_persists_runtime_invalid_state(tmp_path) -> None:
             message="I cannot mark this pipeline complete yet.",
             state=changed_state,
             runtime_preflight=runtime_preflight,
+            # I6 invariant: failed runtime_preflight requires the original LLM
+            # text to be parked in raw_assistant_content so the audit trail
+            # can recover what the LLM actually said before the synthetic
+            # replacement was substituted into ``message``.
+            raw_assistant_content="The pipeline is complete and valid.",
         )
     )
     app.state.composer_service = mock_composer
