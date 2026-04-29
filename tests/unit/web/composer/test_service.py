@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from dataclasses import dataclass
+import threading
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,18 +24,23 @@ from elspeth.web.composer.protocol import (
     ComposerConvergenceError,
     ComposerPluginCrashError,
     ComposerResult,
+    ComposerRuntimePreflightError,
     ComposerServiceError,
     ToolArgumentError,
 )
 from elspeth.web.composer.service import ComposerAvailability, ComposerServiceImpl
 from elspeth.web.composer.state import (
     CompositionState,
+    OutputSpec,
     PipelineMetadata,
+    SourceSpec,
     ValidationSummary,
 )
 from elspeth.web.composer.tools import ToolResult
 from elspeth.web.composer.tools import execute_tool as _execute_tool
 from elspeth.web.config import WebSettings
+from elspeth.web.execution.preflight import runtime_preflight_settings_hash
+from elspeth.web.execution.schemas import ValidationCheck, ValidationError, ValidationResult
 
 
 @dataclass
@@ -259,7 +265,11 @@ class TestComposerSingleToolCall:
         # Turn 2: text response
         text_response = _make_llm_response(content="I've set up a CSV source.")
 
-        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+        passing_preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch.object(service, "_runtime_preflight", return_value=passing_preflight),
+        ):
             mock_llm.side_effect = [tool_response, text_response]
             result = await service.compose("Use CSV as source", [], state)
 
@@ -441,7 +451,11 @@ class TestComposerConvergence:
         )
         text = _make_llm_response(content="Done after final correction.")
 
-        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+        passing_preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch.object(service, "_runtime_preflight", return_value=passing_preflight),
+        ):
             mock_llm.side_effect = [mut, text]
             result = await service.compose("Do it", [], state)
 
@@ -480,7 +494,11 @@ class TestComposerConvergence:
         # Turn 3: text response — loop terminates
         text = _make_llm_response(content="Done.")
 
-        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+        passing_preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+        with (
+            patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm,
+            patch.object(service, "_runtime_preflight", return_value=passing_preflight),
+        ):
             mock_llm.side_effect = [disc, mut, text]
             result = await service.compose("Build", [], state)
 
@@ -2850,3 +2868,322 @@ class TestComposerErrorConstructionInvariants:
 
         assert exc.partial_state is mutated
         assert exc.budget_exhausted == "timeout"
+
+
+class TestComposerRuntimePreflightCacheAndTimeout:
+    @pytest.mark.asyncio
+    async def test_runtime_preflight_cache_reuses_same_state_version_and_settings_hash(self) -> None:
+        service = ComposerServiceImpl(catalog=_mock_catalog(), settings=_make_settings())
+        state = _empty_state()
+        cache = service._new_runtime_preflight_cache()
+        preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch.object(service, "_runtime_preflight", return_value=preflight) as mock_preflight:
+            first = await service._cached_runtime_preflight(
+                state,
+                user_id="user-1",
+                cache=cache,
+                initial_version=state.version,
+                session_scope="session:test",
+            )
+            second = await service._cached_runtime_preflight(
+                state,
+                user_id="user-1",
+                cache=cache,
+                initial_version=state.version,
+                session_scope="session:test",
+            )
+
+        assert first is preflight
+        assert second is preflight
+        mock_preflight.assert_called_once_with(state, "user-1")
+
+    @pytest.mark.asyncio
+    async def test_runtime_preflight_timeout_is_cached_for_compose_call(self) -> None:
+        settings = _make_settings(composer_runtime_preflight_timeout_seconds=0.01)
+        service = ComposerServiceImpl(catalog=_mock_catalog(), settings=settings)
+        state = _empty_state()
+        cache = service._new_runtime_preflight_cache()
+        started = threading.Event()
+        release = threading.Event()
+
+        def slow_preflight(candidate: CompositionState, user_id: str | None) -> ValidationResult:
+            started.set()
+            release.wait(timeout=30)
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        try:
+            with patch.object(service, "_runtime_preflight", side_effect=slow_preflight) as mock_preflight:
+                with pytest.raises(ComposerRuntimePreflightError) as first:
+                    await service._cached_runtime_preflight(
+                        state,
+                        user_id="user-1",
+                        cache=cache,
+                        initial_version=state.version - 1,
+                        session_scope="session:test",
+                    )
+                assert first.value.exc_class == "TimeoutError"
+                assert started.is_set()
+
+                with pytest.raises(ComposerRuntimePreflightError) as second:
+                    await service._cached_runtime_preflight(
+                        state,
+                        user_id="user-1",
+                        cache=cache,
+                        initial_version=state.version - 1,
+                        session_scope="session:test",
+                    )
+
+                assert second.value.exc_class == "TimeoutError"
+                mock_preflight.assert_called_once()
+        finally:
+            release.set()
+
+    def test_runtime_preflight_settings_hash_is_non_secret(self) -> None:
+        class FakeSettings:
+            data_dir = Path("/tmp/elspeth-data")
+            landscape_passphrase = "SECRET_CANARY_SHOULD_NOT_APPEAR"
+
+        digest = runtime_preflight_settings_hash(FakeSettings())
+
+        assert "SECRET_CANARY" not in digest
+        assert len(digest) == 64
+
+
+class TestComposerRuntimePreflightFinalGate:
+    @pytest.mark.asyncio
+    async def test_changed_state_completion_is_replaced_when_runtime_preflight_fails(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        changed_state = state.with_source(
+            SourceSpec(
+                plugin="csv",
+                on_success="main",
+                options={"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                on_validation_failure="discard",
+            )
+        ).with_output(
+            OutputSpec(
+                name="main",
+                plugin="csv",
+                options={"path": "/data/outputs/out.csv", "schema": {"mode": "observed"}},
+                on_write_failure="discard",
+            )
+        )
+        changed_state = replace(changed_state, version=state.version + 1)
+
+        llm_response = _make_llm_response(content="The pipeline is complete and valid.")
+        failed_preflight = ValidationResult(
+            is_valid=False,
+            checks=[
+                ValidationCheck(
+                    name="settings_load",
+                    passed=False,
+                    detail="Forbidden name: 'end_of_source'",
+                )
+            ],
+            errors=[
+                ValidationError(
+                    component_id="agg1",
+                    component_type="aggregation",
+                    message="Forbidden name: 'end_of_source'",
+                    suggestion="Omit trigger for end-of-source-only aggregation.",
+                )
+            ],
+        )
+
+        with patch.object(service, "_call_llm", new_callable=AsyncMock) as mock_llm:
+            mock_llm.return_value = llm_response
+            with patch.object(service, "_runtime_preflight", return_value=failed_preflight) as mock_preflight:
+                result = await service._finalize_no_tool_response(
+                    content="The pipeline is complete and valid.",
+                    state=changed_state,
+                    initial_version=state.version,
+                    user_id="user-1",
+                    last_runtime_preflight=None,
+                    runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                    session_scope="session:test",
+                )
+
+        assert result.message != "The pipeline is complete and valid."
+        assert result.raw_assistant_content == "The pipeline is complete and valid."
+        assert result.runtime_preflight is failed_preflight
+        mock_preflight.assert_called_once_with(changed_state, "user-1")
+
+    @pytest.mark.asyncio
+    async def test_unchanged_text_without_preview_does_not_run_preflight(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+
+        with patch.object(service, "_runtime_preflight") as mock_preflight:
+            result = await service._finalize_no_tool_response(
+                content="I can help with that.",
+                state=state,
+                initial_version=state.version,
+                user_id="user-1",
+                last_runtime_preflight=None,
+                runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                session_scope="session:test",
+            )
+
+        assert result.message == "I can help with that."
+        assert result.raw_assistant_content is None
+        assert result.runtime_preflight is None
+        mock_preflight.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unchanged_state_reuses_preview_preflight_without_rerun(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        preview_preflight = ValidationResult(
+            is_valid=False,
+            checks=[
+                ValidationCheck(
+                    name="settings_load",
+                    passed=False,
+                    detail="Forbidden name: 'end_of_source'",
+                )
+            ],
+            errors=[
+                ValidationError(
+                    component_id="agg1",
+                    component_type="aggregation",
+                    message="Forbidden name: 'end_of_source'",
+                    suggestion=None,
+                )
+            ],
+        )
+
+        with patch.object(service, "_runtime_preflight") as mock_preflight:
+            result = await service._finalize_no_tool_response(
+                content="The pipeline is complete and valid.",
+                state=state,
+                initial_version=state.version,
+                user_id="user-1",
+                last_runtime_preflight=preview_preflight,
+                runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                session_scope="session:test",
+            )
+
+        assert result.message != "The pipeline is complete and valid."
+        assert result.raw_assistant_content == "The pipeline is complete and valid."
+        assert result.runtime_preflight is preview_preflight
+        mock_preflight.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_unchanged_state_reuses_valid_preview_preflight_without_replacement(self) -> None:
+        """Reuse path with is_valid=True must preserve the LLM message verbatim.
+
+        Complement to test_unchanged_state_reuses_preview_preflight_without_rerun:
+        that test exercises the invalid-cached branch (which replaces the
+        message). This test pins the valid-cached branch (which must keep the
+        LLM message intact and not populate raw_assistant_content).
+        """
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        passing_preview_preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch.object(service, "_runtime_preflight") as mock_preflight:
+            result = await service._finalize_no_tool_response(
+                content="The pipeline is complete and valid.",
+                state=state,
+                initial_version=state.version,
+                user_id="user-1",
+                last_runtime_preflight=passing_preview_preflight,
+                runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                session_scope="session:test",
+            )
+
+        assert result.message == "The pipeline is complete and valid."
+        assert result.raw_assistant_content is None
+        assert result.runtime_preflight is passing_preview_preflight
+        mock_preflight.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_passing_preflight_preserves_original_message_verbatim(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        changed_state = replace(state, version=state.version + 1)
+        passed_preflight = ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch.object(service, "_runtime_preflight", return_value=passed_preflight):
+            result = await service._finalize_no_tool_response(
+                content="The pipeline is complete and valid.",
+                state=changed_state,
+                initial_version=state.version,
+                user_id="user-1",
+                last_runtime_preflight=None,
+                runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                session_scope="session:test",
+            )
+
+        assert result.message == "The pipeline is complete and valid."
+        assert result.raw_assistant_content is None
+        assert result.runtime_preflight is passed_preflight
+
+    def test_runtime_preflight_failure_message_uses_failed_check_when_errors_empty(self) -> None:
+        result = ValidationResult(
+            is_valid=False,
+            checks=[
+                ValidationCheck(
+                    name="graph_structure",
+                    passed=False,
+                    detail="Graph has no path from source to sink",
+                )
+            ],
+            errors=[],
+        )
+
+        message = ComposerServiceImpl._runtime_preflight_failure_message(result)
+
+        assert "runtime preflight failed" in message
+        assert "Graph has no path from source to sink" in message
+
+    def test_runtime_preflight_failure_message_has_bare_fallback(self) -> None:
+        result = ValidationResult(is_valid=False, checks=[], errors=[])
+
+        message = ComposerServiceImpl._runtime_preflight_failure_message(result)
+
+        assert message == "I cannot mark this pipeline complete yet because runtime preflight failed."
+
+    @pytest.mark.asyncio
+    async def test_unexpected_preflight_exception_preserves_partial_state(self) -> None:
+        catalog = _mock_catalog()
+        settings = _make_settings()
+        service = ComposerServiceImpl(catalog=catalog, settings=settings)
+        state = _empty_state()
+        changed_state = replace(state, version=state.version + 1)
+
+        with (
+            patch.object(service, "_runtime_preflight", side_effect=RuntimeError("boom")),
+            pytest.raises(ComposerRuntimePreflightError) as exc_info,
+        ):
+            await service._finalize_no_tool_response(
+                content="The pipeline is complete.",
+                state=changed_state,
+                initial_version=state.version,
+                user_id="user-1",
+                last_runtime_preflight=None,
+                runtime_preflight_cache=service._new_runtime_preflight_cache(),
+                session_scope="session:test",
+            )
+
+        assert exc_info.value.partial_state == changed_state
+        assert exc_info.value.exc_class == "RuntimeError"
+
+    def test_runtime_preflight_error_original_exception_is_frozen(self) -> None:
+        original = RuntimeError("boom")
+        error = ComposerRuntimePreflightError(original_exc=original, partial_state=None)
+
+        with pytest.raises(AttributeError):
+            error.original_exc = RuntimeError("replacement")

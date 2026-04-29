@@ -64,6 +64,7 @@ chat_messages_table = Table(
     ),
     Column("role", String, nullable=False),
     Column("content", Text, nullable=False),
+    Column("raw_content", Text, nullable=True),
     Column("tool_calls", JSON, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Composite FK forces same-session ownership: a message in session B

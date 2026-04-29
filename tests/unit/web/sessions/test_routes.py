@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import yaml
@@ -31,8 +31,9 @@ from elspeth.web.auth.models import UserIdentity
 from elspeth.web.composer.progress import ComposerProgressEvent, ComposerProgressRegistry
 from elspeth.web.composer.protocol import ComposerPluginCrashError, ComposerResult
 from elspeth.web.composer.redaction import REDACTED_BLOB_SOURCE_PATH
-from elspeth.web.composer.state import CompositionState, PipelineMetadata
+from elspeth.web.composer.state import CompositionState, PipelineMetadata, ValidationSummary
 from elspeth.web.config import WebSettings
+from elspeth.web.execution.schemas import ValidationCheck, ValidationError, ValidationResult
 from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 from elspeth.web.sessions.engine import create_session_engine
 from elspeth.web.sessions.protocol import (
@@ -183,6 +184,7 @@ class _ProgressRouteSessionService:
         content: str,
         tool_calls=None,
         composition_state_id: uuid.UUID | None = None,
+        raw_content: str | None = None,
     ) -> ChatMessageRecord:
         if session_id != self.session.id:
             raise ValueError("Session not found")
@@ -191,6 +193,7 @@ class _ProgressRouteSessionService:
             session_id=session_id,
             role=role,
             content=content,
+            raw_content=raw_content,
             tool_calls=tool_calls,
             created_at=datetime.now(UTC),
             composition_state_id=composition_state_id,
@@ -262,6 +265,7 @@ def _make_progress_route_app(
     app.state.rate_limiter = ComposerRateLimiter(limit=100)
     app.state.execution_service = AsyncMock()
     app.state.composer_progress_registry = ComposerProgressRegistry()
+    app.state.scoped_secret_resolver = None
     app.include_router(create_session_router())
     return app, service
 
@@ -304,12 +308,11 @@ def _make_app(
     # must replace it with a mock before sending requests.
     app.state.composer_service = None
 
-    from unittest.mock import MagicMock
-
     from elspeth.web.middleware.rate_limit import ComposerRateLimiter
 
     app.state.rate_limiter = ComposerRateLimiter(limit=100)
     app.state.composer_progress_registry = ComposerProgressRegistry()
+    app.state.scoped_secret_resolver = None
 
     # Minimal mock for execution service — delete_session calls
     # cleanup_session_lock() after archiving.
@@ -2242,7 +2245,11 @@ class TestYamlEndpoint:
             ),
         )
 
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        async def _pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=_pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
         assert resp.status_code == 200
         body = resp.json()
         assert "yaml" in body
@@ -2305,7 +2312,11 @@ class TestYamlEndpoint:
             ),
         )
 
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        async def _pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=_pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
         assert resp.status_code == 200
         assert "field_mapper" in resp.json()["yaml"]
         assert "body" in resp.json()["yaml"]
@@ -2372,64 +2383,15 @@ class TestYamlEndpoint:
             ),
         )
 
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+        async def _pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=_pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
 
         assert resp.status_code == 200
         doc = yaml.safe_load(resp.json()["yaml"])
         assert doc["coalesce"][0]["on_success"] == "main"
-
-    @pytest.mark.asyncio
-    async def test_yaml_returns_409_when_current_state_is_invalid(self, tmp_path) -> None:
-        app, service = _make_app(tmp_path)
-        client = TestClient(app)
-
-        session = await service.create_session("alice", "Pipeline", "local")
-        await service.save_composition_state(
-            session.id,
-            CompositionStateData(
-                source={
-                    "plugin": "csv",
-                    "on_success": "t1",
-                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
-                    "on_validation_failure": "quarantine",
-                },
-                nodes=[
-                    {
-                        "id": "t1",
-                        "node_type": "transform",
-                        "plugin": "value_transform",
-                        "input": "t1",
-                        "on_success": "main",
-                        "on_error": "discard",
-                        "options": {
-                            "required_input_fields": ["text"],
-                            "operations": [{"target": "out", "expression": "row['text']"}],
-                            "schema": {"mode": "observed"},
-                        },
-                        "condition": None,
-                        "routes": None,
-                        "fork_to": None,
-                        "branches": None,
-                        "policy": None,
-                        "merge": None,
-                    },
-                ],
-                outputs=[
-                    {
-                        "name": "main",
-                        "plugin": "csv",
-                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
-                        "on_write_failure": "discard",
-                    }
-                ],
-                metadata_={"name": "Invalid Contract Pipeline", "description": ""},
-                is_valid=True,
-            ),
-        )
-
-        resp = client.get(f"/api/sessions/{session.id}/state/yaml")
-        assert resp.status_code == 409
-        assert "invalid" in resp.json()["detail"].lower()
 
     def test_yaml_returns_404_when_no_state(self, tmp_path) -> None:
         """No composition state yet -> 404."""
@@ -2441,6 +2403,209 @@ class TestYamlEndpoint:
 
         yaml_resp = client.get(f"/api/sessions/{session_id}/state/yaml")
         assert yaml_resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_validates_exact_state_snapshot(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "main",
+                    "options": {"path": "/data/blobs/input.csv", "schema": {"mode": "observed"}},
+                    "on_validation_failure": "quarantine",
+                },
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Snapshot", "description": ""},
+                is_valid=True,
+            ),
+        )
+
+        captured_states: list[CompositionState] = []
+
+        async def fake_runtime_preflight(state, *, settings, secret_service, user_id):
+            captured_states.append(state)
+            return ValidationResult(
+                is_valid=False,
+                checks=[],
+                errors=[
+                    ValidationError(
+                        component_id="source",
+                        component_type="source",
+                        message="runtime preflight failed for captured state",
+                        suggestion=None,
+                    )
+                ],
+            )
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=fake_runtime_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 409
+        assert "runtime preflight failed for captured state" in resp.json()["detail"]
+        assert len(captured_states) == 1
+        assert captured_states[0].source is not None
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_emits_yaml_export_telemetry_on_passed_preflight(self, tmp_path, monkeypatch) -> None:
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        async def pass_preflight(state, *, settings, secret_service, user_id):
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=pass_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 200
+        assert any(attrs.get("source") == "yaml_export" and attrs.get("result") == "passed" for _, attrs in emitted)
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_emits_yaml_export_telemetry_on_failed_preflight(self, tmp_path, monkeypatch) -> None:
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        failure = ValidationResult(
+            is_valid=False,
+            checks=[],
+            errors=[ValidationError(component_id=None, component_type=None, message="bad runtime", suggestion=None)],
+        )
+
+        async def fail_preflight(state, *, settings, secret_service, user_id):
+            return failure
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=fail_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 409
+        assert any(attrs.get("source") == "yaml_export" and attrs.get("result") == "failed" for _, attrs in emitted)
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_handles_preflight_exception_with_telemetry_and_409(self, tmp_path, monkeypatch) -> None:
+        """Preflight exceptions must surface as 409 with bounded telemetry, not 500 with raw exception text."""
+        from elspeth.web.sessions import routes as routes_module
+
+        emitted: list[tuple[str, dict[str, str]]] = []
+
+        class FakeCounter:
+            def add(self, value: int, attributes: dict[str, str]) -> None:
+                emitted.append((str(value), dict(attributes)))
+
+        monkeypatch.setattr(routes_module, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id, CompositionStateData(metadata_={"name": "Snapshot", "description": ""}, is_valid=True)
+        )
+
+        secret_canary = "this-text-must-not-appear-in-the-response-body"
+
+        async def boom(state, *, settings, secret_service, user_id):
+            raise TimeoutError(secret_canary)
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=boom):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 409
+        # The raw exception text must not leak into the response body.
+        assert secret_canary not in resp.text
+        assert "Runtime preflight could not complete" in resp.json()["detail"]
+        # Telemetry recorded the exception class as a bounded attribute.
+        assert any(
+            attrs.get("source") == "yaml_export" and attrs.get("result") == "exception" and attrs.get("exception_class") == "TimeoutError"
+            for _, attrs in emitted
+        )
+
+    @pytest.mark.asyncio
+    async def test_get_state_yaml_preserves_secret_ref_markers_in_output(self, tmp_path) -> None:
+        app, service = _make_app(tmp_path)
+        client = TestClient(app)
+        resolved_secret = "__RESOLVED_SECRET_CANARY_DO_NOT_EXPORT__"
+
+        class FakeResolvedSecretService:
+            resolved_value = resolved_secret
+
+        app.state.scoped_secret_resolver = FakeResolvedSecretService()
+        session = await service.create_session("alice", "Pipeline", "local")
+        await service.save_composition_state(
+            session.id,
+            CompositionStateData(
+                source={
+                    "plugin": "csv",
+                    "on_success": "main",
+                    "options": {
+                        "path": "/data/blobs/input.csv",
+                        "schema": {"mode": "observed"},
+                        "api_key": {"secret_ref": "OPENAI_API_KEY"},
+                    },
+                    "on_validation_failure": "quarantine",
+                },
+                outputs=[
+                    {
+                        "name": "main",
+                        "plugin": "csv",
+                        "options": {"path": "outputs/out.csv", "schema": {"mode": "observed"}},
+                        "on_write_failure": "discard",
+                    }
+                ],
+                metadata_={"name": "Secret export", "description": ""},
+                is_valid=True,
+            ),
+        )
+
+        async def fake_runtime_preflight(state, *, settings, secret_service, user_id):
+            assert secret_service is app.state.scoped_secret_resolver
+            assert secret_service.resolved_value == resolved_secret
+            # The runtime preflight path may resolve the secret in memory; export
+            # must still serialize the original state snapshot with the secret_ref marker.
+            assert state.to_dict()["source"]["options"]["api_key"] == {"secret_ref": "OPENAI_API_KEY"}
+            return ValidationResult(is_valid=True, checks=[], errors=[])
+
+        with patch("elspeth.web.sessions.routes._runtime_preflight_for_state", side_effect=fake_runtime_preflight):
+            resp = client.get(f"/api/sessions/{session.id}/state/yaml")
+
+        assert resp.status_code == 200
+        exported_yaml = resp.json()["yaml"]
+        assert resolved_secret not in exported_yaml
+        parsed = yaml.safe_load(exported_yaml)
+        assert parsed["source"]["options"]["api_key"] == {"secret_ref": "OPENAI_API_KEY"}
 
 
 class TestRunAlreadyActiveError:
@@ -3214,3 +3379,457 @@ class TestComposePluginCrashResponse:
         # renders detail as a dict or a string.  This closes the vacuous-
         # pass risk of an `if isinstance(...)` guard.
         assert "composer_plugin_error" not in response.text
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Persist Runtime Validity And Raw Model Text Across All Composer
+# Write Paths
+# ---------------------------------------------------------------------------
+
+
+def test_runtime_preflight_errors_are_used_for_composition_state_persistence() -> None:
+    from elspeth.web.sessions.routes import _composer_persisted_validation
+
+    authoring = ValidationSummary(is_valid=True, errors=(), warnings=(), suggestions=())
+    runtime = ValidationResult(
+        is_valid=False,
+        checks=[
+            ValidationCheck(
+                name="plugin_instantiation",
+                passed=False,
+                detail="Invalid configuration for transform 'batch_stats'",
+            )
+        ],
+        errors=[
+            ValidationError(
+                component_id="agg1",
+                component_type="transform",
+                message="Invalid configuration for transform 'batch_stats'",
+                suggestion="Remove required_input_fields from batch-aware transform options.",
+            )
+        ],
+    )
+
+    is_valid, messages = _composer_persisted_validation(authoring, runtime)
+
+    assert is_valid is False
+    assert messages == ["Invalid configuration for transform 'batch_stats'"]
+
+
+def test_authoring_validity_is_not_marked_valid_when_runtime_preflight_failed_internally() -> None:
+    from elspeth.web.sessions.routes import _RUNTIME_PREFLIGHT_FAILED, _composer_persisted_validation
+
+    authoring = ValidationSummary(is_valid=True, errors=(), warnings=(), suggestions=())
+
+    is_valid, messages = _composer_persisted_validation(authoring, _RUNTIME_PREFLIGHT_FAILED)
+
+    assert is_valid is False
+    assert messages == ["runtime_preflight_failed"]
+
+
+def test_composer_persisted_validation_has_no_split_runtime_failed_knob() -> None:
+    import inspect
+
+    from elspeth.web.sessions.routes import _composer_persisted_validation
+
+    params = inspect.signature(_composer_persisted_validation).parameters
+
+    assert "preflight_failed" not in params
+    assert list(params) == ["authoring", "runtime_preflight"]
+
+
+def test_authoring_valid_state_without_runtime_outcome_is_rejected() -> None:
+    from elspeth.web.sessions.routes import _composer_persisted_validation
+
+    authoring = ValidationSummary(is_valid=True, errors=(), warnings=(), suggestions=())
+
+    with pytest.raises(ValueError, match="requires runtime preflight outcome"):
+        _composer_persisted_validation(authoring, None)
+
+
+@pytest.mark.asyncio
+async def test_state_data_from_composer_state_propagates_to_dict_errors() -> None:
+    from elspeth.web.composer.state import ValidationEntry
+    from elspeth.web.sessions.routes import _state_data_from_composer_state
+
+    state = MagicMock(spec=CompositionState)
+    state.version = 1
+    state.validate.return_value = ValidationSummary(
+        is_valid=False,
+        errors=(ValidationEntry("validation", "validation_failed", "high"),),
+        warnings=(),
+        suggestions=(),
+    )
+    state.to_dict.side_effect = TypeError("broken Tier 1 state")
+
+    with pytest.raises(TypeError, match="broken Tier 1 state"):
+        await _state_data_from_composer_state(
+            state,
+            settings=object(),
+            secret_service=None,
+            user_id="user-1",
+            runtime_preflight=None,
+            preflight_exception_policy="persist_invalid",
+            initial_version=None,
+            telemetry_source="compose",
+        )
+
+
+def test_runtime_preflight_telemetry_uses_bounded_attributes(monkeypatch) -> None:
+    from elspeth.web.sessions import routes
+
+    emitted: list[tuple[int, dict[str, str]]] = []
+
+    class FakeCounter:
+        def add(self, value: int, attributes: dict[str, str]) -> None:
+            emitted.append((value, dict(attributes)))
+
+    monkeypatch.setattr(routes, "_COMPOSER_RUNTIME_PREFLIGHT_COUNTER", FakeCounter())
+    monkeypatch.setattr(routes, "_COMPOSER_AUTHORING_VALIDATION_COUNTER", FakeCounter())
+
+    routes._record_composer_runtime_preflight_telemetry(
+        "exception",
+        source="compose",
+        exception_class="RuntimeError",
+    )
+    routes._record_composer_runtime_preflight_telemetry(
+        "exception",
+        source="compose",
+        exception_class="AdversarialPluginFailure_9c5dbf3e",
+    )
+    routes._record_composer_authoring_validation_telemetry(
+        "exception",
+        source="compose",
+        exception_class="RuntimeError",
+    )
+
+    assert emitted == [
+        (
+            1,
+            {
+                "result": "exception",
+                "source": "compose",
+                "exception_class": "RuntimeError",
+            },
+        ),
+        (
+            1,
+            {
+                "result": "exception",
+                "source": "compose",
+                "exception_class": "other",
+            },
+        ),
+        (
+            1,
+            {
+                "result": "exception",
+                "source": "compose",
+                "exception_class": "RuntimeError",
+            },
+        ),
+    ]
+
+
+def _runtime_preflight_failed_result(message: str = "runtime preflight blocked export") -> ValidationResult:
+    return ValidationResult(
+        is_valid=False,
+        checks=[
+            ValidationCheck(
+                name="plugin_instantiation",
+                passed=False,
+                detail=message,
+            )
+        ],
+        errors=[
+            ValidationError(
+                component_id=None,
+                component_type=None,
+                message=message,
+                suggestion=None,
+            )
+        ],
+    )
+
+
+def test_recompose_success_persists_runtime_invalid_state(tmp_path) -> None:
+    app, service = _make_app(tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Test"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(service.add_message(session_id, "user", "Build a CSV pipeline"))
+    finally:
+        loop.close()
+
+    changed_state = CompositionState(
+        source=None,
+        nodes=(),
+        edges=(),
+        outputs=(),
+        metadata=PipelineMetadata(name="runtime-invalid-recompose"),
+        version=_EMPTY_STATE.version + 1,
+    )
+    runtime_preflight = _runtime_preflight_failed_result("runtime failure from recompose")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        return_value=ComposerResult(
+            message="I cannot mark this pipeline complete yet.",
+            state=changed_state,
+            runtime_preflight=runtime_preflight,
+        )
+    )
+    app.state.composer_service = mock_composer
+
+    recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+    assert recompose_resp.status_code == 200
+    loop = asyncio.new_event_loop()
+    try:
+        persisted = loop.run_until_complete(service.get_current_state(session_id))
+    finally:
+        loop.close()
+    assert persisted is not None
+    assert persisted.metadata_ is not None
+    assert persisted.metadata_["name"] == "runtime-invalid-recompose"
+    assert persisted.is_valid is False
+    assert list(persisted.validation_errors) == ["runtime failure from recompose"]
+
+
+def test_recompose_convergence_persists_runtime_invalid_partial_state(tmp_path) -> None:
+    from elspeth.contracts.freeze import deep_freeze
+    from elspeth.web.composer.protocol import ComposerConvergenceError
+    from elspeth.web.composer.state import EdgeSpec, OutputSpec, SourceSpec
+
+    # Authoring-valid partial state so runtime preflight is invoked.
+    # Source → "out" sink with a single edge satisfies authoring validation
+    # (source present, output present, edge references valid nodes).
+    partial = CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            options=deep_freeze({"path": "/x.csv"}),
+            on_success="out",
+            on_validation_failure="quarantine",
+        ),
+        nodes=(),
+        edges=(EdgeSpec(id="e1", from_node="source", to_node="out", edge_type="on_success", label=None),),
+        outputs=(OutputSpec(name="out", plugin="discard", options=deep_freeze({}), on_write_failure="discard"),),
+        metadata=PipelineMetadata(name="partial-after-convergence"),
+        version=2,
+    )
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        side_effect=ComposerConvergenceError(
+            max_turns=5,
+            budget_exhausted="composition",
+            partial_state=partial,
+        )
+    )
+
+    app, service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Test"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(service.add_message(session_id, "user", "Build a CSV pipeline"))
+    finally:
+        loop.close()
+
+    runtime_preflight = _runtime_preflight_failed_result("runtime failure from convergence")
+    with patch(
+        "elspeth.web.sessions.routes._runtime_preflight_for_state",
+        new=AsyncMock(return_value=runtime_preflight),
+    ):
+        recompose_resp = client.post(f"/api/sessions/{session_id}/recompose")
+
+    assert recompose_resp.status_code == 422
+    loop = asyncio.new_event_loop()
+    try:
+        persisted = loop.run_until_complete(service.get_current_state(session_id))
+    finally:
+        loop.close()
+    assert persisted is not None
+    assert persisted.metadata_ is not None
+    assert persisted.metadata_["name"] == "partial-after-convergence"
+    assert persisted.is_valid is False
+    assert list(persisted.validation_errors) == ["runtime failure from convergence"]
+
+
+def test_compose_plugin_crash_persists_runtime_invalid_partial_state(tmp_path) -> None:
+    from elspeth.contracts.freeze import deep_freeze
+    from elspeth.web.composer.state import EdgeSpec, OutputSpec, SourceSpec
+
+    # Authoring-valid partial state so runtime preflight is invoked (same
+    # pattern as the convergence test above).
+    partial = CompositionState(
+        source=SourceSpec(
+            plugin="csv",
+            options=deep_freeze({"path": "/x.csv"}),
+            on_success="out",
+            on_validation_failure="quarantine",
+        ),
+        nodes=(),
+        edges=(EdgeSpec(id="e1", from_node="source", to_node="out", edge_type="on_success", label=None),),
+        outputs=(OutputSpec(name="out", plugin="discard", options=deep_freeze({}), on_write_failure="discard"),),
+        metadata=PipelineMetadata(name="partial-after-plugin-crash"),
+        version=5,
+    )
+    original = ValueError("plugin bug after mutation")
+    mock_composer = AsyncMock()
+    mock_composer.compose = AsyncMock(
+        side_effect=ComposerPluginCrashError(original, partial_state=partial),
+    )
+
+    app, service = _make_app(tmp_path)
+    app.state.composer_service = mock_composer
+    client = TestClient(app, raise_server_exceptions=False)
+
+    resp = client.post("/api/sessions", json={"title": "Test"})
+    session_id = uuid.UUID(resp.json()["id"])
+
+    runtime_preflight = _runtime_preflight_failed_result("runtime failure from plugin crash")
+    with patch(
+        "elspeth.web.sessions.routes._runtime_preflight_for_state",
+        new=AsyncMock(return_value=runtime_preflight),
+    ):
+        response = client.post(
+            f"/api/sessions/{session_id}/messages",
+            json={"content": "Build me a pipeline"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["detail"]["error_type"] == "composer_plugin_error"
+    loop = asyncio.new_event_loop()
+    try:
+        persisted = loop.run_until_complete(service.get_current_state(session_id))
+    finally:
+        loop.close()
+    assert persisted is not None
+    assert persisted.metadata_ is not None
+    assert persisted.metadata_["name"] == "partial-after-plugin-crash"
+    assert persisted.is_valid is False
+    assert list(persisted.validation_errors) == ["runtime failure from plugin crash"]
+
+
+def test_assistant_raw_content_is_persisted_but_not_returned(tmp_path) -> None:
+    app, service = _make_app(tmp_path)
+    client = TestClient(app)
+
+    session_resp = client.post("/api/sessions", json={"title": "Chat"})
+    session_id = uuid.UUID(session_resp.json()["id"])
+
+    changed_state = CompositionState(
+        source=None,
+        nodes=(),
+        edges=(),
+        outputs=(),
+        metadata=PipelineMetadata(name="runtime preflight failed"),
+        version=_EMPTY_STATE.version + 1,
+    )
+    composer_result = ComposerResult(
+        message="I cannot mark this pipeline complete yet because runtime preflight failed: bad config.",
+        state=changed_state,
+        runtime_preflight=ValidationResult(
+            is_valid=False,
+            checks=[],
+            errors=[
+                ValidationError(
+                    component_id=None,
+                    component_type=None,
+                    message="bad config",
+                    suggestion=None,
+                )
+            ],
+        ),
+        raw_assistant_content="The pipeline is complete and valid.",
+    )
+    composer = AsyncMock()
+    composer.compose = AsyncMock(return_value=composer_result)
+    app.state.composer_service = composer
+
+    resp = client.post(f"/api/sessions/{session_id}/messages", json={"content": "build it"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["message"]["content"].startswith("I cannot mark this pipeline complete")
+    assert "raw_content" not in body["message"]
+
+    loop = asyncio.new_event_loop()
+    try:
+        messages = loop.run_until_complete(service.get_messages(session_id, limit=None))
+    finally:
+        loop.close()
+    assistant = next(message for message in messages if message.role == "assistant")
+    assert assistant.raw_content == "The pipeline is complete and valid."
+
+
+def test_intercepted_assistant_history_is_annotated_without_raw_content() -> None:
+    from elspeth.web.sessions.routes import (
+        _INTERCEPTED_ASSISTANT_HISTORY_PREFIX,
+        _composer_chat_history,
+    )
+
+    session_id = uuid.uuid4()
+    message = ChatMessageRecord(
+        id=uuid.uuid4(),
+        session_id=session_id,
+        role="assistant",
+        content="I cannot mark this pipeline complete yet because runtime preflight failed: bad config.",
+        raw_content="The pipeline is complete and valid.",
+        tool_calls=None,
+        created_at=datetime.now(UTC),
+        composition_state_id=None,
+    )
+
+    history = _composer_chat_history([message])
+
+    assert history == [
+        {
+            "role": "assistant",
+            "content": (
+                _INTERCEPTED_ASSISTANT_HISTORY_PREFIX
+                + "I cannot mark this pipeline complete yet because runtime preflight failed: bad config."
+            ),
+        }
+    ]
+    assert "The pipeline is complete and valid" not in history[0]["content"]
+
+
+def test_send_message_annotates_intercepted_assistant_history_for_llm(tmp_path) -> None:
+    app, service = _make_app(tmp_path)
+    composer = _make_composer_mock(response_text="Retrying from the runtime failure.")
+    app.state.composer_service = composer
+    client = TestClient(app)
+
+    session_resp = client.post("/api/sessions", json={"title": "Chat"})
+    session_id = uuid.UUID(session_resp.json()["id"])
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(service.add_message(session_id, "user", "Build it"))
+        loop.run_until_complete(
+            service.add_message(
+                session_id,
+                "assistant",
+                "I cannot mark this pipeline complete yet because runtime preflight failed: bad config.",
+                raw_content="The pipeline is complete and valid.",
+            )
+        )
+    finally:
+        loop.close()
+
+    resp = client.post(f"/api/sessions/{session_id}/messages", json={"content": "Fix it"})
+
+    assert resp.status_code == 200
+    history = composer.compose.call_args.args[1]
+    assert history[1]["role"] == "assistant"
+    assert history[1]["content"].startswith("[ELSPETH composer note: Your previous assistant response was intercepted")
+    assert "runtime preflight failed: bad config" in history[1]["content"]
+    assert "The pipeline is complete and valid" not in history[1]["content"]

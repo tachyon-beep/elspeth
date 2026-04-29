@@ -491,3 +491,8 @@ allow_hits:
   reason: Optional extras (e.g. chromadb for [rag]) are external dependencies — ImportError is expected when not installed
   safety: Only catches ImportError/ModuleNotFoundError; logs warning with file name and error; SyntaxError and other bugs still crash
   expires: null
+- key: plugins/infrastructure/preflight.py:R1:plugin_preflight_mode_enabled:fp=2019727813f38ff9
+  owner: web-execution
+  reason: ContextVar.get() is not dict.get() — _PLUGIN_PREFLIGHT_MODE is a ContextVar[bool]; .get() returns the current context value, not a dict lookup
+  safety: Returns bool default (False); no silent None default; ContextVar.get() cannot return an absent key
+  expires: null

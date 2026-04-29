@@ -12,6 +12,7 @@ from typing import Any, ClassVar, Literal, Protocol
 
 from elspeth.web.composer.progress import ComposerProgressSink
 from elspeth.web.composer.state import CompositionState
+from elspeth.web.execution.schemas import ValidationResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,12 +20,23 @@ class ComposerResult:
     """Result of a compose() call.
 
     Attributes:
-        message: The assistant's text response.
+        message: The assistant's text response. When runtime preflight
+            fails, this is replaced with a synthetic failure message;
+            the original LLM text is preserved in ``raw_assistant_content``.
         state: The (possibly updated) CompositionState.
+        runtime_preflight: The ValidationResult from the final-gate
+            runtime preflight run, or ``None`` if no preflight was
+            triggered (e.g. the state was unchanged and no preview
+            preflight was available to reuse).
+        raw_assistant_content: The original LLM text when ``message``
+            has been replaced with a synthetic preflight-failure message.
+            ``None`` when ``message`` is the verbatim LLM response.
     """
 
     message: str
     state: CompositionState
+    runtime_preflight: ValidationResult | None = None
+    raw_assistant_content: str | None = None
 
 
 class ComposerServiceError(Exception):
@@ -210,6 +222,34 @@ class ComposerPluginCrashError(ComposerServiceError):
         return cls(original_exc, partial_state=partial)
 
 
+class ComposerRuntimePreflightError(ComposerServiceError):
+    """Unexpected internal failure while running composer runtime preflight."""
+
+    _FROZEN_ATTRS: ClassVar[frozenset[str]] = frozenset({"original_exc", "partial_state", "exc_class"})
+
+    def __init__(self, *, original_exc: Exception, partial_state: CompositionState | None) -> None:
+        super().__init__("Composer runtime preflight failed internally.")
+        self.original_exc = original_exc
+        self.partial_state = partial_state
+        self.exc_class = type(original_exc).__name__
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in type(self)._FROZEN_ATTRS and name in self.__dict__:
+            raise AttributeError(f"{type(self).__name__}.{name} is frozen after construction")
+        super().__setattr__(name, value)
+
+    @classmethod
+    def capture(
+        cls,
+        exc: Exception,
+        *,
+        state: CompositionState,
+        initial_version: int,
+    ) -> ComposerRuntimePreflightError:
+        partial = state if state.version > initial_version else None
+        return cls(original_exc=exc, partial_state=partial)
+
+
 class ToolArgumentError(Exception):
     """Raised by a tool handler when LLM-supplied arguments are unusable.
 
@@ -345,6 +385,9 @@ class ComposerSettings(Protocol):
 
     @property
     def composer_timeout_seconds(self) -> float: ...
+
+    @property
+    def composer_runtime_preflight_timeout_seconds(self) -> float: ...
 
     @property
     def data_dir(self) -> Any: ...

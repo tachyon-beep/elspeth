@@ -11,9 +11,10 @@ web.catalog, composer_mcp.session).
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, TypedDict
 
@@ -30,12 +31,19 @@ from elspeth.web.composer.state import CompositionState, PipelineMetadata
 from elspeth.web.composer.tools import (
     _DISCOVERY_TOOLS,
     _MUTATION_TOOLS,
+    RuntimePreflight,
     _apply_merge_patch,
     execute_tool,
     get_tool_definitions,
     validate_composer_file_sink_collision_policy,
 )
 from elspeth.web.composer.yaml_generator import generate_yaml
+from elspeth.web.execution.runtime_preflight import (
+    RuntimePreflightCoordinator,
+    RuntimePreflightFailure,
+    RuntimePreflightKey,
+)
+from elspeth.web.execution.schemas import ValidationResult
 
 __all__ = ["create_server", "main"]
 
@@ -235,6 +243,34 @@ def _tool_file_sink_collision_control_error(
     return None
 
 
+McpRuntimePreflight = Callable[[CompositionState], Awaitable[ValidationResult]]
+SessionScopeProvider = Callable[[], str]
+
+
+async def _mcp_preview_runtime_preflight(
+    state: CompositionState,
+    *,
+    coordinator: RuntimePreflightCoordinator,
+    session_scope: str,
+    settings_hash: str,
+    timeout_seconds: float,
+    run_preflight: McpRuntimePreflight,
+) -> ValidationResult:
+    key = RuntimePreflightKey(
+        session_scope=session_scope,
+        state_version=state.version,
+        settings_hash=settings_hash,
+    )
+
+    async def worker() -> ValidationResult:
+        return await asyncio.wait_for(run_preflight(state), timeout=timeout_seconds)
+
+    entry = await coordinator.run(key, worker)
+    if isinstance(entry, RuntimePreflightFailure):
+        raise entry.original_exc
+    return entry
+
+
 def _dispatch_tool(
     tool_name: str,
     arguments: dict[str, Any],
@@ -242,6 +278,7 @@ def _dispatch_tool(
     catalog: CatalogService,
     scratch_dir: Path,
     baseline: CompositionState | None = None,
+    runtime_preflight: RuntimePreflight | None = None,
 ) -> dict[str, Any]:
     """Dispatch a tool call and return a result dict.
 
@@ -262,7 +299,7 @@ def _dispatch_tool(
                 "error": control_error,
                 "state": state.to_dict(),
             }
-        result = execute_tool(tool_name, arguments, state, catalog, data_dir=None, baseline=baseline)
+        result = execute_tool(tool_name, arguments, state, catalog, data_dir=None, baseline=baseline, runtime_preflight=runtime_preflight)
         response = result.to_dict()
         response["state"] = result.updated_state.to_dict()
         # Discovery tools return Pydantic models (PluginSummary, PluginSchemaInfo)
@@ -424,17 +461,41 @@ def _dispatch_session_tool(
 def create_server(
     catalog: CatalogService,
     scratch_dir: Path,
+    runtime_preflight: McpRuntimePreflight | None = None,
+    runtime_preflight_settings_hash: str | None = None,
+    runtime_preflight_timeout_seconds: float = 5.0,
+    runtime_preflight_coordinator: RuntimePreflightCoordinator | None = None,
+    session_scope_provider: SessionScopeProvider | None = None,
 ) -> Server:
     """Create an MCP server for pipeline composition.
 
     Args:
         catalog: Plugin catalog for discovery tools.
         scratch_dir: Directory for session persistence.
+        runtime_preflight: Optional async callable for runtime-equivalent preflight.
+            When provided with runtime_preflight_settings_hash, preview_pipeline
+            will include runtime validation results.
+        runtime_preflight_settings_hash: Hash of settings relevant to runtime
+            validation. Required when runtime_preflight is configured.
+        runtime_preflight_timeout_seconds: Per-call timeout for runtime preflight.
+        runtime_preflight_coordinator: Shared coordinator for in-flight deduplication.
+            When embedded in-process with the web server, pass the same coordinator
+            used by ComposerServiceImpl so HTTP and MCP share a single-flight lock.
+        session_scope_provider: Optional callable returning the current session scope
+            string. When None, scope is derived from scratch_dir and session_id.
 
     Returns:
         Configured MCP Server ready for stdio transport.
     """
     server = Server("elspeth-composer")
+    coordinator = runtime_preflight_coordinator or RuntimePreflightCoordinator()
+    session_id_ref: list[str | None] = [None]
+
+    def current_session_scope() -> str:
+        if session_scope_provider is not None:
+            return session_scope_provider()
+        session_id = session_id_ref[0] if session_id_ref[0] is not None else "unsaved"
+        return f"composer-mcp:{scratch_dir.resolve()}:{session_id}"
 
     # Mutable state container — list-of-one pattern allows the
     # inner closures to mutate without nonlocal.
@@ -468,6 +529,30 @@ def create_server(
         name: str,
         arguments: dict[str, Any],
     ) -> CallToolResult | list[TextContent]:
+        runtime_preflight_callback: RuntimePreflight | None = None
+        if name == "preview_pipeline" and runtime_preflight is not None:
+            if runtime_preflight_settings_hash is None:
+                raise ValueError("runtime_preflight_settings_hash is required when runtime_preflight is configured")
+            preview_preflight = await _mcp_preview_runtime_preflight(
+                state_ref[0],
+                coordinator=coordinator,
+                session_scope=current_session_scope(),
+                settings_hash=runtime_preflight_settings_hash,
+                timeout_seconds=runtime_preflight_timeout_seconds,
+                run_preflight=runtime_preflight,
+            )
+            _captured = preview_preflight
+
+            def _make_mcp_callback(
+                _result: ValidationResult = _captured,
+            ) -> RuntimePreflight:
+                def _cb(_state: CompositionState) -> ValidationResult:
+                    return _result
+
+                return _cb
+
+            runtime_preflight_callback = _make_mcp_callback()
+
         try:
             result = _dispatch_tool(
                 name,
@@ -476,6 +561,7 @@ def create_server(
                 catalog,
                 scratch_dir,
                 baseline=baseline_ref[0],
+                runtime_preflight=runtime_preflight_callback,
             )
         except (ValueError, KeyError, TypeError) as exc:
             # Bad LLM arguments (wrong keys, invalid values) — report to agent
@@ -489,9 +575,16 @@ def create_server(
         if "state" in result:
             new_state = CompositionState.from_dict(result["state"])
             state_ref[0] = new_state
-            # Capture baseline when session is created or loaded
+            # Capture baseline when session is created or loaded.
+            # load_session can return success=False on SessionNotFoundError;
+            # in that case, leave session_id_ref unchanged so the scratch
+            # session scope ("unsaved") is used. The success path is contractual
+            # — the tool returns {"data": {"session_id": ...}} on success,
+            # so direct access is correct.
             if name in ("new_session", "load_session"):
                 baseline_ref[0] = new_state
+                if result["success"]:
+                    session_id_ref[0] = result["data"]["session_id"]
             # B4: Redact storage paths from the response sent to the agent.
             result["state"] = redact_source_storage_path(result["state"])
 

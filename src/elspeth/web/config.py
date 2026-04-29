@@ -39,6 +39,7 @@ class WebSettings(BaseModel):
     composer_max_composition_turns: int = Field(..., ge=1)
     composer_max_discovery_turns: int = Field(..., ge=1)
     composer_timeout_seconds: float = Field(..., gt=0)
+    composer_runtime_preflight_timeout_seconds: float = Field(default=5.0, gt=0)
     composer_rate_limit_per_minute: int = Field(..., ge=1)
     composer_expose_provider_errors: bool = False
     auth_rate_limit_per_minute: int = Field(default=20, ge=1)

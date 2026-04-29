@@ -280,6 +280,7 @@ class SessionServiceImpl:
         content: str,
         tool_calls: Sequence[Mapping[str, Any]] | None = None,
         composition_state_id: UUID | None = None,
+        raw_content: str | None = None,
     ) -> ChatMessageRecord:
         """Add a chat message and update the session's updated_at."""
         msg_id = uuid.uuid4()
@@ -302,6 +303,7 @@ class SessionServiceImpl:
                         session_id=sid,
                         role=role,
                         content=content,
+                        raw_content=raw_content,
                         tool_calls=tool_calls,
                         created_at=now,
                         composition_state_id=csid,
@@ -316,6 +318,7 @@ class SessionServiceImpl:
             session_id=session_id,
             role=role,
             content=content,
+            raw_content=raw_content,
             tool_calls=tool_calls,
             created_at=now,
             composition_state_id=composition_state_id,
@@ -347,6 +350,7 @@ class SessionServiceImpl:
                 session_id=UUID(row.session_id),
                 role=row.role,
                 content=row.content,
+                raw_content=row.raw_content,
                 tool_calls=row.tool_calls,
                 created_at=self._ensure_utc(row.created_at),
                 composition_state_id=UUID(row.composition_state_id) if row.composition_state_id else None,
@@ -1116,12 +1120,14 @@ class SessionServiceImpl:
                     "session_id": new_session_id_str,
                     "role": msg.role,
                     "content": msg.content,
+                    # raw_content preserves audit provenance for intercepted assistant turns
+                    "raw_content": msg.raw_content,
                     "tool_calls": deep_thaw(msg.tool_calls) if msg.tool_calls else None,
                     "created_at": msg.created_at,
                     "composition_state_id": None,  # Don't reference source session states
                 }
             )
-        # System message
+        # System message — no raw_content (synthetic, not from the LLM)
         system_msg_id = str(uuid.uuid4())
         msg_records_data.append(
             {
@@ -1129,6 +1135,7 @@ class SessionServiceImpl:
                 "session_id": new_session_id_str,
                 "role": "system",
                 "content": "Conversation forked from an earlier point.",
+                "raw_content": None,
                 "tool_calls": None,
                 "created_at": now,
                 "composition_state_id": None,
@@ -1138,6 +1145,7 @@ class SessionServiceImpl:
         # Offset by 1 microsecond so get_messages() ordering is deterministic
         # (system note before user turn).  Without this, SQLite/Postgres can
         # return the two rows in either order since they share created_at.
+        # raw_content is None: this is a new user-authored message, not an LLM turn.
         new_user_msg_id = str(uuid.uuid4())
         msg_records_data.append(
             {
@@ -1145,6 +1153,7 @@ class SessionServiceImpl:
                 "session_id": new_session_id_str,
                 "role": "user",
                 "content": new_message_content,
+                "raw_content": None,
                 "tool_calls": None,
                 "created_at": now + timedelta(microseconds=1),
                 "composition_state_id": copied_state_id_str,
@@ -1221,6 +1230,7 @@ class SessionServiceImpl:
                 session_id=new_session_id,
                 role=d["role"],
                 content=d["content"],
+                raw_content=d["raw_content"],
                 tool_calls=d["tool_calls"],
                 created_at=d["created_at"],
                 composition_state_id=UUID(d["composition_state_id"]) if d["composition_state_id"] else None,

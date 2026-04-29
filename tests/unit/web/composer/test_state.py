@@ -4118,6 +4118,7 @@ class TestPassThroughComposerParity:
         class _StubPassThrough:
             name = "passthrough"
             passes_through_input = True
+            is_batch_aware = False  # Required by _known_batch_aware_transform_plugins()
 
         class _StubPluginManager:
             def get_transforms(self) -> list[type]:

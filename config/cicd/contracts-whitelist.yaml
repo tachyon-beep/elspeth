@@ -23,6 +23,9 @@ allowed_external_types:
   # Composition state types - shared between web composer and composer MCP server
   - "web/composer/state:CompositionState"
   - "web/composer/state:PipelineMetadata"
+  # Runtime preflight coordination types - shared between web execution and composer MCP
+  - "web/execution/runtime_preflight:RuntimePreflightKey"
+  - "web/execution/runtime_preflight:RuntimePreflightFailure"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -544,6 +547,7 @@ allowed_dict_patterns:
   # LLM tool-use loop. Tool JSON schemas define optional fields.
   # ═══════════════════════════════════════════════════════════════════════════
   - "src/elspeth/web/composer/tools.py:ToolResult.to_dict:return"
+  - "src/elspeth/web/composer/tools.py:_authoring_validation_payload:return"
   - "src/elspeth/web/composer/tools.py:get_tool_definitions:return (list)"
   - "src/elspeth/web/composer/tools.py:execute_tool:arguments"
   - "src/elspeth/web/composer/tools.py:_validate_source_path:options"

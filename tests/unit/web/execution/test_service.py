@@ -342,8 +342,8 @@ class TestB2ShutdownEvent:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_shutdown_event_passed_to_orchestrator_run(
@@ -409,8 +409,8 @@ class TestB3Construction:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_landscape_db_constructed_from_settings(
@@ -635,8 +635,8 @@ class TestCancelMechanism:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_cancelled_run_broadcasts_cancelled_event(
@@ -690,8 +690,8 @@ class TestCancelMechanism:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_graceful_shutdown_forwards_row_counts(
@@ -752,8 +752,8 @@ class TestCancelMechanism:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_completed_run_not_misclassified_when_event_set_late(
@@ -1057,8 +1057,8 @@ class TestCompletionPathExternalCancellation:
     no BaseException cascade, no re-raise."""
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
@@ -1116,8 +1116,8 @@ class TestCompletionPathExternalCancellation:
         assert mock_session_service.update_run_status.call_count == 2
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
@@ -1181,8 +1181,8 @@ class TestCompletionPathExternalCancellation:
         assert terminal_types == ["cancelled"], f"Expected exactly one 'cancelled' terminal, got: {terminal_types}"
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
@@ -1243,8 +1243,8 @@ class TestCompletionPathExternalCancellation:
         assert blob_state["status"] == "error"
 
     @patch("elspeth.web.execution.service.Orchestrator")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
@@ -2215,8 +2215,8 @@ class TestEdgeCompatibility:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_validate_edge_compatibility_called(
@@ -2258,8 +2258,8 @@ class TestEdgeCompatibility:
         mock_graph.validate_edge_compatibility.assert_called_once()
 
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_edge_compatibility_failure_crashes_pipeline(
@@ -2416,8 +2416,8 @@ class TestTerminalOrderingInvariant:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_single_terminal_when_finalize_raises_blob_not_found(
@@ -2484,8 +2484,8 @@ class TestTerminalOrderingInvariant:
 
     @patch("elspeth.web.execution.service.Orchestrator")
     @patch("elspeth.web.execution.service.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.service.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.service.ExecutionGraph")
+    @patch("elspeth.web.execution.preflight.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.preflight.ExecutionGraph")
     @patch("elspeth.web.execution.service.LandscapeDB")
     @patch("elspeth.web.execution.service.FilesystemPayloadStore")
     def test_externally_cancelled_run_emits_single_cancelled_terminal(
@@ -2654,49 +2654,49 @@ class TestResolveYamlPaths:
     """Path rewriting from relative to absolute before YAML reaches plugins."""
 
     def test_source_relative_path_rewritten(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n  options:\n    path: data/input.csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "/srv/data/data/input.csv" in result
 
     def test_source_absolute_path_unchanged(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n  options:\n    path: /absolute/input.csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "/absolute/input.csv" in result
 
     def test_sink_relative_path_rewritten(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n  options:\n    path: /abs/in.csv\nsinks:\n  primary:\n    plugin: csv\n    options:\n      file: output/results.csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "/srv/data/output/results.csv" in result
 
     def test_non_string_input_raises_type_error(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         with pytest.raises(TypeError, match="must return str"):
             _resolve_yaml_paths(123, "/srv/data")  # type: ignore[arg-type]
 
     def test_non_dict_yaml_raises_type_error(self) -> None:
         """YAML that parses to a scalar (not a dict) is a generator bug."""
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         with pytest.raises(TypeError, match="non-dict top-level"):
             _resolve_yaml_paths("just a string", "/srv/data")
 
     def test_no_source_or_sinks_is_noop(self) -> None:
         """YAML with no source/sinks passes through without error."""
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "metadata:\n  name: test\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "name: test" in result
 
     def test_source_without_options_is_noop(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")

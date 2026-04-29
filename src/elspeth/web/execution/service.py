@@ -20,20 +20,17 @@ import time
 from collections.abc import Coroutine
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, TypeVar, cast
 from uuid import UUID
 
 import structlog
 from sqlalchemy.exc import SQLAlchemyError
 
-from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.audit import SecretResolutionInput
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
-from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.events import EventBus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -46,6 +43,7 @@ from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.errors import SemanticContractViolationError
+from elspeth.web.execution.preflight import build_validated_runtime_graph, resolve_runtime_yaml_paths
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError, YamlGenerator
 from elspeth.web.execution.schemas import (
@@ -93,59 +91,6 @@ def _sanitize_error_for_client(exc: BaseException) -> str:
     if isinstance(exc, _CLIENT_SAFE_EXCEPTIONS):
         return str(exc)
     return f"Pipeline execution failed ({type(exc).__name__})"
-
-
-def _resolve_yaml_paths(pipeline_yaml: str, data_dir: str) -> str:
-    """Rewrite relative source/sink paths in pipeline YAML to absolute.
-
-    Plugins call PathConfig.resolved_path() with no base_dir, so relative
-    paths resolve against CWD.  The allowlist check approves paths relative
-    to data_dir.  This function closes the gap by making all paths absolute
-    before the YAML reaches the plugin layer.
-    """
-    import yaml as _yaml
-
-    from elspeth.web.paths import resolve_data_path
-
-    if not isinstance(pipeline_yaml, str):
-        raise TypeError(f"YamlGenerator.generate_yaml() must return str; got {type(pipeline_yaml).__name__}")
-
-    config = _yaml.safe_load(pipeline_yaml)
-    if not isinstance(config, dict):
-        raise TypeError(f"YAML generator produced non-dict top-level value (got {type(config).__name__})")
-
-    # Source path — None means no source configured (skip); non-dict is a
-    # generator bug (offensive programming: explicit type assertion).
-    source = config.get("source")
-    if source is not None:
-        if not isinstance(source, dict):
-            raise TypeError(f"YAML generator produced non-dict 'source' value (got {type(source).__name__})")
-        opts = source.get("options")
-        if opts is not None:
-            if not isinstance(opts, dict):
-                raise TypeError(f"YAML generator produced non-dict 'source.options' value (got {type(opts).__name__})")
-            for key in ("path", "file"):
-                if key in opts and not Path(str(opts[key])).is_absolute():
-                    opts[key] = str(resolve_data_path(str(opts[key]), data_dir))
-
-    # Sink paths — same pattern with explicit type assertions.
-    sinks = config.get("sinks")
-    if sinks is not None:
-        if not isinstance(sinks, dict):
-            raise TypeError(f"YAML generator produced non-dict 'sinks' value (got {type(sinks).__name__})")
-        for sink_name, sink_cfg in sinks.items():
-            if sink_cfg is not None:
-                if not isinstance(sink_cfg, dict):
-                    raise TypeError(f"YAML generator produced non-dict sink '{sink_name}' value (got {type(sink_cfg).__name__})")
-                opts = sink_cfg.get("options")
-                if opts is not None:
-                    if not isinstance(opts, dict):
-                        raise TypeError(f"YAML generator produced non-dict 'sinks.{sink_name}.options' value (got {type(opts).__name__})")
-                    for key in ("path", "file"):
-                        if key in opts and not Path(str(opts[key])).is_absolute():
-                            opts[key] = str(resolve_data_path(str(opts[key]), data_dir))
-
-    return _yaml.dump(config, default_flow_style=False)
 
 
 # B1 fix: RunAlreadyActiveError is NOT defined here — imported from
@@ -366,7 +311,7 @@ class ExecutionServiceImpl:
         # plugins see the same paths the allowlist approved.  Without this,
         # plugins call PathConfig.resolved_path() with no base_dir, which
         # resolves relative paths against CWD — not data_dir.
-        pipeline_yaml = _resolve_yaml_paths(pipeline_yaml, str(self._settings.data_dir))
+        pipeline_yaml = resolve_runtime_yaml_paths(pipeline_yaml, str(self._settings.data_dir))
 
         # Pre-validate blob_ref UUID before creating the run record.
         # UUID() can raise ValueError on malformed strings; if that happens
@@ -701,19 +646,9 @@ class ExecutionServiceImpl:
             # to disk.  load_settings_from_yaml_string() parses in-process,
             # bypassing Dynaconf file I/O.
             settings = load_settings_from_yaml_string(resolved_yaml)
-            bundle = instantiate_plugins_from_config(settings)
-
-            graph = ExecutionGraph.from_plugin_instances(
-                source=bundle.source,
-                source_settings=bundle.source_settings,
-                transforms=bundle.transforms,
-                sinks=bundle.sinks,
-                aggregations=bundle.aggregations,
-                gates=list(settings.gates),
-                coalesce_settings=(list(settings.coalesce) if settings.coalesce else None),
-            )
-            graph.validate()
-            graph.validate_edge_compatibility()
+            runtime_graph = build_validated_runtime_graph(settings)
+            bundle = runtime_graph.plugin_bundle
+            graph = runtime_graph.graph
 
             # Include aggregation transforms alongside regular transforms,
             # following the CLI pattern (see ``_orchestrator_context``

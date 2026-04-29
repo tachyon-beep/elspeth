@@ -1,7 +1,7 @@
 """Dry-run validation using real engine code paths.
 
 Calls the same functions as `elspeth run`: load_settings(),
-instantiate_plugins_from_config(), ExecutionGraph.from_plugin_instances(),
+instantiate_runtime_plugins(), build_runtime_graph(),
 graph.validate(), graph.validate_edge_compatibility().
 
 W18 fix: Only typed exceptions are caught. Bare except Exception is forbidden.
@@ -21,22 +21,28 @@ from typing import Any
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
-from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.dag.models import GraphValidationError
 from elspeth.core.secrets import resolve_secret_refs, secret_env_ref_name
 from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
 from elspeth.web.composer.state import CompositionState, _batch_aware_required_input_fields_error
-from elspeth.web.config import WebSettings
 from elspeth.web.execution._semantic_helpers import (
     assistance_suggestion_for,
     serialize_semantic_contracts,
 )
-from elspeth.web.execution.protocol import YamlGenerator
+from elspeth.web.execution.preflight import (
+    RUNTIME_CHECK_GRAPH_STRUCTURE,
+    RUNTIME_CHECK_PLUGIN_INSTANTIATION,
+    RUNTIME_CHECK_SCHEMA_COMPATIBILITY,
+    RUNTIME_GRAPH_VALIDATION_CHECKS,
+    build_runtime_graph,
+    instantiate_runtime_plugins,
+    resolve_runtime_yaml_paths,
+)
+from elspeth.web.execution.protocol import ValidationSettings, YamlGenerator
 from elspeth.web.execution.schemas import (
     ValidationCheck,
     ValidationError,
@@ -49,9 +55,10 @@ _CHECK_SECRET_REFS = "secret_refs"
 _CHECK_SEMANTIC_CONTRACTS = "semantic_contracts"
 _CHECK_BATCH_TRANSFORM_OPTIONS = "batch_transform_options"
 _CHECK_SETTINGS = "settings_load"
-_CHECK_PLUGINS = "plugin_instantiation"
-_CHECK_GRAPH = "graph_structure"
-_CHECK_SCHEMA = "schema_compatibility"
+_CHECK_PLUGINS = RUNTIME_CHECK_PLUGIN_INSTANTIATION
+_CHECK_GRAPH = RUNTIME_CHECK_GRAPH_STRUCTURE
+_CHECK_SCHEMA = RUNTIME_CHECK_SCHEMA_COMPATIBILITY
+assert RUNTIME_GRAPH_VALIDATION_CHECKS == (_CHECK_PLUGINS, _CHECK_GRAPH, _CHECK_SCHEMA)
 
 _ALL_CHECKS = [
     _CHECK_PATH_ALLOWLIST,
@@ -121,7 +128,7 @@ def _collect_secret_refs(obj: Any, env_ref_names: set[str] | None = None) -> lis
 
 def validate_pipeline(
     state: CompositionState,
-    settings: WebSettings,
+    settings: ValidationSettings,
     yaml_generator: YamlGenerator,
     *,
     secret_service: WebSecretResolver | None = None,
@@ -135,8 +142,8 @@ def validate_pipeline(
     2. Generate YAML from CompositionState
     3. Load settings via load_settings_from_yaml_string() — resolve secret
        refs first if present, matching the execution service path exactly
-    4. instantiate_plugins_from_config(settings)
-    5. ExecutionGraph.from_plugin_instances(bundle fields)
+    4. instantiate_runtime_plugins(settings, preflight_mode=True)
+    5. build_runtime_graph(settings, bundle)
     6. graph.validate() + graph.validate_edge_compatibility()
 
     Only catches: PydanticValidationError, FileNotFoundError, ValueError,
@@ -144,7 +151,7 @@ def validate_pipeline(
 
     Args:
         state: CompositionState from the session.
-        settings: WebSettings — used for path allowlist check.
+        settings: ValidationSettings — exposes data_dir for path resolution and allowlist check.
         yaml_generator: YamlGenerator module/object with generate_yaml() method.
         secret_service: Optional secret resolver for validating secret refs.
         user_id: User ID for scoped secret resolution (required if secret_service is set).
@@ -361,6 +368,7 @@ def validate_pipeline(
 
     # Step 2: Generate YAML
     pipeline_yaml = yaml_generator.generate_yaml(state)
+    pipeline_yaml = resolve_runtime_yaml_paths(pipeline_yaml, str(settings.data_dir))
 
     # Step 3: Settings loading
     #
@@ -425,7 +433,7 @@ def validate_pipeline(
 
     # Step 4: Plugin instantiation
     try:
-        bundle = instantiate_plugins_from_config(elspeth_settings)
+        bundle = instantiate_runtime_plugins(elspeth_settings, preflight_mode=True)
         checks.append(
             ValidationCheck(
                 name=_CHECK_PLUGINS,
@@ -467,15 +475,7 @@ def validate_pipeline(
 
     # Step 5: Graph construction + structural validation
     try:
-        graph = ExecutionGraph.from_plugin_instances(
-            source=bundle.source,
-            source_settings=bundle.source_settings,
-            transforms=bundle.transforms,
-            sinks=bundle.sinks,
-            aggregations=bundle.aggregations,
-            gates=list(elspeth_settings.gates),
-            coalesce_settings=(list(elspeth_settings.coalesce) if elspeth_settings.coalesce else None),
-        )
+        graph = build_runtime_graph(elspeth_settings, bundle)
         graph.validate()
         checks.append(
             ValidationCheck(
