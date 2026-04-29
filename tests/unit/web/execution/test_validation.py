@@ -604,11 +604,11 @@ class TestValidatePipelineRelativePaths:
 
 class TestValidatePipelineSuccess:
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_valid_pipeline_returns_all_checks_passed(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
     ) -> None:
@@ -626,7 +626,7 @@ class TestValidatePipelineSuccess:
         mock_instantiate.return_value = mock_bundle
 
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
 
         state = _make_state()
         settings = _make_settings()
@@ -644,8 +644,8 @@ class TestValidatePipelineSuccess:
 
         # Verify real engine functions were called
         mock_load.assert_called_once()
-        mock_instantiate.assert_called_once_with(mock_settings)
-        mock_graph_cls.from_plugin_instances.assert_called_once()
+        mock_instantiate.assert_called_once_with(mock_settings, preflight_mode=True)
+        mock_build_graph.assert_called_once()
         mock_graph.validate.assert_called_once()
         mock_graph.validate_edge_compatibility.assert_called_once()
 
@@ -705,7 +705,7 @@ class TestValidatePipelineSettingsFailure:
 
 class TestValidatePipelinePluginFailure:
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
     def test_unknown_plugin_returns_attributed_error(
         self,
         mock_instantiate: MagicMock,
@@ -781,11 +781,11 @@ sinks:
 
 class TestValidatePipelineGraphFailure:
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_graph_validation_error_attributed_to_node(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
     ) -> None:
@@ -801,7 +801,7 @@ class TestValidatePipelineGraphFailure:
         mock_instantiate.return_value = mock_bundle
 
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
         mock_graph.validate.side_effect = GraphValidationError("Route destination 'nonexistent' in gate_1 not found")
 
         state = _make_state()
@@ -813,11 +813,11 @@ class TestValidatePipelineGraphFailure:
         assert len(result.errors) >= 1
 
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_edge_compatibility_error(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
     ) -> None:
@@ -833,7 +833,7 @@ class TestValidatePipelineGraphFailure:
         mock_instantiate.return_value = mock_bundle
 
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
         mock_graph.validate.return_value = None  # structural check passes
         mock_graph.validate_edge_compatibility.side_effect = GraphValidationError("Schema mismatch on edge transform_1 -> sink_primary")
 
@@ -869,11 +869,11 @@ class TestValidatePipelineInMemoryLoading:
     """Verify settings loading uses in-memory loader, matching execution service."""
 
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_settings_loaded_from_yaml_string(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load: MagicMock,
     ) -> None:
@@ -890,7 +890,7 @@ class TestValidatePipelineInMemoryLoading:
         mock_bundle.aggregations = {}
         mock_instantiate.return_value = mock_bundle
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
 
         state = _make_state()
         settings = _make_settings()
@@ -1205,11 +1205,11 @@ class TestSecretRefResolutionBeforeSettingsLoad:
     """
 
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_secret_refs_resolved_before_settings_load(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load_string: MagicMock,
     ) -> None:
@@ -1231,7 +1231,7 @@ class TestSecretRefResolutionBeforeSettingsLoad:
         mock_bundle = MagicMock()
         mock_instantiate.return_value = mock_bundle
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
 
         result = validate_pipeline(
             state,
@@ -1251,11 +1251,11 @@ class TestSecretRefResolutionBeforeSettingsLoad:
         assert _check(result, "settings_load").passed is True
 
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_raw_env_marker_for_inventory_secret_resolves_before_settings_load(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load_string: MagicMock,
     ) -> None:
@@ -1277,7 +1277,7 @@ class TestSecretRefResolutionBeforeSettingsLoad:
         mock_bundle = MagicMock()
         mock_instantiate.return_value = mock_bundle
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
 
         result = validate_pipeline(
             state,
@@ -1294,11 +1294,11 @@ class TestSecretRefResolutionBeforeSettingsLoad:
         assert _check(result, "settings_load").passed is True
 
     @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
-    @patch("elspeth.web.execution.validation.instantiate_plugins_from_config")
-    @patch("elspeth.web.execution.validation.ExecutionGraph")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
     def test_no_secrets_also_uses_in_memory_loader(
         self,
-        mock_graph_cls: MagicMock,
+        mock_build_graph: MagicMock,
         mock_instantiate: MagicMock,
         mock_load_string: MagicMock,
     ) -> None:
@@ -1321,7 +1321,7 @@ class TestSecretRefResolutionBeforeSettingsLoad:
         mock_bundle = MagicMock()
         mock_instantiate.return_value = mock_bundle
         mock_graph = MagicMock()
-        mock_graph_cls.from_plugin_instances.return_value = mock_graph
+        mock_build_graph.return_value = mock_graph
 
         result = validate_pipeline(
             state,
@@ -1479,3 +1479,139 @@ sinks:
         parsed = yaml.safe_load(loaded_yaml)
         assert parsed["source"]["options"]["path"] == "/tmp/test_data/blobs/input.csv"
         assert parsed["sinks"]["main"]["options"]["path"] == "/tmp/test_data/outputs/out.csv"
+
+
+class TestValidatePipelineRuntimeCheckBoundaries:
+    def test_runtime_graph_validation_check_order_matches_named_constants(self) -> None:
+        from elspeth.web.execution.preflight import (
+            RUNTIME_CHECK_GRAPH_STRUCTURE,
+            RUNTIME_CHECK_PLUGIN_INSTANTIATION,
+            RUNTIME_CHECK_SCHEMA_COMPATIBILITY,
+            RUNTIME_GRAPH_VALIDATION_CHECKS,
+        )
+
+        assert RUNTIME_GRAPH_VALIDATION_CHECKS == (
+            RUNTIME_CHECK_PLUGIN_INSTANTIATION,
+            RUNTIME_CHECK_GRAPH_STRUCTURE,
+            RUNTIME_CHECK_SCHEMA_COMPATIBILITY,
+        )
+
+    def test_validate_pipeline_success_surfaces_declared_runtime_graph_checks(self) -> None:
+        from elspeth.web.execution.preflight import RUNTIME_GRAPH_VALIDATION_CHECKS
+
+        state = _make_state(
+            source_options={"path": "/tmp/test_data/blobs/input.csv"},
+            outputs=(_make_output({"path": "/tmp/test_data/outputs/out.csv"}),),
+        )
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = """
+source:
+  plugin: csv
+  on_success: primary
+  options:
+    path: /tmp/test_data/blobs/input.csv
+    on_validation_failure: discard
+sinks:
+  primary:
+    plugin: csv
+    options:
+      path: /tmp/test_data/outputs/out.csv
+"""
+        fake_graph = MagicMock()
+
+        with (
+            patch("elspeth.web.execution.validation.load_settings_from_yaml_string", return_value=MagicMock()),
+            patch("elspeth.web.execution.validation.instantiate_runtime_plugins", return_value=MagicMock()) as mock_instantiate,
+            patch("elspeth.web.execution.validation.build_runtime_graph", return_value=fake_graph),
+        ):
+            result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        passed_names = {check.name for check in result.checks if check.passed}
+        assert set(RUNTIME_GRAPH_VALIDATION_CHECKS).issubset(passed_names)
+        assert mock_instantiate.call_args.kwargs == {"preflight_mode": True}
+        fake_graph.validate.assert_called_once_with()
+        fake_graph.validate_edge_compatibility.assert_called_once_with()
+
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
+    def test_graph_structure_failure_uses_graph_check(
+        self,
+        mock_build_graph: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        state = _make_state(
+            source_options={"path": "/tmp/test_data/blobs/input.csv"},
+            outputs=(_make_output({"path": "/tmp/test_data/outputs/out.csv"}),),
+        )
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = """
+source:
+  plugin: csv
+  on_success: primary
+  options:
+    path: /tmp/test_data/blobs/input.csv
+    on_validation_failure: discard
+sinks:
+  primary:
+    plugin: csv
+    options:
+      path: /tmp/test_data/outputs/out.csv
+"""
+        fake_settings = MagicMock()
+        fake_graph = MagicMock()
+        fake_graph.validate.side_effect = GraphValidationError("bad graph")
+        mock_load.return_value = fake_settings
+        mock_instantiate.return_value = MagicMock()
+        mock_build_graph.return_value = fake_graph
+
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert result.is_valid is False
+        assert _check(result, "graph_structure").passed is False
+        assert any(check.name == "schema_compatibility" and not check.passed for check in result.checks)
+        fake_graph.validate_edge_compatibility.assert_not_called()
+
+    @patch("elspeth.web.execution.validation.load_settings_from_yaml_string")
+    @patch("elspeth.web.execution.validation.instantiate_runtime_plugins")
+    @patch("elspeth.web.execution.validation.build_runtime_graph")
+    def test_schema_failure_uses_schema_check(
+        self,
+        mock_build_graph: MagicMock,
+        mock_instantiate: MagicMock,
+        mock_load: MagicMock,
+    ) -> None:
+        state = _make_state(
+            source_options={"path": "/tmp/test_data/blobs/input.csv"},
+            outputs=(_make_output({"path": "/tmp/test_data/outputs/out.csv"}),),
+        )
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = """
+source:
+  plugin: csv
+  on_success: primary
+  options:
+    path: /tmp/test_data/blobs/input.csv
+    on_validation_failure: discard
+sinks:
+  primary:
+    plugin: csv
+    options:
+      path: /tmp/test_data/outputs/out.csv
+"""
+        fake_settings = MagicMock()
+        fake_graph = MagicMock()
+        fake_graph.validate_edge_compatibility.side_effect = GraphValidationError("schema mismatch")
+        mock_load.return_value = fake_settings
+        mock_instantiate.return_value = MagicMock()
+        mock_build_graph.return_value = fake_graph
+
+        result = validate_pipeline(state, settings, mock_yaml_gen)
+
+        assert result.is_valid is False
+        assert _check(result, "graph_structure").passed is True
+        assert _check(result, "schema_compatibility").passed is False

@@ -26,13 +26,11 @@ from uuid import UUID
 import structlog
 from sqlalchemy.exc import SQLAlchemyError
 
-from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts.audit import SecretResolutionInput
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.errors import GracefulShutdownError
 from elspeth.contracts.secrets import WebSecretResolver
 from elspeth.core.config import load_settings_from_yaml_string
-from elspeth.core.dag.graph import ExecutionGraph
 from elspeth.core.events import EventBus
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.payload_store import FilesystemPayloadStore
@@ -45,7 +43,7 @@ from elspeth.web.blobs.protocol import BlobNotFoundError, BlobQuotaExceededError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
 from elspeth.web.config import WebSettings
 from elspeth.web.execution.errors import SemanticContractViolationError
-from elspeth.web.execution.preflight import resolve_runtime_yaml_paths
+from elspeth.web.execution.preflight import build_validated_runtime_graph, resolve_runtime_yaml_paths
 from elspeth.web.execution.progress import ProgressBroadcaster
 from elspeth.web.execution.protocol import ExecutionService, StateAccessError, YamlGenerator
 from elspeth.web.execution.schemas import (
@@ -648,19 +646,9 @@ class ExecutionServiceImpl:
             # to disk.  load_settings_from_yaml_string() parses in-process,
             # bypassing Dynaconf file I/O.
             settings = load_settings_from_yaml_string(resolved_yaml)
-            bundle = instantiate_plugins_from_config(settings)
-
-            graph = ExecutionGraph.from_plugin_instances(
-                source=bundle.source,
-                source_settings=bundle.source_settings,
-                transforms=bundle.transforms,
-                sinks=bundle.sinks,
-                aggregations=bundle.aggregations,
-                gates=list(settings.gates),
-                coalesce_settings=(list(settings.coalesce) if settings.coalesce else None),
-            )
-            graph.validate()
-            graph.validate_edge_compatibility()
+            runtime_graph = build_validated_runtime_graph(settings)
+            bundle = runtime_graph.plugin_bundle
+            graph = runtime_graph.graph
 
             # Include aggregation transforms alongside regular transforms,
             # following the CLI pattern (see ``_orchestrator_context``

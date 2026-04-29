@@ -106,9 +106,7 @@ def runtime_preflight_settings_hash(settings: ValidationSettings) -> str:
 
 def instantiate_runtime_plugins(settings: Any, *, preflight_mode: bool = False) -> PluginBundle:
     """Instantiate configured plugins through the production helper."""
-    # preflight_mode forwarding lands in Task 2 with the cli_helpers signature change.
-    del preflight_mode
-    return instantiate_plugins_from_config(settings)
+    return instantiate_plugins_from_config(settings, preflight_mode=preflight_mode)
 
 
 def build_runtime_graph(settings: Any, bundle: PluginBundle) -> ExecutionGraph:

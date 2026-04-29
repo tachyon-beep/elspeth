@@ -40,14 +40,24 @@ class PluginBundle:
         freeze_fields(self, "transforms", "sinks", "aggregations")
 
 
-def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:
+def instantiate_plugins_from_config(
+    config: "ElspethSettings",
+    *,
+    preflight_mode: bool = False,
+) -> PluginBundle:
     """Instantiate all plugins from configuration.
 
     Creates plugin instances BEFORE graph construction,
     enabling schema extraction from instance attributes.
 
+    When preflight_mode=True, plugin constructors observe
+    plugin_preflight_mode_enabled() and may defer side-effectful client setup
+    to lifecycle/operation methods.
+
     Args:
         config: Validated ElspethSettings instance
+        preflight_mode: If True, sets the process-local preflight context so
+            plugin constructors can defer external client initialisation.
 
     Returns:
         PluginBundle with typed fields for source, transforms, sinks, aggregations.
@@ -57,63 +67,65 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> PluginBundle:
     """
     from elspeth.core.dag import WiredTransform
     from elspeth.plugins.infrastructure.manager import get_shared_plugin_manager
+    from elspeth.plugins.infrastructure.preflight import plugin_preflight_mode
 
     manager = get_shared_plugin_manager()
 
-    # Instantiate source (raises on unknown plugin)
-    source_cls = manager.get_source_by_name(config.source.plugin)
-    source = source_cls(dict(config.source.options))
-    # Bridge: inject on_success from settings level (lifted from options)
-    source.on_success = config.source.on_success
+    with plugin_preflight_mode(preflight_mode):
+        # Instantiate source (raises on unknown plugin)
+        source_cls = manager.get_source_by_name(config.source.plugin)
+        source = source_cls(dict(config.source.options))
+        # Bridge: inject on_success from settings level (lifted from options)
+        source.on_success = config.source.on_success
 
-    # Instantiate transforms
-    transforms: list[WiredTransform] = []
-    for plugin_config in config.transforms:
-        transform_cls = manager.get_transform_by_name(plugin_config.plugin)
-        transform = transform_cls(dict(plugin_config.options))
-        # Bridge: inject routing from settings level (lifted from options)
-        transform.on_success = plugin_config.on_success
-        transform.on_error = plugin_config.on_error
-        transforms.append(WiredTransform(plugin=transform, settings=plugin_config))
+        # Instantiate transforms
+        transforms: list[WiredTransform] = []
+        for plugin_config in config.transforms:
+            transform_cls = manager.get_transform_by_name(plugin_config.plugin)
+            transform = transform_cls(dict(plugin_config.options))
+            # Bridge: inject routing from settings level (lifted from options)
+            transform.on_success = plugin_config.on_success
+            transform.on_error = plugin_config.on_error
+            transforms.append(WiredTransform(plugin=transform, settings=plugin_config))
 
-    # Instantiate aggregations
-    # Aggregations REQUIRE batch-aware transforms (is_batch_aware=True).
-    # Non-batch-aware transforms process rows individually, ignoring aggregation
-    # triggers entirely - a silent misconfiguration that produces wrong results.
-    aggregations = {}
-    for agg_config in config.aggregations:
-        transform_cls = manager.get_transform_by_name(agg_config.plugin)
-        transform = transform_cls(dict(agg_config.options))
-        # Bridge: inject routing from settings level (lifted from options)
-        transform.on_success = agg_config.on_success
-        transform.on_error = agg_config.on_error
+        # Instantiate aggregations
+        # Aggregations REQUIRE batch-aware transforms (is_batch_aware=True).
+        # Non-batch-aware transforms process rows individually, ignoring aggregation
+        # triggers entirely - a silent misconfiguration that produces wrong results.
+        aggregations = {}
+        for agg_config in config.aggregations:
+            transform_cls = manager.get_transform_by_name(agg_config.plugin)
+            transform = transform_cls(dict(agg_config.options))
+            # Bridge: inject routing from settings level (lifted from options)
+            transform.on_success = agg_config.on_success
+            transform.on_error = agg_config.on_error
 
-        # Validate batch-aware requirement (fail-fast before graph construction)
-        if not transform.is_batch_aware:
-            raise ValueError(
-                f"Aggregation '{agg_config.name}' uses transform '{agg_config.plugin}' "
-                f"which has is_batch_aware=False. Aggregations require batch-aware "
-                f"transforms that can process multiple rows at once. "
-                f"Use a batch-aware transform like 'azure_batch_llm', 'batch_stats', "
-                f"or 'batch_replicate', or set is_batch_aware=True on your custom transform."
-            )
+            # Validate batch-aware requirement (fail-fast before graph construction)
+            if not transform.is_batch_aware:
+                raise ValueError(
+                    f"Aggregation '{agg_config.name}' uses transform '{agg_config.plugin}' "
+                    f"which has is_batch_aware=False. Aggregations require batch-aware "
+                    f"transforms that can process multiple rows at once. "
+                    f"Use a batch-aware transform like 'azure_batch_llm', 'batch_stats', "
+                    f"or 'batch_replicate', or set is_batch_aware=True on your custom transform."
+                )
 
-        aggregations[agg_config.name] = (transform, agg_config)
+            aggregations[agg_config.name] = (transform, agg_config)
 
-    # Instantiate sinks
-    sinks = {}
-    for sink_name, sink_config in config.sinks.items():
-        sink_cls = manager.get_sink_by_name(sink_config.plugin)
-        sinks[sink_name] = sink_cls(dict(sink_config.options))
-        sinks[sink_name]._on_write_failure = sink_config.on_write_failure
+        # Instantiate sinks
+        sinks = {}
+        for sink_name, sink_config in config.sinks.items():
+            sink_cls = manager.get_sink_by_name(sink_config.plugin)
+            sinks[sink_name] = sink_cls(dict(sink_config.options))
+            sinks[sink_name]._on_write_failure = sink_config.on_write_failure
 
-    return PluginBundle(
-        source=source,
-        source_settings=config.source,
-        transforms=transforms,
-        sinks=sinks,
-        aggregations=aggregations,
-    )
+        return PluginBundle(
+            source=source,
+            source_settings=config.source,
+            transforms=transforms,
+            sinks=sinks,
+            aggregations=aggregations,
+        )
 
 
 def _make_sink_factory(config: "ElspethSettings") -> "Callable[[str], SinkProtocol]":

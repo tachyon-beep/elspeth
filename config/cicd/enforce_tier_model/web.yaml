@@ -1,18 +1,24 @@
 allow_hits:
 - key: web/catalog/routes.py:R1:get_schema:fp=bc80b0854f0cb34e
   owner: web-catalog
-  reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant dict
+  reason: Tier 3 boundary — plugin_type from URL path parameter, lookup in constant
+    dict
   safety: Returns None on miss, handled by 404 response
   expires: null
 - key: web/config.py:R5:WebSettings:_reject_blank_path_strings:fp=0062e954aa23db17
   owner: architecture
-  reason: Pydantic before-validator at Tier 3 config boundary — isinstance(v, str) distinguishes raw YAML string input (which may be all-whitespace) from already-coerced Path values or None, rejecting blank
-    strings before Pydantic's str→Path coercion silently accepts them. Mode=before runs prior to coercion so the type is not yet guaranteed, which is why isinstance rather than direct .strip() is used.
-  safety: Raises ValueError on blank string input; non-string values pass through to Pydantic's normal path validation; no silent coercion
+  reason: Pydantic before-validator at Tier 3 config boundary — isinstance(v, str)
+    distinguishes raw YAML string input (which may be all-whitespace) from already-coerced
+    Path values or None, rejecting blank strings before Pydantic's str→Path coercion
+    silently accepts them. Mode=before runs prior to coercion so the type is not yet
+    guaranteed, which is why isinstance rather than direct .strip() is used.
+  safety: Raises ValueError on blank string input; non-string values pass through
+    to Pydantic's normal path validation; no silent coercion
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=b4a0510125abce03
   owner: web-catalog
-  reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be absent
+  reason: Tier 3 boundary — Pydantic-generated JSON schema 'properties' key may be
+    absent
   safety: Default empty dict; no properties means no config fields
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_extract_config_fields:fp=816144ac56504e6d
@@ -22,18 +28,23 @@ allow_hits:
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=787f2794ac1e0cec
   owner: web-catalog
-  reason: Tier 3 boundary — JSON Schema oneOf entry may carry inline schema instead of $ref
-  safety: Default empty string fails the startswith(prefix) guard and the branch is skipped
+  reason: Tier 3 boundary — JSON Schema oneOf entry may carry inline schema instead
+    of $ref
+  safety: Default empty string fails the startswith(prefix) guard and the branch is
+    skipped
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=0593034aa10317db
   owner: web-catalog
-  reason: Tier 3 boundary — variant $defs entry may declare no 'properties' (empty config)
+  reason: Tier 3 boundary — variant $defs entry may declare no 'properties' (empty
+    config)
   safety: Default empty dict; variant contributes no field names to the union
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_fields_from_discriminated:fp=ea2d38196092229b
   owner: web-catalog
-  reason: Tier 3 boundary — variant $defs entry may declare no 'required' list (no mandatory fields)
-  safety: Default empty list; variant's required set is empty; intersection-required handles correctly
+  reason: Tier 3 boundary — variant $defs entry may declare no 'required' list (no
+    mandatory fields)
+  safety: Default empty list; variant's required set is empty; intersection-required
+    handles correctly
   expires: null
 - key: web/catalog/service.py:R1:CatalogServiceImpl:_field_summary:fp=bb6ceaf2795988d5
   owner: web-catalog
@@ -78,87 +89,114 @@ allow_hits:
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:decode_token:fp=593e0af0074215d6
   owner: web-auth
   reason: Tier 3 boundary — JWT header kid field is optional per RFC 7515
-  safety: Missing kid falls through to AuthenticationError path (no matching key); no silent acceptance
+  safety: Missing kid falls through to AuthenticationError path (no matching key);
+    no silent acceptance
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=7b72be83fb8bf0f7
   owner: web-auth
-  reason: Tier 3 boundary — OIDC discovery JSON top-level shape (dict vs. list/string) must be validated before indexing
-  safety: Non-dict raises AuthenticationError with got-type in message; no silent coercion; converts to HTTP 401
+  reason: Tier 3 boundary — OIDC discovery JSON top-level shape (dict vs. list/string)
+    must be validated before indexing
+  safety: Non-dict raises AuthenticationError with got-type in message; no silent
+    coercion; converts to HTTP 401
   expires: null
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_discovery_document:fp=393627c554a657f9
   owner: web-auth
-  reason: Tier 3 boundary — discovery dict.get('jwks_uri') lets us validate type before use rather than letting KeyError mask malformed JSON
-  safety: Missing or non-string raises AuthenticationError; validated string is returned to caller; no caching before validation
+  reason: Tier 3 boundary — discovery dict.get('jwks_uri') lets us validate type before
+    use rather than letting KeyError mask malformed JSON
+  safety: Missing or non-string raises AuthenticationError; validated string is returned
+    to caller; no caching before validation
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_discovery_document:fp=050deebdeb8bfc07
   owner: web-auth
-  reason: Tier 3 boundary — jwks_uri must be a non-empty string; IdPs have been observed returning integers/nulls for this field
-  safety: Non-string or empty raises AuthenticationError with a specific message; no silent fallback
+  reason: Tier 3 boundary — jwks_uri must be a non-empty string; IdPs have been observed
+    returning integers/nulls for this field
+  safety: Non-string or empty raises AuthenticationError with a specific message;
+    no silent fallback
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=0814d66955701c3e
   owner: web-auth
-  reason: Tier 3 boundary — JWKS JSON top-level shape must be dict before passing to PyJWKSet.from_dict (which raises AttributeError on non-dict)
-  safety: Non-dict raises AuthenticationError before self._jwks is assigned; malformed responses cannot poison the cache
+  reason: Tier 3 boundary — JWKS JSON top-level shape must be dict before passing
+    to PyJWKSet.from_dict (which raises AttributeError on non-dict)
+  safety: Non-dict raises AuthenticationError before self._jwks is assigned; malformed
+    responses cannot poison the cache
   expires: null
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:_validate_jwks_document:fp=000e385cef7d8d09
   owner: web-auth
-  reason: Tier 3 boundary — jwks.get('keys') permits shape-checking the value type before handing off to PyJWKSet
+  reason: Tier 3 boundary — jwks.get('keys') permits shape-checking the value type
+    before handing off to PyJWKSet
   safety: Non-list raises AuthenticationError; validation happens before cache assignment
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_validate_jwks_document:fp=6f55b6f9dc56c36b
   owner: web-auth
-  reason: Tier 3 boundary — 'keys' field must be a list per RFC 7517; IdPs have been observed returning objects or nulls
+  reason: Tier 3 boundary — 'keys' field must be a list per RFC 7517; IdPs have been
+    observed returning objects or nulls
   safety: Non-list raises AuthenticationError; cache not written until shape is verified
   expires: null
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:_get_token_algorithm:fp=e6da8061e94c304e
   owner: web-auth
-  reason: Tier 3 boundary — JWT header alg is external token metadata and may be absent before decode
+  reason: Tier 3 boundary — JWT header alg is external token metadata and may be absent
+    before decode
   safety: Missing alg raises AuthenticationError before jwt.decode selects an algorithm
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_get_token_algorithm:fp=c3d5bff62157490f
   owner: web-auth
   reason: Tier 3 boundary — JWT header alg must be a non-empty string before decode
-  safety: Non-string or blank alg raises AuthenticationError; no silent fallback to another algorithm
+  safety: Non-string or blank alg raises AuthenticationError; no silent fallback to
+    another algorithm
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_get_jwk_algorithm:fp=de17cc341f202e2e
   owner: web-auth
-  reason: Tier 3 boundary — individual JWKS entries may be non-object values even when the top-level keys list is valid
-  safety: Non-dict entries are skipped during kid matching; malformed entries do not crash the auth path
+  reason: Tier 3 boundary — individual JWKS entries may be non-object values even
+    when the top-level keys list is valid
+  safety: Non-dict entries are skipped during kid matching; malformed entries do not
+    crash the auth path
   expires: null
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:_get_jwk_algorithm:fp=f344522ba920a705
   owner: web-auth
-  reason: Tier 3 boundary — JWK kid is optional metadata and must be compared defensively against the token header kid
-  safety: Missing or non-matching kid continues the search; final no-match raises AuthenticationError
+  reason: Tier 3 boundary — JWK kid is optional metadata and must be compared defensively
+    against the token header kid
+  safety: Missing or non-matching kid continues the search; final no-match raises
+    AuthenticationError
   expires: null
 - key: web/auth/oidc.py:R1:JWKSTokenValidator:_get_jwk_algorithm:fp=57935b9d084d5f3c
   owner: web-auth
-  reason: Tier 3 boundary — JWK alg is optional metadata and is only enforced when the matched key advertises one
-  safety: None preserves honest absence; non-empty mismatches raise AuthenticationError before decode
+  reason: Tier 3 boundary — JWK alg is optional metadata and is only enforced when
+    the matched key advertises one
+  safety: None preserves honest absence; non-empty mismatches raise AuthenticationError
+    before decode
   expires: null
 - key: web/auth/oidc.py:R5:JWKSTokenValidator:_get_jwk_algorithm:fp=cddeaf8b7fd695dd
   owner: web-auth
   reason: Tier 3 boundary — matched JWK alg must be a non-empty string if present
-  safety: Invalid alg raises AuthenticationError; malformed IdP metadata is rejected rather than silently ignored
+  safety: Invalid alg raises AuthenticationError; malformed IdP metadata is rejected
+    rather than silently ignored
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:authenticate:fp=3e6bc7ed5a4ac005
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
-  safety: Default is payload['sub'] which is required; absence of optional claim is expected
+  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back
+    to sub
+  safety: Default is payload['sub'] which is required; absence of optional claim is
+    expected
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:_optional_profile_claim:fp=9c36a06f27aea4c1
   owner: web-auth
-  reason: Tier 3 boundary — optional OIDC profile claims are looked up generically and may be absent from the external token payload
-  safety: Missing claims return None so callers preserve honest absence instead of fabricating display data
+  reason: Tier 3 boundary — optional OIDC profile claims are looked up generically
+    and may be absent from the external token payload
+  safety: Missing claims return None so callers preserve honest absence instead of
+    fabricating display data
   expires: null
 - key: web/auth/oidc.py:R5:OIDCAuthProvider:_optional_profile_claim:fp=cf33f9c8429e9850
   owner: web-auth
-  reason: Tier 3 boundary — optional cosmetic claims must be visible strings before surfacing in the UI
-  safety: Non-string or blank values return None; malformed IdP data is dropped rather than exposed
+  reason: Tier 3 boundary — optional cosmetic claims must be visible strings before
+    surfacing in the UI
+  safety: Non-string or blank values return None; malformed IdP data is dropped rather
+    than exposed
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=e15cc5f5ab6b3e2d
   owner: web-auth
   reason: Tier 3 boundary — groups claim is optional in OIDC tokens; None = no groups
-  safety: None returns empty groups; non-list raises AuthenticationError; no silent discard
+  safety: None returns empty groups; non-list raises AuthenticationError; no silent
+    discard
   expires: null
 - key: web/auth/oidc.py:R5:OIDCAuthProvider:get_user_info:fp=79d0cdd7f4d823e0
   owner: web-auth
@@ -167,7 +205,8 @@ allow_hits:
   expires: null
 - key: web/auth/oidc.py:R1:OIDCAuthProvider:get_user_info:fp=13fe88b1bd7c9f1e
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back to sub
+  reason: Tier 3 boundary — preferred_username is optional in OIDC tokens, falls back
+    to sub
   safety: Default is payload['sub'] which is required
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:_extract_groups:fp=268368c0e155cc41
@@ -192,12 +231,15 @@ allow_hits:
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:authenticate:fp=564181fecfacb986
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
-  safety: Default is payload['sub'] which is required; absence of optional claim is expected
+  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls
+    back to sub
+  safety: Default is payload['sub'] which is required; absence of optional claim is
+    expected
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=3b33e715a472f615
   owner: web-auth
-  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls back to sub
+  reason: Tier 3 boundary — preferred_username is optional in Entra tokens, falls
+    back to sub
   safety: Default is payload['sub'] which is required
   expires: null
 - key: web/auth/entra.py:R1:EntraAuthProvider:get_user_info:fp=eb6da577b2a7f803
@@ -217,72 +259,87 @@ allow_hits:
   expires: null
 - key: web/auth/models.py:R5:UserIdentity:__post_init__:fp=085af69aa85f4acc
   owner: web-auth
-  reason: Tier 3 boundary — isinstance check on user_id from external IdP JWT payload (sub claim is Any)
+  reason: Tier 3 boundary — isinstance check on user_id from external IdP JWT payload
+    (sub claim is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
 - key: web/auth/models.py:R5:UserIdentity:__post_init__:fp=fc1331f656d792bc
   owner: web-auth
-  reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
+  reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload
+    (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
 - key: web/auth/models.py:R5:UserProfile:__post_init__:fp=1e107c02a0aae95c
   owner: web-auth
-  reason: Tier 3 boundary — isinstance check on user_id from external IdP JWT payload (sub claim is Any)
+  reason: Tier 3 boundary — isinstance check on user_id from external IdP JWT payload
+    (sub claim is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
 - key: web/auth/models.py:R5:UserProfile:__post_init__:fp=94dab5ba5bbf7397
   owner: web-auth
-  reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload (preferred_username is Any)
+  reason: Tier 3 boundary — isinstance check on username from external IdP JWT payload
+    (preferred_username is Any)
   safety: Raises AuthenticationError on non-string; validated at construction time
   expires: null
 - key: web/app.py:R5:_settings_from_env:fp=76a688746d4557c8
   owner: web-app
-  reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies for tuple conversion
+  reason: Tier 3 boundary — JSON-parsed env var may be a list; isinstance check classifies
+    for tuple conversion
   safety: isinstance used only for type dispatch; no contract masking
   expires: null
 - key: web/app.py:R6:_settings_from_env:fp=8747c11bfe362b54
   owner: web-app
-  reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain string (the common case)
+  reason: Tier 3 boundary — env var value that isn't valid JSON is treated as plain
+    string (the common case)
   safety: JSONDecodeError caught only to fall back to raw string; no silent data loss
   expires: null
 - key: web/execution/progress.py:R8:ProgressBroadcaster:subscribe:fp=80dd3c1d05f93c94
   owner: web-execution
   reason: Subscriber map creates the per-run queue→state mapping lazily on first subscription
-  safety: Mutation is guarded by the broadcaster lock and only initializes empty internal state
+  safety: Mutation is guarded by the broadcaster lock and only initializes empty internal
+    state
   expires: null
 - key: web/execution/progress.py:R9:ProgressBroadcaster:unsubscribe:fp=d21d1c5a7f779ec1
   owner: web-execution
-  reason: Unsubscribe is idempotent — a queue may be absent because the WS handler already removed it or cleanup_run raced ahead
+  reason: Unsubscribe is idempotent — a queue may be absent because the WS handler
+    already removed it or cleanup_run raced ahead
   safety: Missing entry simply means no state to remove; lock-protected no-op
   expires: null
 - key: web/execution/progress.py:R1:ProgressBroadcaster:broadcast:fp=895f7c6d83b0c1d9
   owner: web-execution
   reason: Broadcast treats an absent run entry as 'no subscribers' for that run
-  safety: A missing subscriber map results in a no-op broadcast, which is the correct behavior
+  safety: A missing subscriber map results in a no-op broadcast, which is the correct
+    behavior
   expires: null
 - key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=18e58b3e32b2e5fe
   owner: web-execution
-  reason: QueueFull for terminal events — drains queue and retries (terminal events must never be dropped)
+  reason: QueueFull for terminal events — drains queue and retries (terminal events
+    must never be dropped)
   safety: Terminal events guaranteed delivered; progress events use drop-oldest backpressure
   expires: null
 - key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=4148cfe963eb1f65
   owner: web-execution
-  reason: QueueEmpty suppressed during terminal event drain — queue may have been consumed concurrently
+  reason: QueueEmpty suppressed during terminal event drain — queue may have been
+    consumed concurrently
   safety: Race-safe no-op; no data loss
   expires: null
 - key: web/execution/progress.py:R7:ProgressBroadcaster:_safe_put:fp=4082e42d8f7ef55f
   owner: web-execution
-  reason: QueueEmpty suppressed during progress event drop-oldest — queue may have been consumed between full check and drain
+  reason: QueueEmpty suppressed during progress event drop-oldest — queue may have
+    been consumed between full check and drain
   safety: Race-safe no-op; no data loss
   expires: null
 - key: web/execution/progress.py:R6:ProgressBroadcaster:_safe_put:fp=b0813b2652b434b9
   owner: web-execution
-  reason: QueueFull after drop-oldest retry for non-terminal events — event dropped rather than blocking pipeline thread
-  safety: Best-effort delivery for progress events; terminal events use separate drain path
+  reason: QueueFull after drop-oldest retry for non-terminal events — event dropped
+    rather than blocking pipeline thread
+  safety: Best-effort delivery for progress events; terminal events use separate drain
+    path
   expires: null
 - key: web/execution/progress.py:R9:ProgressBroadcaster:cleanup_run:fp=bcf3a714f3cd29f0
   owner: web-execution
-  reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both remove the same run entry
+  reason: Run cleanup is idempotent because unsubscribe and explicit cleanup can both
+    remove the same run entry
   safety: Missing key simply means there are no remaining subscribers to clean up
   expires: null
 - key: web/auth/middleware.py:R6:get_current_user:fp=ea59abc681792adb
@@ -292,7 +349,8 @@ allow_hits:
   expires: null
 - key: web/auth/middleware.py:R1:get_current_user:fp=27850ac518f1116d
   owner: web-auth
-  reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP header
+  reason: Tier 3 boundary — request.headers.get('Authorization') reads untrusted HTTP
+    header
   safety: Missing header returns 401; malformed header returns 401; no default fabrication
   expires: null
 - key: web/auth/routes.py:R1:create_auth_router:refresh_token:fp=c6db2676f6c05f60
@@ -302,52 +360,78 @@ allow_hits:
   expires: null
 - key: web/composer/state.py:R5:_declared_input_fields_option:fp=3b81988b405ac7b0
   owner: web-composer
-  reason: Composer state options are Tier 3 LLM/user-supplied plugin config; wrapper-shaped aggregation options may carry an optional nested options mapping that must be inspected only when it is actually
-    a mapping
-  safety: Non-mapping wrapper values are not accepted as valid; existing schema-contract validation reports malformed aggregation wrapper options as blocking ValidationEntry results, while top-level required_input_fields
-    is still rejected
+  reason: Composer state options are Tier 3 LLM/user-supplied plugin config; wrapper-shaped
+    aggregation options may carry an optional nested options mapping that must be
+    inspected only when it is actually a mapping
+  safety: Non-mapping wrapper values are not accepted as valid; existing schema-contract
+    validation reports malformed aggregation wrapper options as blocking ValidationEntry
+    results, while top-level required_input_fields is still rejected
   expires: null
 - key: web/composer/state.py:R5:_check_schema_contracts:_is_config_probe_exception:fp=392eb7ac8346848d
   owner: web-composer
-  reason: Composer preview classifies only known plugin config/probe exception types while probing plugin-computed output contracts for shape-changing transforms. The caught exception message is NOT surfaced
-    to the UI — only type(exc).__name__ is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials, filesystem paths) via the preview response. ADR-007 adds fail-closed handling
-    for known pass-through plugins; non-pass-through plugins retain the v2 fallback to raw guarantees.
-  safety: Unexpected exceptions are re-raised. Known config/probe exceptions are converted into a warning and preview falls back to raw declared schema guarantees (or frozenset() for known pass-through
-    plugins, which then forces Stage 1 rejection) instead of crashing or fabricating a stronger contract
+  reason: Composer preview classifies only known plugin config/probe exception types
+    while probing plugin-computed output contracts for shape-changing transforms.
+    The caught exception message is NOT surfaced to the UI — only type(exc).__name__
+    is embedded in the contract warning to prevent plugin-option leaks (URLs, credentials,
+    filesystem paths) via the preview response. ADR-007 adds fail-closed handling
+    for known pass-through plugins; non-pass-through plugins retain the v2 fallback
+    to raw guarantees.
+  safety: Unexpected exceptions are re-raised. Known config/probe exceptions are converted
+    into a warning and preview falls back to raw declared schema guarantees (or frozenset()
+    for known pass-through plugins, which then forces Stage 1 rejection) instead of
+    crashing or fabricating a stronger contract
   expires: null
 - key: web/composer/_semantic_validator.py:R5:_is_config_probe_exception:fp=f4dd333a133b13c6
   owner: web-composer
-  reason: The semantic-contract validator probes producer plugins to read their output_semantics() during draft pipeline composition. Producer construction can fail with known draft/config exceptions (PluginConfigError,
-    PluginNotFoundError, TemplateError, UnknownPluginTypeError, or "Invalid configuration for transform" ValueError) when the user has not finished filling in options. Mirrors the same predicate at web/composer/state.py:_is_config_probe_exception
-    used by the schema-contract probe path. The caught exception text is NEVER embedded in any ValidationEntry or SemanticEdgeContract — the only signal exposed downstream is "no semantic facts" (treated
-    as UNKNOWN by compare_semantic), preventing plugin-option leaks via validator diagnostics.
-  safety: Unexpected exceptions are re-raised (per CLAUDE.md plugin-as-system-code policy). Known draft/config exceptions yield producer_decl=None, which compare_semantic translates to SemanticOutcome.UNKNOWN;
-    FAIL-policy consumers then emit a structured error naming only the requirement_code and plugin names, never the exception text.
+  reason: The semantic-contract validator probes producer plugins to read their output_semantics()
+    during draft pipeline composition. Producer construction can fail with known draft/config
+    exceptions (PluginConfigError, PluginNotFoundError, TemplateError, UnknownPluginTypeError,
+    or "Invalid configuration for transform" ValueError) when the user has not finished
+    filling in options. Mirrors the same predicate at web/composer/state.py:_is_config_probe_exception
+    used by the schema-contract probe path. The caught exception text is NEVER embedded
+    in any ValidationEntry or SemanticEdgeContract — the only signal exposed downstream
+    is "no semantic facts" (treated as UNKNOWN by compare_semantic), preventing plugin-option
+    leaks via validator diagnostics.
+  safety: Unexpected exceptions are re-raised (per CLAUDE.md plugin-as-system-code
+    policy). Known draft/config exceptions yield producer_decl=None, which compare_semantic
+    translates to SemanticOutcome.UNKNOWN; FAIL-policy consumers then emit a structured
+    error naming only the requirement_code and plugin names, never the exception text.
   expires: null
 - key: web/composer/state.py:R6:_check_schema_contracts:fp=c9553ec19974f8bb
   owner: web-composer
-  reason: Contract helper ValueError is intentionally converted into a blocking ValidationEntry on the consumer node instead of raising immediately
-  safety: The pipeline remains invalid; no contract telemetry is fabricated for that consumer edge
+  reason: Contract helper ValueError is intentionally converted into a blocking ValidationEntry
+    on the consumer node instead of raising immediately
+  safety: The pipeline remains invalid; no contract telemetry is fabricated for that
+    consumer edge
   expires: null
 - key: web/composer/state.py:R6:_check_schema_contracts:fp=be6716b7244eab96
   owner: web-composer
-  reason: Producer contract parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
-  safety: The invalid producer blocks validation and suppresses downstream edge contracts instead of silently continuing
+  reason: Producer contract parse failures are intentionally converted into blocking
+    ValidationEntry results and the producer is marked uncheckable
+  safety: The invalid producer blocks validation and suppresses downstream edge contracts
+    instead of silently continuing
   expires: null
 - key: web/composer/state.py:R6:_check_schema_contracts:fp=6b38000cc28451a9
   owner: web-composer
-  reason: Sink contract parse failures are intentionally converted into blocking ValidationEntry results on the output
-  safety: The pipeline remains invalid and the sink edge contract is skipped rather than fabricated
+  reason: Sink contract parse failures are intentionally converted into blocking ValidationEntry
+    results on the output
+  safety: The pipeline remains invalid and the sink edge contract is skipped rather
+    than fabricated
   expires: null
 - key: web/composer/state.py:R6:_check_schema_contracts:fp=68a7fbbf6670f83c
   owner: web-composer
-  reason: Sink-side producer parse failures are intentionally converted into blocking ValidationEntry results and the producer is marked uncheckable
-  safety: The pipeline remains invalid and downstream sink contract evidence is suppressed for the bad producer
+  reason: Sink-side producer parse failures are intentionally converted into blocking
+    ValidationEntry results and the producer is marked uncheckable
+  safety: The pipeline remains invalid and downstream sink contract evidence is suppressed
+    for the bad producer
   expires: null
 - key: web/composer/state.py:R6:CompositionState:validate:fp=dede8aff4f04ddfb
   owner: web-composer
-  reason: Aggregation trigger PydanticValidationError is intentionally converted into a blocking ValidationEntry so composer rejects malformed trigger.condition values before runtime settings load
-  safety: The pipeline remains invalid; no trigger config is fabricated and unexpected exception types propagate
+  reason: Aggregation trigger PydanticValidationError is intentionally converted into
+    a blocking ValidationEntry so composer rejects malformed trigger.condition values
+    before runtime settings load
+  safety: The pipeline remains invalid; no trigger config is fabricated and unexpected
+    exception types propagate
   expires: null
 - key: web/composer/tools.py:R6:_execute_list_models:fp=2b5ccd34354c1629
   owner: web-composer
@@ -356,64 +440,85 @@ allow_hits:
   expires: null
 - key: web/composer/tools.py:R6:_prevalidate_plugin_options:fp=2feb51a9d81c7c8d
   owner: web-composer
-  reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets engine validation catch it later
-  safety: Returns None (no pre-validation result); plugin name still validated during full pipeline instantiation
+  reason: UnknownPluginTypeError is expected for unrecognised plugin names — lets
+    engine validation catch it later
+  safety: Returns None (no pre-validation result); plugin name still validated during
+    full pipeline instantiation
   expires: null
 - key: web/composer/tools.py:R6:_execute_update_blob:fp=4b6da695102513a4
   owner: web-composer
-  reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk faults during post-replace divergence rollback expected; programmer bugs still propagate
-  safety: Rollback failure attached as add_note() on primary_exc with blob_id and "manual reconciliation required"; primary commit exception remains the headline.  Pre-replace failures bypass the rollback
-    branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback and test_quota_breach_returns_failure_without_touching_storage).
+  reason: Narrow OSError around storage_path.write_bytes(old_content) rollback — disk
+    faults during post-replace divergence rollback expected; programmer bugs still
+    propagate
+  safety: Rollback failure attached as add_note() on primary_exc with blob_id and
+    "manual reconciliation required"; primary commit exception remains the headline.  Pre-replace
+    failures bypass the rollback branch entirely (verified by test_primary_db_exception_before_replace_propagates_without_rollback
+    and test_quota_breach_returns_failure_without_touching_storage).
   expires: null
 - key: web/composer/tools.py:R6:_execute_delete_blob:fp=3ba309fc86c585cf
   owner: web-composer
-  reason: Narrow OSError around tombstone restore after a failed blob delete — compensation disk faults must not bury the primary DB exception
-  safety: Rollback failure is attached as add_note() on primary_exc and the original delete failure is re-raised unchanged
+  reason: Narrow OSError around tombstone restore after a failed blob delete — compensation
+    disk faults must not bury the primary DB exception
+  safety: Rollback failure is attached as add_note() on primary_exc and the original
+    delete failure is re-raised unchanged
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=7d8ddf794406c58f
+- key: web/execution/validation.py:R5:validate_pipeline:fp=b87d794d30c0fa96
   owner: web-execution
-  reason: isinstance(exc, PluginConfigError) discriminates exception type to extract plugin_name attribute
-  safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
+  reason: isinstance(exc, PluginConfigError) discriminates exception type to extract
+    plugin_name attribute
+  safety: Type dispatch for error formatting, not contract masking; both branches
+    produce validation checks
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=eec7ab67719bee18
+- key: web/execution/validation.py:R5:validate_pipeline:fp=d01d508055e4dda8
   owner: web-execution
-  reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer cause detail over generic str(exc)
-  safety: Type dispatch for error formatting, not contract masking; both branches produce validation checks
+  reason: isinstance(exc, PluginConfigError) discriminates exception type to prefer
+    cause detail over generic str(exc)
+  safety: Type dispatch for error formatting, not contract masking; both branches
+    produce validation checks
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=801c7d036f72ff2b
+- key: web/execution/validation.py:R1:validate_pipeline:fp=33a2b79c5bd8b730
   owner: web-execution
-  reason: Validation checks optional source path/file keys supplied by composition state
-  safety: Absent keys are treated honestly as 'no path provided' and the check is recorded as skipped/passed
+  reason: Validation checks optional source path/file keys supplied by composition
+    state
+  safety: Absent keys are treated honestly as 'no path provided' and the check is
+    recorded as skipped/passed
   expires: null
-- key: web/execution/validation.py:R1:validate_pipeline:fp=cb8f3cf812e3756e
+- key: web/execution/validation.py:R1:validate_pipeline:fp=2383164f7555b8f7
   owner: web-execution
-  reason: Validation checks optional output path/file keys supplied by composition state
+  reason: Validation checks optional output path/file keys supplied by composition
+    state
   safety: Absent keys treated as 'no path provided'; check recorded as skipped/passed
   expires: null
 - key: web/secrets/server_store.py:R1:ServerSecretStore:has_secret:fp=64afc66c27b37667
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret fast path
+  reason: Tier 3 boundary — os.environ.get() checks env var presence for has_secret
+    fast path
   safety: Returns bool only; no secret value exposed; no default fabrication
   expires: null
 - key: web/secrets/server_store.py:R1:ServerSecretStore:get_secret:fp=208ba630bb980dc3
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises SecretNotFoundError
+  reason: Tier 3 boundary — os.environ.get() reads external env var; unset/empty raises
+    SecretNotFoundError
   safety: Missing env var raises SecretNotFoundError; no default fabrication
   expires: null
 - key: web/secrets/server_store.py:R1:ServerSecretStore:list_secrets:fp=24c0960485b6a97d
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() checks env var presence for availability metadata
+  reason: Tier 3 boundary — os.environ.get() checks env var presence for availability
+    metadata
   safety: Only produces bool available flag; no secret value exposed
   expires: null
 - key: web/secrets/user_store.py:R1:_fingerprint_key_available:fp=9ec1dd9710d48731
   owner: web-secrets
-  reason: Tier 3 boundary — os.environ.get() checks deployment env var presence for fingerprint key
+  reason: Tier 3 boundary — os.environ.get() checks deployment env var presence for
+    fingerprint key
   safety: Returns bool only; deployment readiness check; no default fabrication
   expires: null
 - key: web/secrets/user_store.py:R6:UserSecretStore:_row_is_resolvable:fp=54cac57e74b91be4
   owner: web-secrets
-  reason: Decryptability probe — Fernet InvalidToken is the expected signal for key rotation or ciphertext corruption when computing browser-safe availability metadata
-  safety: Exception is converted only into available=False; get_secret() still raises SecretNotFoundError with explicit cause on the resolution path
+  reason: Decryptability probe — Fernet InvalidToken is the expected signal for key
+    rotation or ciphertext corruption when computing browser-safe availability metadata
+  safety: Exception is converted only into available=False; get_secret() still raises
+    SecretNotFoundError with explicit cause on the resolution path
   expires: null
 - key: web/secrets/service.py:R6:WebSecretService:resolve:fp=2d6278e2028d9ca9
   owner: web-secrets
@@ -506,24 +611,27 @@ allow_hits:
 
     '
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=d0e69f4d79adbde8
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=37e51986585e3b97
   owner: web-execution
-  reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in recursive config traversal
+  reason: Tree-walk — isinstance(Mapping) dispatches dict/list/scalar branches in
+    recursive config traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=2f72704518b7254e
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=e97c65781b7e6225
   owner: web-execution
   reason: Tree-walk — isinstance(ref, str) validates secret_ref marker value type
   safety: Non-string ref is silently skipped (malformed marker); no crash masking
   expires: null
-- key: web/execution/validation.py:R5:_collect_secret_refs:fp=3562a31e9f2a60af
+- key: web/execution/validation.py:R5:_collect_secret_refs:fp=46a71cc27fceaa19
   owner: web-execution
-  reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config traversal
+  reason: Tree-walk — isinstance() dispatches list/tuple branch in recursive config
+    traversal
   safety: No contract masking; structural dispatch on deserialized YAML (Tier 3 data)
   expires: null
-- key: web/execution/validation.py:R5:validate_pipeline:fp=56388796706c735c
+- key: web/execution/validation.py:R5:validate_pipeline:fp=916e1b66853b6ec8
   owner: web-execution
-  reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs — yaml.safe_load can return non-dict for malformed input
+  reason: isinstance(config_dict, dict) validates YAML parse output before resolve_secret_refs
+    — yaml.safe_load can return non-dict for malformed input
   safety: Raises TypeError with diagnostic message; no error suppression
   expires: null
 - key: web/app.py:R1:create_app:fp=4694104ab591b164
@@ -533,8 +641,11 @@ allow_hits:
   expires: null
 - key: web/blobs/service.py:R6:BlobServiceImpl:copy_blobs_for_fork:fp=a6f3d6c5c313a06c
   owner: web-blobs
-  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO faults expected during cleanup; programmer bugs still propagate
-  safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan blob_id and target session_id; storage file unlinked best-effort; primary copy exception remains the headline
+  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback delete_blob — DB/IO
+    faults expected during cleanup; programmer bugs still propagate
+  safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with
+    orphan blob_id and target session_id; storage file unlinked best-effort; primary
+    copy exception remains the headline
   expires: null
 - key: web/sessions/service.py:R5:SessionServiceImpl:_unwrap_envelope:fp=2695aa4a742eae91
   owner: web-sessions
@@ -553,102 +664,125 @@ allow_hits:
   expires: null
 - key: web/sessions/service.py:R6:SessionServiceImpl:archive_session:_sync:fp=bf04b9fc319a2611
   owner: web-sessions
-  reason: Narrow OSError during staged blob-directory restore after archive rollback — compensation disk faults must not bury the primary archive failure
-  safety: Restore failure is attached via add_note() to primary_exc and the original archive exception is re-raised unchanged
+  reason: Narrow OSError during staged blob-directory restore after archive rollback
+    — compensation disk faults must not bury the primary archive failure
+  safety: Restore failure is attached via add_note() to primary_exc and the original
+    archive exception is re-raised unchanged
   expires: null
 - key: web/sessions/service.py:R6:SessionServiceImpl:archive_session:_sync:fp=4eb8d408d680acc6
   owner: web-sessions
-  reason: Narrow OSError around post-commit quarantine purge — once session rows are deleted, staged blob cleanup is best-effort only
-  safety: Returns after leaving the staged directory in quarantine for manual cleanup; it does not fabricate a rollback or mask the already-completed archive
+  reason: Narrow OSError around post-commit quarantine purge — once session rows are
+    deleted, staged blob cleanup is best-effort only
+  safety: Returns after leaving the staged directory in quarantine for manual cleanup;
+    it does not fabricate a rollback or mask the already-completed archive
   expires: null
 - key: web/sessions/service.py:R7:SessionServiceImpl:archive_session:_sync:fp=405e736aebf0bc7c
   owner: web-sessions
-  reason: Best-effort quarantine-root cleanup after staged blob purge — the parent directory may still contain other files or be recreated concurrently
-  safety: Failing to remove the parent leaves only a manual-cleanup directory behind; session archival has already succeeded
+  reason: Best-effort quarantine-root cleanup after staged blob purge — the parent
+    directory may still contain other files or be recreated concurrently
+  safety: Failing to remove the parent leaves only a manual-cleanup directory behind;
+    session archival has already succeeded
   expires: null
-- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=5a0ca90c8be7e0ff
+- key: web/execution/service.py:R8:ExecutionServiceImpl:execute:fp=16aa4c83b37c9960
   owner: web-execution
   reason: Session lock map creates per-session lock lazily on first execution
   safety: Mutation is thread-safe; setdefault is atomic for dict
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=4146b9aee1adf450
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=3faca0400ebe066b
   owner: web-execution
   reason: Optional keys in user-authored config — source options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=942b309eba14ca2a
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=93a8228fbcf7c291
   owner: web-execution
   reason: Optional keys in user-authored config — output options key may be absent
   safety: Returns None; validation handles absence
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=b5228b56df818b33
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_execute_locked:fp=d97dbb3cc847b468
   owner: web-execution
   reason: Optional keys in user-authored config — blob_ref is optional in source options
   safety: Returns None; blob link skipped
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=2659de825227fd32
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_execute_locked:fp=0498979d3f8803af
   owner: web-execution
   reason: Idempotent shutdown-event cleanup on failure path
   safety: Pop is idempotent; except BaseException handler cleans up before re-raise
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_execute_locked:fp=03e5eafacd57f2a8
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_execute_locked:fp=699b1bc86e93ead7
   owner: web-execution
-  reason: Best-effort run status cleanup on setup failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb so
-    programmer bugs in update_run_status propagate. Logs exc_class only (no str(exc)) to avoid SQLAlchemy `__cause__` chains exposing DB URLs/credentials.
+  reason: Best-effort run status cleanup on setup failure — must not mask original
+    exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per
+    canonical pattern b8ba2214/127417cb so programmer bugs in update_run_status propagate.
+    Logs exc_class only (no str(exc)) to avoid SQLAlchemy `__cause__` chains exposing
+    DB URLs/credentials.
   safety: Logged with slog.error; original exception always re-raised
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=4d73fa1c03a49a3b
+- key: web/execution/service.py:R1:ExecutionServiceImpl:cancel:fp=3cf81cd510666514
   owner: web-execution
   reason: Check for live shutdown event before fallback handling
   safety: Returns None if absent; no silent default
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=342bb9816ab71a92
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=9fcfb853b30428ef
   owner: web-execution
   reason: Tier 3 — config from YAML deserialization may be non-dict
   safety: Raises TypeError if not dict; no silent default
   expires: null
-- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=52abe7ddc484a40c
+- key: web/execution/service.py:R1:ExecutionServiceImpl:_run_pipeline:fp=64685408536b411e
   owner: web-execution
-  reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown guard
+  reason: Scope-to-audit-source mapping — .get() on explicit mapping dict with crash-on-unknown
+    guard
   safety: Unknown scope raises ValueError immediately; no silent default
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=c21fd576c9a7a783
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:_safe_broadcast:fp=4ad9154cdfd96eb7
   owner: web-execution
-  reason: Progress broadcasting via call_soon_threadsafe raises RuntimeError when event loop is closed during shutdown
-  safety: Only RuntimeError caught (narrowed from bare Exception); logged with canonical exc_class; pipeline continues
+  reason: Progress broadcasting via call_soon_threadsafe raises RuntimeError when
+    event loop is closed during shutdown
+  safety: Only RuntimeError caught (narrowed from bare Exception); logged with canonical
+    exc_class; pipeline continues
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=f19cefd9535e138e
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=de0ef042754df56a
   owner: web-execution
-  reason: GracefulShutdownError is an expected control-flow signal from orchestrator cancellation
+  reason: GracefulShutdownError is an expected control-flow signal from orchestrator
+    cancellation
   safety: Classified as cancelled; separated from BaseException failure path
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=1edde4f1fef0aec7
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_run_pipeline:fp=459e8e18a3148d55
   owner: web-execution
-  reason: Signal classification — KeyboardInterrupt/SystemExit skip async status update during interpreter or loop shutdown
-  safety: Non-signal BaseException paths still update failed status; signal paths emit a structured warning and rely on orphan cleanup
+  reason: Signal classification — KeyboardInterrupt/SystemExit skip async status update
+    during interpreter or loop shutdown
+  safety: Non-signal BaseException paths still update failed status; signal paths
+    emit a structured warning and rely on orphan cleanup
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=b0e9574dd1303d34
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_run_pipeline:fp=bcc423aab5ea70ee
   owner: web-execution
-  reason: Status update after pipeline failure — must not mask original exception. Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical pattern b8ba2214/127417cb. Logs exc_class
-    only (no str(status_err)) to avoid leaking SQL + bound parameters or `__cause__` text with DB credentials. The sanitized client_msg already reached the DB update call above, so the slog's exc_class
-    is the complete triage surface.
+  reason: Status update after pipeline failure — must not mask original exception.
+    Narrowed from `except Exception` to `(SQLAlchemyError, OSError)` per canonical
+    pattern b8ba2214/127417cb. Logs exc_class only (no str(status_err)) to avoid leaking
+    SQL + bound parameters or `__cause__` text with DB credentials. The sanitized
+    client_msg already reached the DB update call above, so the slog's exc_class is
+    the complete triage surface.
   safety: Logged; original exception re-raised
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=35b849c2507772ec
+- key: web/execution/service.py:R9:ExecutionServiceImpl:_run_pipeline:fp=9b1317e5d9065f3e
   owner: web-execution
   reason: Final shutdown-event cleanup is intentionally idempotent
   safety: Pop is idempotent
   expires: null
-- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=aabff81a11a28aa7
+- key: web/execution/service.py:R6:ExecutionServiceImpl:_finalize_output_blobs:fp=e82b755f94710fed
   owner: web-execution
-  reason: Blob finalization before terminal broadcast — failure must not mask run outcome
-  safety: _FINALIZE_SUPPRESSED covers blob-domain exceptions (OSError, SQLAlchemyError, BlobNotFoundError, BlobQuotaExceededError, BlobStateError); RuntimeError deliberately excluded (too broad); programmer
-    bugs propagate; partial failures logged from structured result
+  reason: Blob finalization before terminal broadcast — failure must not mask run
+    outcome
+  safety: _FINALIZE_SUPPRESSED covers blob-domain exceptions (OSError, SQLAlchemyError,
+    BlobNotFoundError, BlobQuotaExceededError, BlobStateError); RuntimeError deliberately
+    excluded (too broad); programmer bugs propagate; partial failures logged from
+    structured result
   expires: null
-- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=d53605b9638395d8
+- key: web/execution/service.py:R5:ExecutionServiceImpl:_on_pipeline_done:fp=7298058d7fe78866
   owner: web-execution
-  reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit from diagnostic logging
-  safety: Only suppresses signal exceptions; all other exceptions logged as last-resort diagnostic
+  reason: Last-resort safety net — isinstance check excludes KeyboardInterrupt/SystemExit
+    from diagnostic logging
+  safety: Only suppresses signal exceptions; all other exceptions logged as last-resort
+    diagnostic
   expires: null
 - key: web/app.py:R1:create_app:fp=ddde20baab9b3056
   owner: web-app
@@ -657,18 +791,22 @@ allow_hits:
   expires: null
 - key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=167813bc5b04773a
   owner: web-blobs
-  reason: Quota exceeded during finalization marks blob as error instead of crashing run
+  reason: Quota exceeded during finalization marks blob as error instead of crashing
+    run
   safety: Over-quota file deleted; blob marked error; run still finalized
   expires: null
 - key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=0989f39b81a966ed
   owner: web-blobs
-  reason: Per-blob operational errors caught to prevent one failure from aborting remaining blobs
+  reason: Per-blob operational errors caught to prevent one failure from aborting
+    remaining blobs
   safety: Failed blobs moved to "error" status best-effort; errors returned in BlobFinalizationResult
   expires: null
 - key: web/blobs/service.py:R6:BlobServiceImpl:finalize_run_output_blobs:_sync:fp=3af5b664750c7418
   owner: web-blobs
-  reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE — DB/IO faults expected; programmer bugs still propagate
-  safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not a silent swallow
+  reason: Narrow (SQLAlchemyError, OSError) around pending->error recovery UPDATE
+    — DB/IO faults expected; programmer bugs still propagate
+  safety: Recovery failure appended to errors list as RecoveryFailed[<type>]; not
+    a silent swallow
   expires: null
 - key: web/execution/routes.py:R1:create_execution_router:websocket_run_progress:fp=9ff45025f16939b7
   owner: web-execution
@@ -683,7 +821,8 @@ allow_hits:
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=a08151dd826caa66
   owner: web-execution
   reason: Idle-timeout status recheck — run may be deleted between heartbeat polls
-  safety: Only not-found errors close with 4004; infrastructure errors propagate to the outer handler
+  safety: Only not-found errors close with 4004; infrastructure errors propagate to
+    the outer handler
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=003ec748d84d1e5a
   owner: web-execution
@@ -692,7 +831,8 @@ allow_hits:
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=6ddae18ae4d8a9af
   owner: web-execution
-  reason: Narrowed outer handler to (ConnectionError, OSError) — programming errors now propagate
+  reason: Narrowed outer handler to (ConnectionError, OSError) — programming errors
+    now propagate
   safety: Logged with slog.error; clean 1011 close sent to client
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=08647ae877994684
@@ -702,13 +842,16 @@ allow_hits:
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=ac8b5ae1657d7430
   owner: web-execution
-  reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to except AuthenticationError only
-  safety: Only auth failures close with 4001; infrastructure errors propagate to outer handler
+  reason: WebSocket auth — narrowed from except (AuthenticationError, Exception) to
+    except AuthenticationError only
+  safety: Only auth failures close with 4001; infrastructure errors propagate to outer
+    handler
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=c82ab0ae477d840d
   owner: web-execution
   reason: Run-ownership IDOR gate — narrowed from except Exception to except ValueError
-  safety: Only not-found errors return 4004; infrastructure errors propagate to outer handler
+  safety: Only not-found errors return 4004; infrastructure errors propagate to outer
+    handler
   expires: null
 - key: web/execution/routes.py:R6:create_execution_router:websocket_run_progress:fp=10e73ce68f35bd65
   owner: web-execution
@@ -722,60 +865,96 @@ allow_hits:
   expires: null
 - key: web/app.py:R7:lifespan:fp=9d0da83a5fd41364
   owner: web-execution
-  reason: contextlib.suppress(CancelledError) is the expected shutdown path for the periodic orphan cleanup task
+  reason: contextlib.suppress(CancelledError) is the expected shutdown path for the
+    periodic orphan cleanup task
   safety: Clean cancellation during app shutdown; no error suppression
   expires: null
 - key: web/composer/service.py:R5:ComposerServiceImpl:_compose_loop:fp=d6d6a213946684f7
   owner: bugfix
-  reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays, nulls, or scalars; the composer must reject non-object arguments before cache lookup or tool dispatch
-  safety: Emits a tool error back to the LLM, does not call execute_tool, marks mutation intent for budget accounting, and preserves current state
+  reason: Tier 3 boundary - LiteLLM tool-call arguments can decode to JSON arrays,
+    nulls, or scalars; the composer must reject non-object arguments before cache
+    lookup or tool dispatch
+  safety: Emits a tool error back to the LLM, does not call execute_tool, marks mutation
+    intent for budget accounting, and preserves current state
   expires: null
 - key: web/app.py:R6:_periodic_orphan_cleanup:fp=2d133ac438c01532
   owner: web-execution
-  reason: Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention, SQLite file I/O) so the periodic
-    loop retries on the next interval. Catch is intentionally narrow; programmer-bug exceptions (AttributeError from a drifted attribute on ExecutionServiceImpl, TypeError from a signature change, AssertionError
-    from an invariant guard) are NOT caught and terminate the background task so they surface at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError). Same pattern as the CRIT-2
-    audit-cleanup narrow catch at web/composer/service.py ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py fork_from_message (lines 968 and 987).
-  safety: Recoverable failures are logged via slog.error periodic_orphan_cleanup_failed with exc_class only — exc_info is deliberately omitted so SQLAlchemy __cause__ chains (DB URLs, schema names, sqlite
-    file path) cannot reach structured server logs. Same exc_info-redaction pattern commit 59bdf514 established across the HTTP-path slog.error sites. Programmer-bug propagation invariant is guarded by
-    tests/unit/web/test_app.py test_programmer_bug_terminates_task_and_does_not_log (AttributeError terminates the task) and the recoverable-failure path by test_continues_after_exception (OperationalError
+  reason: Audit/IO-cleanup narrow catch — except (SQLAlchemyError, OSError) absorbs
+    recoverable failures of cancel_all_orphaned_runs (transient DB loss, lock contention,
+    SQLite file I/O) so the periodic loop retries on the next interval. Catch is intentionally
+    narrow; programmer-bug exceptions (AttributeError from a drifted attribute on
+    ExecutionServiceImpl, TypeError from a signature change, AssertionError from an
+    invariant guard) are NOT caught and terminate the background task so they surface
+    at lifespan shutdown (the outer contextlib.suppress absorbs only CancelledError).
+    Same pattern as the CRIT-2 audit-cleanup narrow catch at web/composer/service.py
+    ComposerServiceImpl.compose and the rollback-cleanup sites at web/sessions/routes.py
+    fork_from_message (lines 968 and 987).
+  safety: Recoverable failures are logged via slog.error periodic_orphan_cleanup_failed
+    with exc_class only — exc_info is deliberately omitted so SQLAlchemy __cause__
+    chains (DB URLs, schema names, sqlite file path) cannot reach structured server
+    logs. Same exc_info-redaction pattern commit 59bdf514 established across the HTTP-path
+    slog.error sites. Programmer-bug propagation invariant is guarded by tests/unit/web/test_app.py
+    test_programmer_bug_terminates_task_and_does_not_log (AttributeError terminates
+    the task) and the recoverable-failure path by test_continues_after_exception (OperationalError
     logged, loop continues, no traceback text leaked).
   expires: null
 - key: web/secrets/user_store.py:R1:_compute_fingerprint:fp=d88552191c8b792f
   owner: web-secrets
-  reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed by check-and-crash
+  reason: Tier 3 — fingerprint key from deployment environment; os.environ.get followed
+    by check-and-crash
   safety: Missing key raises RuntimeError immediately; no silent default
   expires: null
 - key: web/sessions/routes.py:R6:_handle_convergence_error:fp=2a14911a15088910
   owner: web-sessions
-  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed to data-shape errors. Hardened to log exc_class (not str) for Tier-1 redaction symmetry with _handle_plugin_crash.
+  reason: Convergence partial-state validation may fail on damaged LLM output — narrowed
+    to data-shape errors. Hardened to log exc_class (not str) for Tier-1 redaction
+    symmetry with _handle_plugin_crash.
   safety: Returns 422 with structured error, does not swallow
   expires: null
 - key: web/sessions/routes.py:R6:_handle_convergence_error:fp=5fe4290756778192
   owner: web-sessions
-  reason: Convergence partial-state save may fail — catch covers the full SQLAlchemyError family (IntegrityError, OperationalError for lock timeout or pool disconnect, ProgrammingError for schema drift,
-    and siblings). A narrow IntegrityError catch would let siblings escape and upgrade the structured 422 into an unstructured 500. Narrowed from the earlier (ValueError, TypeError, KeyError, SQLAlchemyError)
-    tuple per CLAUDE.md Tier-1 semantics — to_dict() and CompositionStateData() run on our own dataclass, so TypeError/KeyError from that block is a broken internal invariant and must propagate as a 500
-    with traceback rather than be laundered into partial_state_save_failed=True. exc_info stays omitted so SQLAlchemy __cause__ chains do not leak connection strings into structured server logs.
-  safety: 'Returns 422 with structured error, sets partial_state_save_failed=True; does not swallow. Both the slog (exc_class=...) and the HTTP response body (partial_state_save_error=ClassName) carry the
-    exception class name only — no SQL statement, no bound parameters, no __cause__ text. str(SQLAlchemyError) would expand to ''[SQL: ...][parameters: ...]'' plus __cause__ (DB URLs / credentials on OperationalError);
-    str(ValueError/TypeError/KeyError) over dict access to composition-state fields can surface source options / metadata (potential secret refs). Redaction is uniform across both channels.'
+  reason: Convergence partial-state save may fail — catch covers the full SQLAlchemyError
+    family (IntegrityError, OperationalError for lock timeout or pool disconnect,
+    ProgrammingError for schema drift, and siblings). A narrow IntegrityError catch
+    would let siblings escape and upgrade the structured 422 into an unstructured
+    500. Narrowed from the earlier (ValueError, TypeError, KeyError, SQLAlchemyError)
+    tuple per CLAUDE.md Tier-1 semantics — to_dict() and CompositionStateData() run
+    on our own dataclass, so TypeError/KeyError from that block is a broken internal
+    invariant and must propagate as a 500 with traceback rather than be laundered
+    into partial_state_save_failed=True. exc_info stays omitted so SQLAlchemy __cause__
+    chains do not leak connection strings into structured server logs.
+  safety: 'Returns 422 with structured error, sets partial_state_save_failed=True;
+    does not swallow. Both the slog (exc_class=...) and the HTTP response body (partial_state_save_error=ClassName)
+    carry the exception class name only — no SQL statement, no bound parameters, no
+    __cause__ text. str(SQLAlchemyError) would expand to ''[SQL: ...][parameters:
+    ...]'' plus __cause__ (DB URLs / credentials on OperationalError); str(ValueError/TypeError/KeyError)
+    over dict access to composition-state fields can surface source options / metadata
+    (potential secret refs). Redaction is uniform across both channels.'
   expires: null
 - key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=a7fda2fec0b216fd
   owner: web-sessions
-  reason: Plugin-crash partial-state validation may fail on damaged LLM output — narrowed to data-shape errors (ValueError, TypeError, KeyError). Mirrors the convergence-error validate-guard; required because
-    partial_state is captured mid-mutation and may be structurally inconsistent.
-  safety: Returns 500 with structured error; logs exc_class and falls back to ValidationSummary(is_valid=False). Original plugin crash still propagates — validation-guard failure never masks the primary
-    bug.
+  reason: Plugin-crash partial-state validation may fail on damaged LLM output — narrowed
+    to data-shape errors (ValueError, TypeError, KeyError). Mirrors the convergence-error
+    validate-guard; required because partial_state is captured mid-mutation and may
+    be structurally inconsistent.
+  safety: Returns 500 with structured error; logs exc_class and falls back to ValidationSummary(is_valid=False).
+    Original plugin crash still propagates — validation-guard failure never masks
+    the primary bug.
   expires: null
 - key: web/sessions/routes.py:R6:_handle_plugin_crash:fp=901a4c73fc045de6
   owner: web-sessions
-  reason: Plugin-crash partial-state save may fail — catch covers the full SQLAlchemyError family. A narrow IntegrityError catch would let OperationalError, ProgrammingError, and siblings escape and mask
-    the redacted 500 plugin-crash response. Narrowed from the earlier (ValueError, TypeError, KeyError, SQLAlchemyError) tuple per CLAUDE.md Tier-1 semantics — to_dict() and CompositionStateData() operate
-    on our own dataclass, so TypeError/KeyError from that block is a broken internal invariant and must propagate rather than be laundered into partial_state_save_failed=True. Mirrors the convergence-error
-    persist-guard. On save failure, sets partial_state_save_failed=True on the 500 response body for frontend recovery UX symmetry with _handle_convergence_error.
-  safety: Returns 500 with structured error; logs exc_class (no traceback, same redaction policy as the convergence path). Original plugin crash still propagates via the outer `raise HTTPException(...)
-    from crash.original_exc`.
+  reason: Plugin-crash partial-state save may fail — catch covers the full SQLAlchemyError
+    family. A narrow IntegrityError catch would let OperationalError, ProgrammingError,
+    and siblings escape and mask the redacted 500 plugin-crash response. Narrowed
+    from the earlier (ValueError, TypeError, KeyError, SQLAlchemyError) tuple per
+    CLAUDE.md Tier-1 semantics — to_dict() and CompositionStateData() operate on our
+    own dataclass, so TypeError/KeyError from that block is a broken internal invariant
+    and must propagate rather than be laundered into partial_state_save_failed=True.
+    Mirrors the convergence-error persist-guard. On save failure, sets partial_state_save_failed=True
+    on the 500 response body for frontend recovery UX symmetry with _handle_convergence_error.
+  safety: Returns 500 with structured error; logs exc_class (no traceback, same redaction
+    policy as the convergence path). Original plugin crash still propagates via the
+    outer `raise HTTPException(...) from crash.original_exc`.
   expires: null
 - key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=f09cf88e38050ef4
   owner: web-sessions
@@ -789,7 +968,8 @@ allow_hits:
   expires: null
 - key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=41b1862f8993731f
   owner: web-sessions
-  reason: isinstance(options, dict) validates persisted source.options before mutating nested fields during fork blob rewrite
+  reason: isinstance(options, dict) validates persisted source.options before mutating
+    nested fields during fork blob rewrite
   safety: Non-dict raises AuditIntegrityError immediately; no silent skip or coercion
   expires: null
 - key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=7fdf71e485823668
@@ -804,104 +984,143 @@ allow_hits:
   expires: null
 - key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=5e66a51d14daa69e
   owner: web-sessions
-  reason: blob_map.get() on copied blob UUID — not every source reference is guaranteed to have a copied blob target, so fork rewrite falls back to path/file matching
-  safety: None result only triggers the secondary path/file rewrite probe; no fabricated blob mapping is introduced
+  reason: blob_map.get() on copied blob UUID — not every source reference is guaranteed
+    to have a copied blob target, so fork rewrite falls back to path/file matching
+  safety: None result only triggers the secondary path/file rewrite probe; no fabricated
+    blob mapping is introduced
   expires: null
 - key: web/sessions/routes.py:R1:create_session_router:fork_from_message:fp=b7fe9219c0a46be1
   owner: web-sessions
-  reason: options.get(path_key) on persisted source options — path/file keys are optional and used only for fallback blob rewrite
+  reason: options.get(path_key) on persisted source options — path/file keys are optional
+    and used only for fallback blob rewrite
   safety: None result skips that fallback key and continues scanning remaining candidates
   expires: null
 - key: web/sessions/routes.py:R5:create_session_router:fork_from_message:fp=c039fd2368c108dd
   owner: web-sessions
-  reason: isinstance(path_value, str) guards source_blob_path_map lookup against non-string persisted path/file values
-  safety: Only string values participate in the fallback rewrite; non-string values remain unchanged and can still fail later validation instead of being silently coerced
+  reason: isinstance(path_value, str) guards source_blob_path_map lookup against non-string
+    persisted path/file values
+  safety: Only string values participate in the fallback rewrite; non-string values
+    remain unchanged and can still fail later validation instead of being silently
+    coerced
   expires: null
 - key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=c504df7a5c728e09
   owner: web-sessions
-  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the BlobQuotaExceededError path — DB/IO faults expected during cleanup; programmer bugs still propagate
-  safety: Cleanup failure attached as RecoveryFailed[<type>] note on the HTTPException(413) that propagates; orphan sessions.id flagged for manual cleanup; user-facing 413 response remains intact even when
-    cleanup fails
+  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in
+    the BlobQuotaExceededError path — DB/IO faults expected during cleanup; programmer
+    bugs still propagate
+  safety: Cleanup failure attached as RecoveryFailed[<type>] note on the HTTPException(413)
+    that propagates; orphan sessions.id flagged for manual cleanup; user-facing 413
+    response remains intact even when cleanup fails
   expires: null
 - key: web/sessions/routes.py:R6:create_session_router:fork_from_message:fp=98bef8a5290a5098
   owner: web-sessions
-  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in the generic except Exception path — DB/IO faults expected during cleanup; programmer bugs still propagate
-  safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with orphan sessions.id; bare `raise` preserves primary_exc and its original traceback as the headline (regression-tested
-    by test_fork_cleanup_failure_preserves_primary_exception_with_note)
+  reason: Narrow (SQLAlchemyError, OSError) around fork-rollback archive_session in
+    the generic except Exception path — DB/IO faults expected during cleanup; programmer
+    bugs still propagate
+  safety: Cleanup failure attached as RecoveryFailed[<type>] note on primary_exc with
+    orphan sessions.id; bare `raise` preserves primary_exc and its original traceback
+    as the headline (regression-tested by test_fork_cleanup_failure_preserves_primary_exception_with_note)
   expires: null
 - key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=17378531bc04d849
   owner: web-sessions
-  reason: derived_from_map.get() on seed_id — seed may not exist in derived_from_map (states without derived_from parents)
+  reason: derived_from_map.get() on seed_id — seed may not exist in derived_from_map
+    (states without derived_from parents)
   safety: Returns None, while-loop terminates naturally
   expires: null
 - key: web/sessions/service.py:R1:SessionServiceImpl:prune_state_versions:_sync:fp=7414fdec789846ef
   owner: web-sessions
-  reason: derived_from_map.get() traversing parent chain — parent may reference state outside session or not in map
+  reason: derived_from_map.get() traversing parent chain — parent may reference state
+    outside session or not in map
   safety: Returns None, terminates transitive closure walk
   expires: null
 - key: web/composer/skills/__init__.py:R6:load_deployment_skill:fp=a7cf6bcf22cab117
   owner: web-composer
-  reason: Deployment skill is optional — FileNotFoundError is expected when deployment skill is absent. PermissionError/IsADirectoryError now propagate (operator misconfiguration).
-  safety: Returns empty string for absent file only (not a fabricated default). Core skill always loads (crash on missing). Only the deployment overlay is optional. Size guard rejects oversized files.
+  reason: Deployment skill is optional — FileNotFoundError is expected when deployment
+    skill is absent. PermissionError/IsADirectoryError now propagate (operator misconfiguration).
+  safety: Returns empty string for absent file only (not a fabricated default). Core
+    skill always loads (crash on missing). Only the deployment overlay is optional.
+    Size guard rejects oversized files.
   expires: null
 - key: web/composer/redaction.py:R1:redact_source_storage_path:fp=f9cae2269932b86b
   owner: web-composer
-  reason: Function receives multiple dict shapes — to_dict() output always has "source", but component dicts from _execute_get_pipeline_state do not. .get() handles the absent-key case (no-op early return).
+  reason: Function receives multiple dict shapes — to_dict() output always has "source",
+    but component dicts from _execute_get_pipeline_state do not. .get() handles the
+    absent-key case (no-op early return).
   safety: Returns input unchanged when "source" key absent — no data loss or fabrication
   expires: null
 - key: web/composer/redaction.py:R1:redact_source_storage_path:fp=87ca61fbdfb63fd5
   owner: web-composer
-  reason: Source dict from DB records (CompositionStateRecord.source) may lack "options" — _state_response wraps deep_thaw(state.source) which is raw JSON from the DB. Not all source shapes include "options".
+  reason: Source dict from DB records (CompositionStateRecord.source) may lack "options"
+    — _state_response wraps deep_thaw(state.source) which is raw JSON from the DB.
+    Not all source shapes include "options".
   safety: Returns input unchanged when "options" absent — no data loss or fabrication
   expires: null
 - key: web/sessions/routes.py:R2:_get_session_compose_lock_registry:fp=12ed66fe52b45967
   owner: web-sessions
-  reason: App-scoped compose lock registry is initialized lazily on first session-router use rather than being required at startup
-  safety: Missing attribute allocates and stores a new _SessionComposeLockRegistry on request.app.state; subsequent calls reuse the same object
+  reason: App-scoped compose lock registry is initialized lazily on first session-router
+    use rather than being required at startup
+  safety: Missing attribute allocates and stores a new _SessionComposeLockRegistry
+    on request.app.state; subsequent calls reuse the same object
   expires: null
 - key: web/sessions/routes.py:R2:_litellm_error_detail:fp=d0807e170e4c1409
   owner: web-sessions
-  reason: Optional LiteLLM/provider exception metadata — status_code is not guaranteed on every provider error object, and this helper only surfaces it in explicit staging/debug mode.
-  safety: Missing status_code omits provider_status_code from the response; no fabricated status is emitted, and the stable redacted detail still uses type(exc).__name__.
+  reason: Optional LiteLLM/provider exception metadata — status_code is not guaranteed
+    on every provider error object, and this helper only surfaces it in explicit staging/debug
+    mode.
+  safety: Missing status_code omits provider_status_code from the response; no fabricated
+    status is emitted, and the stable redacted detail still uses type(exc).__name__.
   expires: null
 - key: web/sessions/routes.py:R1:_state_response:fp=486d1155103a1d1c
   owner: web-sessions
-  reason: Unwrapping redact_source_storage_path() output — helper returns dict with "source" key; .get() with fallback to original is defensive against helper contract change
+  reason: Unwrapping redact_source_storage_path() output — helper returns dict with
+    "source" key; .get() with fallback to original is defensive against helper contract
+    change
   safety: Falls back to unredacted source_data (less privacy, not less safety)
   expires: null
-- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=6521ed28e55d2739
+- key: web/execution/validation.py:R5:_infer_component_type_from_plugin_error:fp=4e99de25e7b391f1
   owner: web-validation
-  reason: Union type dispatch — function receives PluginNotFoundError | PluginConfigError, isinstance needed to read component_type attribute only present on PluginConfigError
+  reason: Union type dispatch — function receives PluginNotFoundError | PluginConfigError,
+    isinstance needed to read component_type attribute only present on PluginConfigError
   safety: Returns None for non-matching type; no error suppression
   expires: null
 - key: web/middleware/rate_limit.py:R9:ComposerRateLimiter:_sweep_stale_entries:fp=50c8c5807a0f8fe3
   owner: web-middleware
-  reason: Sweep eviction — user may have a bucket entry but no corresponding lock if lock was never created (edge case). pop() with default is idempotent cleanup, not error suppression.
+  reason: Sweep eviction — user may have a bucket entry but no corresponding lock
+    if lock was never created (edge case). pop() with default is idempotent cleanup,
+    not error suppression.
   safety: Stale lock removal is best-effort; missing key means no cleanup needed
   expires: null
-- key: web/execution/service.py:R9:ExecutionServiceImpl:cleanup_session_lock:fp=60ead98d4ff2f30d
+- key: web/execution/service.py:R9:ExecutionServiceImpl:cleanup_session_lock:fp=a829f9e1efdce8b0
   owner: web-execution
-  reason: Session may never have called execute(), so no lock exists in _session_locks. Cleanup is called on every session delete regardless. Matches ProgressBroadcaster.cleanup_run() pattern.
+  reason: Session may never have called execute(), so no lock exists in _session_locks.
+    Cleanup is called on every session delete regardless. Matches ProgressBroadcaster.cleanup_run()
+    pattern.
   safety: Missing key means session was never executed against; no cleanup needed
   expires: null
 - key: web/blobs/service.py:R5:_source_references_blob:fp=4d36218f080a8c27
   owner: web-blobs
-  reason: Tier 1 read guard — composition_states.source JSON must be dict when non-None; raises AuditIntegrityError on DB corruption
-  safety: Explicit raise fires immediately on type mismatch; not a silent recovery; survives ``python -O``
+  reason: Tier 1 read guard — composition_states.source JSON must be dict when non-None;
+    raises AuditIntegrityError on DB corruption
+  safety: Explicit raise fires immediately on type mismatch; not a silent recovery;
+    survives ``python -O``
   expires: null
 - key: web/blobs/service.py:R1:_source_references_blob:fp=f0f84925d830641c
   owner: web-blobs
-  reason: JSON column navigation — source.options is optional (file-path sources omit it)
+  reason: JSON column navigation — source.options is optional (file-path sources omit
+    it)
   safety: Returns False (no match) when absent; Tier 1 raise on wrong type if present
   expires: null
 - key: web/blobs/service.py:R5:_source_references_blob:fp=1c6db8c2e1b02409
   owner: web-blobs
-  reason: Tier 1 read guard — source.options must be dict when non-None; raises AuditIntegrityError on DB corruption
-  safety: Explicit raise fires immediately on type mismatch; not a silent recovery; survives ``python -O``
+  reason: Tier 1 read guard — source.options must be dict when non-None; raises AuditIntegrityError
+    on DB corruption
+  safety: Explicit raise fires immediately on type mismatch; not a silent recovery;
+    survives ``python -O``
   expires: null
 - key: web/blobs/service.py:R1:_source_references_blob:fp=c13b50d74ef3162f
   owner: web-blobs
-  reason: JSON column navigation — blob_ref is optional (only present for blob-backed sources)
+  reason: JSON column navigation — blob_ref is optional (only present for blob-backed
+    sources)
   safety: Returns False (no match) when absent; correct for file-path sources
   expires: null
 - key: web/blobs/service.py:R1:_source_references_blob:fp=92334695308af494
@@ -912,56 +1131,68 @@ allow_hits:
 - key: web/blobs/sniff.py:R6:_detect_from_text:fp=a966bc58c3ffd3b7
   owner: web-blobs
   reason: Tier 3 boundary — csv.Error during MIME sniffing on untrusted upload content
-  safety: Continues to next delimiter; returns None for uncertain content; no data loss
+  safety: Continues to next delimiter; returns None for uncertain content; no data
+    loss
   expires: null
 - key: web/execution/schemas.py:R5:RunEvent:_reject_epoch_timestamp:fp=8edcac734ba3bbc4
   owner: web-execution
-  reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp, rejects int (Unix epoch)
-  safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False) coercion scope
+  reason: Tier 1 field_validator — isinstance whitelists datetime|str for timestamp,
+    rejects int (Unix epoch)
+  safety: Raises ValueError on non-datetime/non-str; tightens Field(strict=False)
+    coercion scope
   expires: null
 - key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=f92e540938b20316
   owner: web-execution
-  reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip path; non-dict values handled by Pydantic
+  reason: Pydantic before-validator — isinstance(values, dict) gates JSON round-trip
+    path; non-dict values handled by Pydantic
   safety: Structural dispatch for deserialization, not error suppression
   expires: null
 - key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=6362fcd2f47a1a88
   owner: web-execution
-  reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
+  reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON
+    round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
 - key: web/execution/schemas.py:R1:RunEvent:_resolve_data_from_event_type:fp=93f94bb7ebf3eae8
   owner: web-execution
-  reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON round-trip
+  reason: Pydantic before-validator — .get() on pre-validated Tier 3 input from JSON
+    round-trip
   safety: Missing keys fall through to Pydantic field validation downstream
   expires: null
 - key: web/execution/schemas.py:R5:RunEvent:_resolve_data_from_event_type:fp=967d7fc40d9b6626
   owner: web-execution
-  reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip resolution
+  reason: Pydantic before-validator — isinstance(data, dict) gates JSON round-trip
+    resolution
   safety: Non-dict data falls through to Pydantic union matching
   expires: null
 - key: web/execution/schemas.py:R5:RunEvent:_enforce_data_type:fp=cd4aa2d1b29e0ae9
   owner: web-execution
-  reason: Offensive programming — isinstance enforces event_type/data type correspondence at construction time
+  reason: Offensive programming — isinstance enforces event_type/data type correspondence
+    at construction time
   safety: Raises ValueError on mismatch; belt-and-suspenders with before-validator
   expires: null
-- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=1378dc4c3a5c6dec
+- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=0519434e39f75617
   owner: web-execution
-  reason: Security boundary — isinstance dispatches SecretResolutionError to safe message (no secret name leakage)
+  reason: Security boundary — isinstance dispatches SecretResolutionError to safe
+    message (no secret name leakage)
   safety: Type dispatch for sanitization, not error suppression
   expires: null
-- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=dab71b7562298e03
+- key: web/execution/service.py:R5:_sanitize_error_for_client:fp=cceb135c4f8ce0db
   owner: web-execution
-  reason: Security boundary — isinstance check allowlists exception types safe to expose to clients
+  reason: Security boundary — isinstance check allowlists exception types safe to
+    expose to clients
   safety: All others reduced to generic message; no sensitive info leaked
   expires: null
 - key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=7f72acae2e41bb1d
   owner: web-execution
-  reason: Offensive programming — isinstance assertion on YAML generator output (source must be dict)
+  reason: Offensive programming — isinstance assertion on YAML generator output (source
+    must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
 - key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=5e0c3dc17498063e
   owner: web-execution
-  reason: Offensive programming — isinstance assertion on YAML generator output (source.options must be dict)
+  reason: Offensive programming — isinstance assertion on YAML generator output (source.options
+    must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
 - key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=d0e7e2507b117f2d
@@ -971,7 +1202,8 @@ allow_hits:
   expires: null
 - key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=27b0eea4a848386d
   owner: web-execution
-  reason: Offensive programming — isinstance assertion on YAML generator output (sinks must be dict)
+  reason: Offensive programming — isinstance assertion on YAML generator output (sinks
+    must be dict)
   safety: Raises TypeError with diagnostic message on generator bug
   expires: null
 - key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=5f1f81fee41e3e1a
@@ -981,7 +1213,8 @@ allow_hits:
   expires: null
 - key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=126f6792a20126fc
   owner: web-execution
-  reason: Offensive programming — isinstance assertion on YAML generator output (sink config must be dict)
+  reason: Offensive programming — isinstance assertion on YAML generator output (sink
+    config must be dict)
   safety: Raises TypeError with diagnostic message naming the sink
   expires: null
 - key: web/execution/preflight.py:R1:resolve_runtime_yaml_paths:fp=c876a96667c425f7
@@ -991,7 +1224,8 @@ allow_hits:
   expires: null
 - key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=94ce4eef74759672
   owner: web-execution
-  reason: Offensive programming — isinstance assertion on YAML generator output (sink options must be dict)
+  reason: Offensive programming — isinstance assertion on YAML generator output (sink
+    options must be dict)
   safety: Raises TypeError with diagnostic message naming the sink
   expires: null
 - key: web/execution/preflight.py:R5:resolve_runtime_yaml_paths:fp=a04e52dbfb1f9b7f
@@ -1127,9 +1361,11 @@ allow_hits:
   expires: null
 - key: web/async_workers.py:R6:run_sync_in_worker:fp=42677ae62a78782d
   owner: web-runtime
-  reason: Event-loop wake polling in async-over-sync worker helper; TimeoutError from wait_for means the worker has not completed yet, not a failed operation.
-  safety: The future is shielded so the worker keeps running; completed result or exception is returned on the next poll, and cancellation shuts down the one-call executor without swallowing the worker
-    outcome.
+  reason: Event-loop wake polling in async-over-sync worker helper; TimeoutError from
+    wait_for means the worker has not completed yet, not a failed operation.
+  safety: The future is shielded so the worker keeps running; completed result or
+    exception is returned on the next poll, and cancellation shuts down the one-call
+    executor without swallowing the worker outcome.
   expires: null
 per_file_rules:
 - pattern: web/composer/tools.py
@@ -1137,10 +1373,14 @@ per_file_rules:
   - R1
   - R5
   - R9
-  reason: Tier 3 boundary — LLM tool call arguments are external data with optional fields per JSON schema; pop-with-default implements RFC 7386 merge patch null semantics
+  reason: Tier 3 boundary — LLM tool call arguments are external data with optional
+    fields per JSON schema; pop-with-default implements RFC 7386 merge patch null
+    semantics
   expires: null
 - pattern: web/composer/service.py
   rules:
   - R6
-  reason: Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError) or missing required keys (KeyError/TypeError). Errors returned to LLM for self-correction, not swallowed.
+  reason: Tier 3 boundary — LLM tool call arguments may contain malformed JSON (JSONDecodeError)
+    or missing required keys (KeyError/TypeError). Errors returned to LLM for self-correction,
+    not swallowed.
   expires: null
