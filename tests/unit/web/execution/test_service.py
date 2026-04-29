@@ -2654,49 +2654,49 @@ class TestResolveYamlPaths:
     """Path rewriting from relative to absolute before YAML reaches plugins."""
 
     def test_source_relative_path_rewritten(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n  options:\n    path: data/input.csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "/srv/data/data/input.csv" in result
 
     def test_source_absolute_path_unchanged(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n  options:\n    path: /absolute/input.csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "/absolute/input.csv" in result
 
     def test_sink_relative_path_rewritten(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n  options:\n    path: /abs/in.csv\nsinks:\n  primary:\n    plugin: csv\n    options:\n      file: output/results.csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "/srv/data/output/results.csv" in result
 
     def test_non_string_input_raises_type_error(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         with pytest.raises(TypeError, match="must return str"):
             _resolve_yaml_paths(123, "/srv/data")  # type: ignore[arg-type]
 
     def test_non_dict_yaml_raises_type_error(self) -> None:
         """YAML that parses to a scalar (not a dict) is a generator bug."""
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         with pytest.raises(TypeError, match="non-dict top-level"):
             _resolve_yaml_paths("just a string", "/srv/data")
 
     def test_no_source_or_sinks_is_noop(self) -> None:
         """YAML with no source/sinks passes through without error."""
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "metadata:\n  name: test\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")
         assert "name: test" in result
 
     def test_source_without_options_is_noop(self) -> None:
-        from elspeth.web.execution.service import _resolve_yaml_paths
+        from elspeth.web.execution.preflight import resolve_runtime_yaml_paths as _resolve_yaml_paths
 
         yaml_str = "source:\n  plugin: csv\n"
         result = _resolve_yaml_paths(yaml_str, "/srv/data")

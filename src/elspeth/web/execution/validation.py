@@ -31,12 +31,12 @@ from elspeth.plugins.infrastructure.config_base import PluginConfigError
 from elspeth.plugins.infrastructure.manager import PluginNotFoundError
 from elspeth.web.composer._semantic_validator import validate_semantic_contracts
 from elspeth.web.composer.state import CompositionState, _batch_aware_required_input_fields_error
-from elspeth.web.config import WebSettings
 from elspeth.web.execution._semantic_helpers import (
     assistance_suggestion_for,
     serialize_semantic_contracts,
 )
-from elspeth.web.execution.protocol import YamlGenerator
+from elspeth.web.execution.preflight import resolve_runtime_yaml_paths
+from elspeth.web.execution.protocol import ValidationSettings, YamlGenerator
 from elspeth.web.execution.schemas import (
     ValidationCheck,
     ValidationError,
@@ -121,7 +121,7 @@ def _collect_secret_refs(obj: Any, env_ref_names: set[str] | None = None) -> lis
 
 def validate_pipeline(
     state: CompositionState,
-    settings: WebSettings,
+    settings: ValidationSettings,
     yaml_generator: YamlGenerator,
     *,
     secret_service: WebSecretResolver | None = None,
@@ -144,7 +144,7 @@ def validate_pipeline(
 
     Args:
         state: CompositionState from the session.
-        settings: WebSettings — used for path allowlist check.
+        settings: ValidationSettings — exposes data_dir for path resolution and allowlist check.
         yaml_generator: YamlGenerator module/object with generate_yaml() method.
         secret_service: Optional secret resolver for validating secret refs.
         user_id: User ID for scoped secret resolution (required if secret_service is set).
@@ -361,6 +361,7 @@ def validate_pipeline(
 
     # Step 2: Generate YAML
     pipeline_yaml = yaml_generator.generate_yaml(state)
+    pipeline_yaml = resolve_runtime_yaml_paths(pipeline_yaml, str(settings.data_dir))
 
     # Step 3: Settings loading
     #

@@ -1378,3 +1378,104 @@ class TestInferComponentTypeFromPluginError:
         """PluginNotFoundError always returns None — no component_type attribute."""
         exc = PluginNotFoundError("No plugin named 'foobar'")
         assert _infer_component_type_from_plugin_error(exc) is None
+
+
+class TestValidatePipelineRuntimePathResolution:
+    @staticmethod
+    def _loaded_yaml_from_settings_loader(mock_load: MagicMock) -> str:
+        call = mock_load.call_args
+        if call.args:
+            return call.args[0]
+        return call.kwargs["yaml_content"]
+
+    def test_validate_pipeline_resolves_relative_source_and_sink_paths_before_settings_load(self) -> None:
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="main",
+                options={"path": "blobs/session/input.csv"},
+                on_validation_failure="discard",
+            ),
+            nodes=(),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={"path": "outputs/out.csv"},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = """
+source:
+  plugin: csv
+  on_success: main
+  options:
+    path: blobs/session/input.csv
+    on_validation_failure: discard
+sinks:
+  main:
+    plugin: csv
+    options:
+      path: outputs/out.csv
+"""
+
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("stop after settings-load input capture")
+            validate_pipeline(state, settings, mock_yaml_gen)
+
+        loaded_yaml = self._loaded_yaml_from_settings_loader(mock_load)
+        parsed = yaml.safe_load(loaded_yaml)
+        assert parsed["source"]["options"]["path"] == "/tmp/test_data/blobs/session/input.csv"
+        assert parsed["sinks"]["main"]["options"]["path"] == "/tmp/test_data/outputs/out.csv"
+
+    def test_validate_pipeline_preserves_absolute_paths_before_settings_load(self) -> None:
+        state = CompositionState(
+            source=SourceSpec(
+                plugin="csv",
+                on_success="main",
+                options={"path": "/tmp/test_data/blobs/input.csv"},
+                on_validation_failure="discard",
+            ),
+            nodes=(),
+            edges=(),
+            outputs=(
+                OutputSpec(
+                    name="main",
+                    plugin="csv",
+                    options={"path": "/tmp/test_data/outputs/out.csv"},
+                    on_write_failure="discard",
+                ),
+            ),
+            metadata=PipelineMetadata(),
+            version=1,
+        )
+        settings = _make_settings(data_dir="/tmp/test_data")
+        mock_yaml_gen = MagicMock()
+        mock_yaml_gen.generate_yaml.return_value = """
+source:
+  plugin: csv
+  on_success: main
+  options:
+    path: /tmp/test_data/blobs/input.csv
+    on_validation_failure: discard
+sinks:
+  main:
+    plugin: csv
+    options:
+      path: /tmp/test_data/outputs/out.csv
+"""
+
+        with patch("elspeth.web.execution.validation.load_settings_from_yaml_string") as mock_load:
+            mock_load.side_effect = ValueError("stop after settings-load input capture")
+            validate_pipeline(state, settings, mock_yaml_gen)
+
+        loaded_yaml = self._loaded_yaml_from_settings_loader(mock_load)
+        parsed = yaml.safe_load(loaded_yaml)
+        assert parsed["source"]["options"]["path"] == "/tmp/test_data/blobs/input.csv"
+        assert parsed["sinks"]["main"]["options"]["path"] == "/tmp/test_data/outputs/out.csv"

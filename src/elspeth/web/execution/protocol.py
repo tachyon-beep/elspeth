@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from uuid import UUID
 
 from elspeth.web.auth.models import UserIdentity
 from elspeth.web.composer.state import CompositionState
 from elspeth.web.execution.schemas import RunStatusResponse, ValidationResult
+
+
+class ValidationSettings(Protocol):
+    """Settings needed by direct runtime preflight validation."""
+
+    @property
+    def data_dir(self) -> Any: ...
 
 
 class StateAccessError(Exception):
